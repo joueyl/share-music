@@ -1,0 +1,13 @@
+node_modules/
+dist/
+target/
+.env
+*.sqlite*
+*.log
+native/build/
+.DS_Store
+deploy/turnserver.conf
+vcpkg_installed/
+native/build-auto/
+
+native/build-com/

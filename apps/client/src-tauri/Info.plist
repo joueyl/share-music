@@ -1,0 +1,1 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>NSAudioCaptureUsageDescription</key><string>把你选择的系统音频共享到音乐房间。</string><key>NSScreenCaptureUsageDescription</key><string>通过系统授权采集音频，用于房间音乐共享。</string></dict></plist>

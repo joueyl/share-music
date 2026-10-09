@@ -1,0 +1,1 @@
+{"main-window":{"identifier":"main-window","description":"Only control commands and state events; media stays in Rust","local":true,"windows":["main"],"permissions":["core:default"]}}

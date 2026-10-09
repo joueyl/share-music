@@ -1,0 +1,24 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file: ../apps/server/.env
+    environment:
+      NODE_ENV: production
+      BIND_ADDRESS: 0.0.0.0
+      DATABASE_PATH: /data/music-share.sqlite
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - room-data:/data
+    restart: unless-stopped
+  turn:
+    image: coturn/coturn:4.6.3
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+    command: ["-c", "/etc/coturn/turnserver.conf"]
+    restart: unless-stopped
+volumes:
+  room-data:

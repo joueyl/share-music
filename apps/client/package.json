@@ -1,0 +1,26 @@
+{
+  "name": "@music-share/client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1420",
+    "build": "vue-tsc --noEmit && vite build",
+    "typecheck": "vue-tsc --noEmit",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@music-share/shared": "0.1.0",
+    "@tauri-apps/api": "^2.9.0",
+    "vue": "^3.5.22",
+    "vue-router": "^4.6.0",
+    "pinia": "^3.0.3",
+    "lucide-vue-next": "^0.468.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0",
+    "@vitejs/plugin-vue": "^6.0.1",
+    "vite": "^7.1.9",
+    "vue-tsc": "^3.1.0"
+  }
+}

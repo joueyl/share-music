@@ -1,0 +1,8 @@
+import { expect, it } from 'vitest';
+import { Capacity } from '../src/capacity';
+import { createHmac } from 'node:crypto';
+it('reserves shared aggregate relay capacity including overhead', () => { const c = new Capacity(() => 1000); c.reserve('r1', 1, 'u1', 900000); c.reserve('r2', 1, 'u2', 900000); const third = c.reserve('r3', 1, 'u3', 900000); expect(c.usedBps).toBe(3240000); expect(c.reserve('r3', 1, 'u3', 900000).id).toBe(third.id); expect(() => c.reserve('r4', 1, 'u4', 900000)).toThrow('RELAY_BUDGET_EXHAUSTED'); });
+it('expired reservations free capacity; renew is bound to user, room and epoch', () => { let now = 1000; const c = new Capacity(() => now); const l = c.reserve('r', 1, 'u', 900000); expect(() => c.renew(l.id, 'other', 'r', 1)).toThrow('LEASE_EXPIRED'); now += 95001; expect(c.usedBps).toBe(0); expect(() => c.renew(l.id, 'u', 'r', 1)).toThrow('LEASE_EXPIRED'); });
+it('produces expiring coturn REST credentials without exposing the shared secret', () => { const c = new Capacity(() => 100000); const l = c.reserve('r', 1, 'u', 900000); const uri = c.credentials(l, 'turn.example.com', 'secret')[0]; const authority = uri.slice(5).split('@')[0]; const [username, password] = authority.split(':').map(decodeURIComponent); expect(username).toBe(`160:${l.id}`); expect(password).toBe(createHmac('sha1', 'secret').update(username).digest('base64')); });
+
+it('budgets each receiver and prevents renewing for a different receiver', () => { const c = new Capacity(() => 1000); const l = c.reserve('r', 1, 'source', 900000, 'a'); c.reserve('r', 1, 'source', 900000, 'b'); expect(c.usedBps).toBe(2160000); expect(() => c.renew(l.id, 'source', 'r', 1, 'b')).toThrow('LEASE_EXPIRED'); });

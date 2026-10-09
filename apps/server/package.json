@@ -1,0 +1,28 @@
+{
+  "name": "@music-share/server",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "node --env-file-if-exists=.env --import tsx --watch src/main.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file-if-exists=.env dist/apps/server/src/main.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@nestjs/common": "^11.1.0",
+    "@nestjs/core": "^11.1.0",
+    "@nestjs/platform-express": "^11.1.0",
+    "@nestjs/platform-ws": "^11.1.0",
+    "@nestjs/websockets": "^11.1.0",
+    "@music-share/shared": "0.1.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "ws": "^8.18.3",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "@types/ws": "^8.18.1",
+    "@types/express": "^5.0.3"
+  }
+}
