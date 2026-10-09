@@ -89,3 +89,9 @@ Vue 类型检查与生产构建、Rust Release 构建、NSIS 打包均通过。�
 旧 Stop 保留房间快照，后续旧信令可能再次 reconcile 播放链路；服务端离开时也可能向该连接发布最后一份房间快照。现在停止时清除快照、输出位置、管线和缓存；Connection 同步清除希望加入的房间并停止媒体，过滤退出后的快照、信令和中继回复，断网退出不依赖 WebSocket，并且重连不会重新加入。前端丢弃退出后的房间/播放事件并清空媒体状态；服务端在发布离开变化前解除连接的房间关联。
 
 38 项 TypeScript 测试、12 项 Rust 单元测试、类型检查、桌面 cargo check 均通过。真实 NestJS 内存服务、两个 Rust 客户端、合成 WAV 与 SDL dummy 输出集成测试通过（27.40 秒），覆盖播放、静音恢复、暂停、seek、Opus、成员退出后不恢复播放、房主继续播放、重新加入恢复和房主退出；未采集用户音频。Windows 安装包重新生成，当前校验值以同目录 `.exe.sha256` 为准。
+
+## 2026-10-09 pnpm 工作区安装
+
+补充 pnpm-workspace.yaml 和从 npm 锁文件导入的 pnpm-lock.yaml，根目录可识别客户端、服务端及共享包，启用本地共享包链接和必要的 esbuild 安装脚本；服务端直接声明实际使用的 express。桌面启动和 Windows 打包脚本从客户端包解析 Tauri CLI，兼容 pnpm 独立依赖布局。npm 工作区与锁文件保持可用。
+
+在独立的干净源码目录用 pnpm 10.26.1 执行 frozen-lockfile 安装：识别 4 个工作区，195 个依赖安装成功。随后 pnpm run build（NestJS 与 Vue）、38 项回归测试和 tauri-cli 2.12.1 调用均通过。本机全局 offline=true 会导致首次缺缓存安装失败，验证时仅对命令临时关闭离线模式，未修改全局设置或替换原工程正在使用的 node_modules。

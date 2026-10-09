@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync, mkdirSync, writeFileSync } from 
 import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
-import { selectNativeLibrary } from './desktop.mjs';
+import { selectNativeLibrary, tauriCli } from './desktop.mjs';
 
 export function windowsResources(library, shareDirectory) {
   if (!library || !existsSync(library)) throw new Error('缺少媒体库，请先构建 native（Release），或设置 MUSIC_NATIVE_LIBRARY。');
@@ -53,7 +53,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     } }, null, 2));
     console.log(`打包媒体库：${library}\n随包资源：${Object.keys(resources).length} 个（DLL 与许可证）`);
     if (!process.argv.includes('--check')) {
-      const child = spawn(process.execPath, [join(root, 'node_modules/@tauri-apps/cli/tauri.js'), 'build', '--bundles', 'nsis', '--config', config], {
+      const child = spawn(process.execPath, [tauriCli(root), 'build', '--bundles', 'nsis', '--config', config], {
         cwd: join(root, 'apps/client'), env: process.env, stdio: 'inherit'
       });
       child.on('error', error => { console.error(error.message); process.exitCode = 1; });

@@ -2,6 +2,11 @@ import { existsSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+
+export function tauriCli(root) {
+  return createRequire(join(root, 'apps/client/package.json')).resolve('@tauri-apps/cli/tauri.js');
+}
 
 export function selectNativeLibrary(root, platform, configured) {
   const filename = platform === 'win32' ? 'music_native.dll' : platform === 'darwin' ? 'libmusic_native.dylib' : 'libmusic_native.so';
@@ -21,7 +26,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.log(`使用媒体库：${library}`);
   }
   if (!process.argv.includes('--check-native')) {
-    const child = spawn(process.execPath, [join(root,'node_modules/@tauri-apps/cli/tauri.js'),'dev',...process.argv.slice(2)], { cwd:join(root,'apps/client'),env,stdio:'inherit' });
+    const child = spawn(process.execPath, [tauriCli(root),'dev',...process.argv.slice(2)], { cwd:join(root,'apps/client'),env,stdio:'inherit' });
     child.on('error',error=>{console.error(error.message);process.exitCode=1;});
     child.on('exit',code=>{process.exitCode=code??1;});
   }

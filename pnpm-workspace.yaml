@@ -1,0 +1,11 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+linkWorkspacePackages: true
+preferWorkspacePackages: true
+
+# Required for Vite's esbuild and Vitest's native OXC parser.
+onlyBuiltDependencies:
+  - esbuild
+  - '@oxc-parser/binding'

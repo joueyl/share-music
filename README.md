@@ -15,6 +15,15 @@ npm ci
 npm run dev:server
 ```
 
+也支持 pnpm 10，在项目根目录（包含 `pnpm-workspace.yaml`）安装全部客户端、服务端和共享包依赖：
+
+```powershell
+pnpm install
+pnpm run dev:server
+```
+
+另开终端运行 `pnpm run desktop`；浏览器预览使用 `pnpm run dev:client`，Windows 安装包使用 `pnpm run package:win`。pnpm 锁文件已随源码提供，可用 `pnpm install --frozen-lockfile` 复现依赖版本。首次安装需要联网；若配置了 `offline=true` 而本地没有缓存，运行 `pnpm install --offline=false`。pnpm 配置支持本地共享包链接，并允许 esbuild 等所需原生依赖的安装脚本。
+
 另开终端：
 
 ```sh
