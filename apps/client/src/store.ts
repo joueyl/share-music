@@ -28,7 +28,8 @@ export const useApp = defineStore('app', () => {
   }
   const webrtcWarnings = computed(() => Object.values(webrtc.value).filter(event => currentConnection(event) && event.status !== 'connected'));
   const now = ref(Date.now()), offset = ref(0), busy = ref(false);
-  let acceptEvents = true;
+  let acceptEvents = true, clockSynced = false;
+  function requestClock() { void bridge.send({ type: 'clock', requestId: crypto.randomUUID(), clientSentAt: Date.now() }).catch(error); }
   let clockTimer: ReturnType<typeof setInterval> | undefined, initialized = false;
   const permission = computed(() => !!room.value && !!user.value && room.value.hostId === user.value.id ? ALL_PERMISSIONS : room.value?.members.find(m => m.id === user.value?.id)?.permissions ?? DEFAULT_PERMISSIONS);
   const host = computed(() => !!room.value && room.value.hostId === user.value?.id);
@@ -37,7 +38,7 @@ export const useApp = defineStore('app', () => {
   async function initialize() {
     if (initialized) return; initialized = true;
     const cap = await bridge.capabilities(); native.value = cap.native; nativeReason.value = cap.reason;
-    await bridge.subscribe('connection', e => { if (!acceptEvents) return; connected.value = e.connected; if (!e.connected) stun.value = { checking: false, servers: [] }; });
+    await bridge.subscribe('connection', e => { if (!acceptEvents) return; connected.value = e.connected; if (e.connected) requestClock(); else stun.value = { checking: false, servers: [] }; });
     await bridge.subscribe('stun-status', e => { if (!acceptEvents) return; stun.value = e; });
     await bridge.subscribe('media-status', e => { if (!acceptEvents) return; media.value = e; });
     await bridge.subscribe('webrtc-status', event => {
@@ -49,20 +50,25 @@ export const useApp = defineStore('app', () => {
       if (!acceptEvents) return;
       if (message.type === 'snapshot') {
         if (room.value?.id !== message.data.id) webrtc.value = {};
+        if (!clockSynced && Number.isFinite(message.data.serverNow)) offset.value = message.data.serverNow - Date.now();
         room.value = message.data; void bridge.syncCloud(message.data, offset.value);
         webrtc.value = Object.fromEntries(Object.entries(webrtc.value).filter(([, event]) => currentConnection(event)));
       }
       else if (message.type === 'error' || message.type === 'result' && !message.ok || message.type === 'admission' && !message.ok) error(message.error);
-      else if (message.type === 'clock' && !bridge.desktop) {
+      else if (message.type === 'clock') {
         const received = Date.now(), roundTrip = received - message.clientSentAt - (message.serverSentAt - message.serverReceivedAt);
-        if (roundTrip < 500) offset.value = ((message.serverReceivedAt - message.clientSentAt) + (message.serverSentAt - received)) / 2;
+        if (roundTrip >= 0 && roundTrip < 1000) {
+          clockSynced = true;
+          offset.value = ((message.serverReceivedAt - message.clientSentAt) + (message.serverSentAt - received)) / 2;
+          if (room.value) void bridge.syncCloud(room.value, offset.value);
+        }
       }
     });
     clockTimer = setInterval(() => { now.value = Date.now(); }, 50);
-    setInterval(() => { if (connected.value) void bridge.send({ type: 'clock', requestId: crypto.randomUUID(), clientSentAt: Date.now() }).catch(error); }, 5000);
+    setInterval(() => { if (connected.value) requestClock(); }, 5000);
   }
   async function login(serverUrl: string, name: string, password: string, register: boolean) {
-    acceptEvents = true; busy.value = true; notice.value = ''; try { user.value = (await bridge.login(serverUrl, name, password, register)).user; } catch (e) { error(e); } finally { busy.value = false; }
+    acceptEvents = true; clockSynced = false; offset.value = 0; busy.value = true; notice.value = ''; try { user.value = (await bridge.login(serverUrl, name, password, register)).user; } catch (e) { error(e); } finally { busy.value = false; }
   }
   async function logout() {
     if (busy.value) return;

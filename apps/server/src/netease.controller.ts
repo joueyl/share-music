@@ -16,6 +16,23 @@ export function adminAllowed(req: Pick<Request, 'headers' | 'socket'>, secret = 
   const ip = req.socket.remoteAddress;
   return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(ip ?? '') && /^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(req.headers.host ?? '') && !req.headers['x-forwarded-for'];
 }
+function normalizedOrigin(value:string):string|undefined {
+  try {const url=new URL(value);if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.pathname!=='/'||url.search||url.hash)return undefined;return url.origin;}catch{return undefined;}
+}
+/** Forwarded protocol is accepted only from a directly connected loopback proxy.
+ * Docker/remote proxies should set the explicit public origin instead. */
+export function loginOriginAllowed(req:Pick<Request,'headers'|'socket'|'protocol'>, configured=process.env.NETEASE_LOGIN_ORIGIN):boolean {
+  if(req.headers['sec-fetch-site']==='cross-site')return false;
+  const raw=req.headers.origin;
+  if(!raw)return true; // Authenticated non-browser clients may omit Origin.
+  if(typeof raw!=='string')return false;
+  const origin=normalizedOrigin(raw);if(!origin)return false;
+  if(configured?.trim())return origin===normalizedOrigin(configured.trim());
+  const loopback=['127.0.0.1','::1','::ffff:127.0.0.1'].includes(req.socket.remoteAddress??'');
+  const forwarded=req.headers['x-forwarded-proto'];
+  const protocol=loopback&&(forwarded==='http'||forwarded==='https')?forwarded:req.protocol;
+  return origin===normalizedOrigin(`${protocol}://${req.headers.host}`);
+}
 @Controller()
 export class NeteaseController {
   constructor(@Inject(AppService) private app: AppService) {}
@@ -23,7 +40,7 @@ export class NeteaseController {
     res.setHeader('Cache-Control', 'no-store');
     if (!adminAllowed(req)) { res.setHeader('WWW-Authenticate', 'Basic realm="Music login", charset="UTF-8"'); throw new DomainError('UNAUTHORIZED'); }
     // JSON POSTs must originate from this page, not a cross-origin form.
-    if (req.method === 'POST' && req.headers.origin && req.headers.origin !== (process.env.NETEASE_LOGIN_ORIGIN || `${req.protocol}://${req.headers.host}`)) throw new DomainError('FORBIDDEN');
+    if (req.method === 'POST' && !loginOriginAllowed(req)) throw new DomainError('NETEASE_LOGIN_ORIGIN_FORBIDDEN');
     this.app.limit(`netease-admin:${req.socket.remoteAddress}`, 60, 60000);
   }
   @Get('loginServe') page(@Req() req: Request, @Res() res: Response) {

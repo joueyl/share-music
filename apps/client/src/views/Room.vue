@@ -17,7 +17,7 @@ const disabled = computed(() => !app.connected || !!app.room?.pending);
 // Keep the user's chosen position independent of the continuously ticking room clock.
 const seekPreview = ref<number | null>(null);
 const seekMaximum = computed(() => Math.max(0, (track.value?.durationMs ?? 1) - 1));
-const displayedProgress = computed(() => seekPreview.value ?? Math.min(app.progress, seekMaximum.value));
+const displayedProgress = computed(() => seekPreview.value ?? Math.min(app.room?.pending?.playback.positionMs ?? app.progress, seekMaximum.value));
 watch(() => app.room?.playback.sourceEpoch, () => { seekPreview.value = null; });
 function previewSeek(event: Event) { seekPreview.value = Number((event.target as HTMLInputElement).value); }
 async function commitSeek(event: Event) {

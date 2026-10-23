@@ -53,6 +53,17 @@ it('desktop logout invokes the native session teardown', async () => {
  native.desktop=true; const bridge=await import('../src/bridge'); await bridge.logout(); expect(native.invoke).toHaveBeenCalledWith('logout');
 });
 
+it('desktop uses WebSocket clock samples, including an immediate sample on connect', async () => {
+ native.desktop=true; native.invoke.mockResolvedValue({native:true,reason:''});
+ const {useApp}=await import('../src/store'); const app=useApp(); await app.initialize();
+ await app.login('http://127.0.0.1:3000','tester','test-password',false);
+ const socket=Socket.instances[0]; socket.open(); socket.message({type:'authenticated'});
+ expect(socket.sent.some(message=>message.type==='clock')).toBe(true);
+ const now=Date.now(); socket.message({type:'clock',clientSentAt:now-100,serverReceivedAt:now+9950,serverSentAt:now+9950});
+ expect(app.offset).toBe(10000);
+ await app.logout();
+});
+
 it('leaving drops late snapshots and media status and works while disconnected', async () => {
  const bridge = await import('../src/bridge'); const {useApp} = await import('../src/store'); const app=useApp(); await app.initialize();
  await app.login('http://127.0.0.1:3000','tester','test-password',false);

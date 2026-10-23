@@ -171,14 +171,18 @@ export class RoomEngine {
     }
     this.publish(this.snapshot(roomId));
   }
-  reportProgress(roomId: string, userId: string, epoch: number, positionMs: number) {
+  reportProgress(roomId: string, userId: string, epoch: number, positionMs: number, sampledAtServerMs?: number) {
     const r = this.get(roomId); this.member(r, userId);
     const p = r.playback, t = r.playlist.find(t => t.id === p.sourceId);
     if (r.pending || !t?.ossKey || epoch !== p.sourceEpoch || p.playState !== 'playing' || positionMs > t.durationMs) return;
+    const now = this.now(), sampledAt = Math.min(sampledAtServerMs ?? now, now);
+    if (!Number.isFinite(positionMs) || positionMs < 0 || !Number.isFinite(sampledAt) ||
+        sampledAt < now - 5000 || sampledAt < p.effectiveAtServerMs || (sampledAtServerMs ?? now) > now + 250) return;
+    if (p.leaderId && p.leaderId !== userId) return;
+    if (Math.abs(positionMs - positionAt(p, sampledAt)) > 5000) return;
     if (!p.leaderId) p.leaderId = userId;
-    if (p.leaderId !== userId) return;
-    if (Math.abs(positionMs - positionAt(p, this.now())) > 5000) return;
-    p.positionMs = positionMs; p.effectiveAtServerMs = this.now(); this.publish(this.snapshot(roomId));
+    // Anchor to capture time, not arrival time, so network delay cannot pull a completed seek backwards.
+    p.positionMs = positionMs; p.effectiveAtServerMs = sampledAt; this.publish(this.snapshot(roomId));
   }
   exhausted(roomId: string, userId: string, epoch: number) {
     const r = this.get(roomId); this.member(r, userId);

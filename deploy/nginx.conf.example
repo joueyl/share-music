@@ -10,23 +10,24 @@ server {
         proxy_read_timeout 150s;
         proxy_send_timeout 150s;
         proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
     }
-    # Configure NETEASE_ADMIN_TOKEN and NETEASE_LOGIN_ORIGIN before exposing this route.
+    # Set NETEASE_ADMIN_TOKEN; set NETEASE_LOGIN_ORIGIN to the exact public origin for Docker/remote proxies.
     location /loginServe {
         proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $http_host;
         proxy_set_header X-Forwarded-For $remote_addr;
     }
     location ~ ^/api/rooms/[0-9a-f-]+/music/netease$ {
         proxy_read_timeout 240s;
         proxy_send_timeout 240s;
         proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
     }
     location /api/ {
         proxy_pass http://127.0.0.1:3000;
-        proxy_set_header Host $host;
+        proxy_set_header Host $http_host;
     }
     location /ws {
         proxy_pass http://127.0.0.1:3000;

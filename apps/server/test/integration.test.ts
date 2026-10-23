@@ -50,3 +50,10 @@ it('serves an uncached local QR login page and protects music proxy requests',as
  const remote=await fetch(base+'/loginServe',{headers:{'X-Forwarded-For':'203.0.113.1'}});expect(remote.status).toBe(401);
  expect((await api('/netease/song_detail')).status).toBe(401);
 });
+
+it('allows same-origin HTTPS proxy QR polling but still blocks foreign origins',async()=>{
+ const response=await fetch(base+'/loginServe/check',{method:'POST',headers:{'Content-Type':'application/json',Origin:`https://127.0.0.1:${port}`,'X-Forwarded-Proto':'https'},body:JSON.stringify({sessionId:randomUUID()})});
+ expect(response.status).toBe(400);expect((await response.json()).error).toBe('NETEASE_LOGIN_REPLACED');
+ const denied=await fetch(base+'/loginServe/check',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://evil.example.com','X-Forwarded-Proto':'https'},body:JSON.stringify({sessionId:randomUUID()})});
+ expect(denied.status).toBe(403);expect((await denied.json()).error).toBe('NETEASE_LOGIN_ORIGIN_FORBIDDEN');
+});

@@ -10,7 +10,7 @@ const loginSchema = z.object({ name: z.string().trim().min(2).max(40), password:
 export function httpError(error: unknown): never {
   if (error instanceof OssUploadError) throw new HttpException({ error: error.code, details: error.details }, error.details.ossCode === 'Timeout' ? 504 : 502);
   if (error instanceof z.ZodError) throw new HttpException({ error: 'INVALID_REQUEST', issues: error.issues.map(i => ({ path: i.path, message: i.message })) }, 400);
-  if (error instanceof DomainError) throw new HttpException({ error: error.code }, error.code === 'UNAUTHORIZED' || error.code === 'INVALID_CREDENTIALS' ? 401 : error.code === 'RATE_LIMITED' ? 429 : error.code === 'HOST_ONLY' || error.code === 'FORBIDDEN' ? 403 : 400);
+  if (error instanceof DomainError) throw new HttpException({ error: error.code }, error.code === 'UNAUTHORIZED' || error.code === 'INVALID_CREDENTIALS' ? 401 : error.code === 'RATE_LIMITED' ? 429 : error.code === 'HOST_ONLY' || error.code === 'FORBIDDEN' || error.code === 'NETEASE_LOGIN_ORIGIN_FORBIDDEN' ? 403 : 400);
   throw error;
 }
 @Controller('api')

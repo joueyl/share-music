@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Database } from '../src/database';
 import { NeteaseService, type MusicInvoker } from '../src/netease';
-import { adminAllowed } from '../src/netease.controller';
+import { adminAllowed, loginOriginAllowed } from '../src/netease.controller';
 
 function fixture() {
  const db = new Database(':memory:'); let now=10000, code=801, cookie='MUSIC_U=first; __csrf=test';
@@ -77,4 +77,25 @@ it('restricts login management to local direct access or the configured Basic cr
 
 it('allows keyword suggestions and injects the persisted cookie without accepting caller network overrides',async()=>{
  const f=fixture();try{f.db.setSetting('netease.cookie','MUSIC_U=saved');await f.service.call('search_suggest',{keywords:'晴天',type:'mobile',cookie:'wrong',proxy:'http://bad'});expect(f.api.mock.calls.at(-1)).toEqual(['search_suggest',expect.objectContaining({keywords:'晴天',type:'mobile',cookie:'MUSIC_U=saved'})]);expect(f.api.mock.calls.at(-1)?.[1]).not.toHaveProperty('proxy');}finally{f.db.close();}
+});
+
+const originReq=(origin:string|undefined,host='music.example.com:8443',ip='127.0.0.1',forwarded?:string)=>({protocol:'http',socket:{remoteAddress:ip},headers:{host,...(origin?{origin}:{}),...(forwarded?{'x-forwarded-proto':forwarded}:{})}}) as any;
+it('accepts HTTPS termination by loopback proxies and preserves public nonstandard ports',()=>{
+ expect(loginOriginAllowed(originReq('https://music.example.com:8443',undefined,undefined,'https'),'')).toBe(true);
+ expect(loginOriginAllowed(originReq('https://music.example.com:8443',undefined,undefined,'https'),'   ')).toBe(true);
+ expect(loginOriginAllowed(originReq('http://music.example.com:8443'),'')).toBe(true);
+ expect(loginOriginAllowed(originReq('https://music.example.com:8443'),'')).toBe(false);
+});
+it('uses an explicit origin for Docker proxies, accepts trailing slash and rejects paths',()=>{
+ const req=originReq('https://music.example.com:8443','api:3000','172.20.0.2');
+ expect(loginOriginAllowed(req,'https://music.example.com:8443/')).toBe(true);
+ expect(loginOriginAllowed(req,'https://music.example.com:8443/loginServe')).toBe(false);
+ expect(loginOriginAllowed(req,'https://music.example.com')).toBe(false);
+});
+it('does not trust protocol headers from arbitrary peers or accept cross-site/null/malformed origins',()=>{
+ expect(loginOriginAllowed(originReq('https://music.example.com:8443',undefined,'203.0.113.1','https'),'')).toBe(false);
+ expect(loginOriginAllowed(originReq('https://music.example.com:8443',undefined,undefined,'https,http'),'')).toBe(false);
+ for(const origin of ['null','https://evil.example.com','https://music.example.com.evil:8443','https://user:pass@music.example.com:8443','https://music.example.com:8443/path'])expect(loginOriginAllowed(originReq(origin),'https://music.example.com:8443')).toBe(false);
+ const req=originReq('https://music.example.com:8443');req.headers['sec-fetch-site']='cross-site';expect(loginOriginAllowed(req,'https://music.example.com:8443')).toBe(false);
+ expect(loginOriginAllowed(originReq(undefined),'')).toBe(true);
 });

@@ -26,6 +26,25 @@ describe('authoritative room engine', () => {
   engine.leave(roomId, host.id); expect(engine.snapshot(roomId).playlist[0].available).toBe(true);
   engine.leave(roomId, member.id); expect(engine.snapshot(roomId).playback.leaderId).toBeNull();
  });
+ it('keeps the exact seek target while OSS buffers and compensates delayed progress delivery', () => {
+  const t = { ...track(), ossKey: `music/${host.id}/${randomUUID()}` }; start(t);
+  cmd(host.id, { type: 'seek', payload: { positionMs: 90000 } });
+  const pending = engine.snapshot(roomId).pending!;
+  now += 8000; engine.tick();
+  expect(engine.snapshot(roomId).pending!.committed).toBe(false);
+  engine.ready(roomId, host.id, pending.id, pending.playback.sourceEpoch);
+  now += 200; engine.tick();
+  const p = engine.snapshot(roomId).playback;
+  expect(p.positionMs).toBe(90000); expect(p.effectiveAtServerMs).toBe(now);
+  const sampledAt = now + 1000; now += 1800;
+  engine.reportProgress(roomId, host.id, p.sourceEpoch, 91000, sampledAt);
+  const updated = engine.snapshot(roomId).playback;
+  expect(updated.positionMs).toBe(91000); expect(updated.effectiveAtServerMs).toBe(sampledAt);
+  expect(updated.positionMs + now - updated.effectiveAtServerMs).toBe(91800);
+  // Delayed samples preceding the new seek or last accepted sample cannot roll it back.
+  engine.reportProgress(roomId, host.id, p.sourceEpoch, 90000, sampledAt - 1000);
+  expect(engine.snapshot(roomId).playback.positionMs).toBe(91000);
+ });
  it.each(['startLive', 'requestLive', 'approveLive', 'rejectLive', 'stopLive'])('rejects removed system streaming command %s', type => {
   expect(commandSchema.safeParse({ type, payload: { spec, bitrateBps: 2304000, requestId: randomUUID(), sourceEpoch: 1 } }).success).toBe(false);
  });

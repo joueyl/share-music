@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { apiResponse } from './api-response';
+import { CloudPlayer } from './cloud-player';
 import { listen } from '@tauri-apps/api/event';
 import type { Command, RoomSnapshot, TrackMetadata } from '@music-share/shared';
 type Listener = (event: any) => void;
@@ -106,26 +107,18 @@ export async function importFile(): Promise<TrackMetadata> {
  const result=await apiResponse(res);
  return {id:crypto.randomUUID(),name:file.name,durationMs,sizeBytes:file.size,spec:{sampleRate:decoded.sampleRate,bits:16,channels:decoded.numberOfChannels},lossless:false,bitrateBps:Math.min(20000000,Math.ceil(file.size*8000/durationMs)),contentHash,ossKey:result.ossKey};
 }
-export async function setVolume(volume: number) { audio.volume=volume; }
+export async function setVolume(volume: number) { if (audio) audio.volume=volume; }
 export async function capabilities(): Promise<{ native: boolean; reason: string; capture: boolean }> { return desktop ? invoke('media_capabilities') : { native: false, capture: false, reason: 'OSS 音乐播放与 WebSocket 同步' }; }
 
-const audio=typeof Audio === 'undefined' ? null! as HTMLAudioElement : new Audio(); let cloud:RoomSnapshot|null=null, epoch=-1, offset=0, ready=false, reported=0;
-function clearCloud(){cloud=null;epoch=-1;ready=false;if(audio){audio.pause();audio.removeAttribute('src');audio.load();}}
-export async function syncCloud(room:RoomSnapshot, clockOffset:number){
- if(!audio || !room.playlist) return; cloud=room;offset=clockOffset;const p=room.pending?.playback??room.playback,t=room.playlist.find(t=>t.id===p.sourceId);
- if(!t?.ossKey){clearCloud();return;} if(epoch===p.sourceEpoch)return;
- epoch=p.sourceEpoch;ready=false;audio.pause();const expected=epoch;
- try{const data=await browserRequest(`/rooms/${room.id}/music/${t.id}`);if(epoch!==expected)return;audio.src=data.url;audio.load();}catch(e){emit('server-message',{type:'error',error:String(e)});}
+const audio = typeof Audio === 'undefined' ? null : new Audio();
+const cloudPlayer = audio ? new CloudPlayer(audio,
+  async (roomId, trackId) => (await browserRequest(`/rooms/${roomId}/music/${trackId}`)).url,
+  send, emit) : null;
+function clearCloud() { cloudPlayer?.clear(); }
+export async function syncCloud(room: RoomSnapshot, clockOffset: number) {
+  if (room.playlist) await cloudPlayer?.sync(room, clockOffset);
 }
-if(audio) audio.oncanplay=()=>{if(!cloud||ready)return;ready=true;const p=cloud.pending;if(p&&!p.committed)void send({type:'ready',roomId:cloud.id,transitionId:p.id,sourceEpoch:epoch});};
-if(audio) audio.onerror=()=>emit('server-message',{type:'error',error:'音乐加载失败，请检查 OSS 或格式'});
-setInterval(()=>{if(!cloud||!ready||socket?.readyState!==WebSocket.OPEN)return;const p=cloud.pending?.committed?cloud.pending.playback:cloud.playback;if(p.sourceEpoch!==epoch)return;
- const now=Date.now()+offset;if(now<p.effectiveAtServerMs||p.playState!=='playing'){audio.pause();return;}
- const target=p.positionMs+now-p.effectiveAtServerMs;if(Math.abs(audio.currentTime*1000-target)>600)audio.currentTime=target/1000;
- if(audio.paused)void audio.play().catch(()=>emit('server-message',{type:'error',error:'请点击页面以允许播放'}));
- emit('media-status',{status:audio.paused?'buffering':'playing',detail:'OSS · WebSocket 同步',bufferedMs:0,driftMs:audio.currentTime*1000-target,receiveBps:0});
- if(Date.now()-reported>1000&&!audio.paused&&!audio.seeking&&audio.readyState>=3){reported=Date.now();void send({type:'progress',roomId:cloud.id,sourceEpoch:epoch,positionMs:audio.currentTime*1000}).catch(()=>{});}
-},200);
+setInterval(() => { if (socket?.readyState === WebSocket.OPEN) cloudPlayer?.tick(); }, 100);
 
 export type MusicSearchItem = { id: string; name: string; artists: string; album: string; durationMs: number };
 export async function searchMusic(keywords: string, offset = 0): Promise<{ songs: MusicSearchItem[]; total: number }> {
