@@ -35,7 +35,7 @@ mod desktop {
     }
     #[tauri::command]
     fn media_capabilities(state: State<'_, AppState>) -> Value {
-        json!({"native":state.native.is_some(),"capture":state.native.is_some(),"reason":state.native_error})
+        json!({"native":state.native.is_some(),"capture":false,"reason":state.native_error})
     }
     #[tauri::command]
     async fn login(
@@ -153,27 +153,11 @@ mod desktop {
             .send(input)
     }
     #[tauri::command]
-    fn select_capture_device(state: State<'_, AppState>, device_id: String) -> Result<(), String> {
-        media_send(&state, media::Input::Device(device_id))
-    }
-    #[tauri::command]
     fn set_volume(state: State<'_, AppState>, volume: f32) -> Result<(), String> {
         if !volume.is_finite() || !(0.0..=1.).contains(&volume) {
             return Err("INVALID_VOLUME".into());
         }
         media_send(&state, media::Input::Volume(volume))
-    }
-    #[tauri::command]
-    async fn capture_devices(state: State<'_, AppState>) -> Result<Value, String> {
-        let native = state
-            .native
-            .as_ref()
-            .ok_or_else(|| state.native_error.clone())?
-            .clone();
-        // WebView uses STA COM. Query devices off the UI thread in a blocking worker.
-        tauri::async_runtime::spawn_blocking(move || native.devices())
-            .await
-            .map_err(|error| error.to_string())?
     }
     #[tauri::command]
     async fn import_file(state: State<'_, AppState>) -> Result<Value, String> {
@@ -227,24 +211,40 @@ mod desktop {
         Ok(metadata)
     }
     pub fn run() {
-        let (native, native_error) =
-            match native::Native::locate().and_then(|p| native::Native::load(&p)) {
-                Ok(n) => (Some(n), String::new()),
-                Err(e) => (None, e),
-            };
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .expect("HTTP client");
         tauri::Builder::default()
-            .manage(AppState {
-                session: Mutex::new(None),
-                auth_generation: Arc::new(AtomicU64::new(0)),
-                event_generation: Arc::new(AtomicU64::new(0)),
-                native,
-                native_error,
-                http,
+            .setup(move |app| {
+                let path = native::Native::locate().or_else(|error| {
+                    let packaged = app
+                        .path()
+                        .resource_dir()
+                        .map_err(|_| error.clone())?
+                        .join("media")
+                        .join(native::Native::filename());
+                    if packaged.is_file() {
+                        Ok(packaged)
+                    } else {
+                        Err(error)
+                    }
+                });
+                let (native, native_error) = match path.and_then(|path| native::Native::load(&path))
+                {
+                    Ok(native) => (Some(native), String::new()),
+                    Err(error) => (None, error),
+                };
+                app.manage(AppState {
+                    session: Mutex::new(None),
+                    auth_generation: Arc::new(AtomicU64::new(0)),
+                    event_generation: Arc::new(AtomicU64::new(0)),
+                    native,
+                    native_error,
+                    http,
+                });
+                Ok(())
             })
             .invoke_handler(tauri::generate_handler![
                 media_capabilities,
@@ -256,8 +256,6 @@ mod desktop {
                 join_room,
                 leave_room,
                 import_file,
-                capture_devices,
-                select_capture_device,
                 set_volume
             ])
             .build(tauri::generate_context!())

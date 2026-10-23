@@ -1,6 +1,9 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import type { RoomSnapshot } from '../../../packages/shared/src';
+import { MusicImport } from './music-import';
+import { OssStorage } from './oss';
+import { NeteaseService } from './netease';
 import { Auth } from './auth';
 import { Database } from './database';
 import { RoomEngine, DomainError } from './engine';
@@ -9,11 +12,14 @@ import { PublicTurn } from './turn';
 @Injectable()
 export class AppService implements OnModuleDestroy {
   readonly database = new Database(process.env.DATABASE_PATH ?? './data/music-share.sqlite');
+  readonly oss = new OssStorage(process.env, fetch, this.database);
+  readonly netease = new NeteaseService(this.database);
   readonly auth: Auth;
   readonly capacity = new Capacity();
   readonly turn = new PublicTurn();
   readonly publicCapacity = new Capacity(Date.now, this.turn.budget);
   readonly engine: RoomEngine;
+  readonly musicImport: MusicImport;
   readonly subscribers = new Set<(room: RoomSnapshot) => void>();
   private ticker: ReturnType<typeof setInterval>;
   private attempts = new Map<string, { count: number; since: number }>();
@@ -25,7 +31,8 @@ export class AppService implements OnModuleDestroy {
     }
     this.turn.stun(); // Fail fast on invalid STUN configuration.
     this.auth = new Auth(this.database, secret);
-    this.engine = new RoomEngine(r => this.database.saveRoom(r), r => this.subscribers.forEach(fn => fn(r)));
+    this.engine = new RoomEngine(r => this.database.saveRoom(r), r => this.subscribers.forEach(fn => fn(r)), Date.now, (key,hash)=>this.oss.registered(key,hash));
+    this.musicImport = new MusicImport(this.engine, this.netease, this.oss, fetch, this.database);
     const records = this.database.rooms(); this.engine.restore(records); this.engine.restoreOverrides(records);
     this.ticker = setInterval(() => this.engine.tick(), 50); this.ticker.unref();
   }

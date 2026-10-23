@@ -13,7 +13,7 @@ export type Quality = 'lossless' | 'source' | 'opus';
 export const audioSpecSchema = z.object({ sampleRate: z.number().int().positive().max(192000), bits: z.number().int().positive().max(32), channels: z.number().int().min(1).max(8) }).strict();
 export type AudioSpec = z.infer<typeof audioSpecSchema>;
 export const trackSchema = z.object({
-  id: z.string().uuid(), name: z.string().trim().min(1).max(200), durationMs: z.number().int().min(1).max(86_400_000),
+  ossKey: z.string().max(500).optional(), id: z.string().uuid(), name: z.string().trim().min(1).max(200), durationMs: z.number().int().min(1).max(86_400_000),
   sizeBytes: z.number().int().positive().max(10_000_000_000), spec: audioSpecSchema,
   lossless: z.boolean(), bitrateBps: z.number().int().positive().max(20_000_000), contentHash: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
@@ -21,7 +21,7 @@ export type TrackMetadata = z.infer<typeof trackSchema>;
 export type Track = TrackMetadata & { providerId: string; available: boolean };
 export type Member = { id: string; name: string; joinedAt: number; online: boolean; overrides: Partial<Permissions>; permissions: Permissions };
 export type Playback = {
-  sourceId: string | null; sourceEpoch: number; sourceType: 'file' | 'live' | null;
+  leaderId?: string | null; sourceId: string | null; sourceEpoch: number; sourceType: 'file' | 'live' | null;
   playState: 'stopped' | 'playing' | 'paused'; positionMs: number; effectiveAtServerMs: number;
   providerId: string | null; qualityMode: Quality; spec: AudioSpec | null; bitrateBps: number; instant: boolean;
 };
@@ -45,12 +45,7 @@ const variants = [
   z.object({ type: z.literal('pause'), payload: empty }),
   z.object({ type: z.literal('resume'), payload: empty }),
   z.object({ type: z.literal('stop'), payload: empty }),
-  z.object({ type: z.literal('stopLive'), payload: z.object({ sourceEpoch: z.number().int().nonnegative() }).strict() }),
   z.object({ type: z.literal('seek'), payload: z.object({ positionMs: z.number().int().nonnegative() }).strict() }),
-  z.object({ type: z.literal('startLive'), payload: z.object({ spec: audioSpecSchema, bitrateBps: z.number().int().positive().max(20_000_000) }).strict() }),
-  z.object({ type: z.literal('requestLive'), payload: z.object({ spec: audioSpecSchema, bitrateBps: z.number().int().positive().max(20_000_000) }).strict() }),
-  z.object({ type: z.literal('approveLive'), payload: z.object({ requestId: id }).strict() }),
-  z.object({ type: z.literal('rejectLive'), payload: z.object({ requestId: id }).strict() }),
   z.object({ type: z.literal('quality'), payload: z.object({ qualityMode: z.enum(['lossless', 'source', 'opus']) }).strict() }),
   z.object({ type: z.literal('defaults'), payload: permissionsSchema }),
   z.object({ type: z.literal('permission'), payload: z.object({ memberId: id, overrides: permissionsSchema.partial() }).strict() }),

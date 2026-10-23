@@ -30,7 +30,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   }
   private send(ws: WebSocket, message: unknown) { if (ws.readyState !== WebSocket.OPEN) return; if (ws.bufferedAmount > 256000) { ws.close(4008, 'Slow client'); return; } ws.send(JSON.stringify(message)); }
   handleConnection(ws: WebSocket, request: IncomingMessage) {
-    const allowed = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,http://tauri.localhost,https://tauri.localhost').split(',');
+    const allowed = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:11420,http://127.0.0.1:11420,http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,http://tauri.localhost,https://tauri.localhost').split(',');
     if (request.headers.origin && !allowed.includes(request.headers.origin)) { ws.close(4003, 'Origin forbidden'); return; }
     this.authTimers.set(ws, setTimeout(() => ws.close(4001, 'Authentication timeout'), 5000));
     ws.on('pong', () => { const s = this.sessions.get(ws); if (s) s.lastPong = Date.now(); });
@@ -70,6 +70,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           s.roomId = v.roomId; const snapshot = this.app.engine.join(v.roomId, s.user); this.send(ws, { type: 'snapshot', data: snapshot }); return;
         }
         if (message.type === 'clock') { const received = Date.now(); const v = schemas.clock.parse(message); this.send(ws, { ...v, serverReceivedAt: received, serverSentAt: Date.now() }); return; }
+        if (message.type === 'progress') { const v = z.object({ type: z.literal('progress'), roomId: uuid, sourceEpoch: z.number().int().nonnegative(), positionMs: z.number().finite().nonnegative() }).strict().parse(message); this.requireRoom(s, v.roomId); this.app.engine.reportProgress(v.roomId, s.user.id, v.sourceEpoch, v.positionMs); return; }
         if (message.type === 'ready') { const v = schemas.ready.parse(message); this.requireRoom(s, v.roomId); this.app.engine.ready(v.roomId, s.user.id, v.transitionId, v.sourceEpoch); return; }
         if (message.type === 'exhausted' || message.type === 'sourceFailed') { const v = schemas[message.type as 'exhausted' | 'sourceFailed'].parse(message); this.requireRoom(s, v.roomId); this.app.engine[message.type as 'exhausted' | 'sourceFailed'](v.roomId, s.user.id, v.sourceEpoch); return; }
         if (message.type === 'signal') {

@@ -89,7 +89,7 @@ pub fn start(
 
                           if sink.send(Message::Text(message.to_string())).await.is_err(){break;}
                          },
-                         event=media_events.recv()=>{if let Some(event)=event{match event{Event::Control(value)=>{if desired_room.lock().unwrap().as_deref()!=value["roomId"].as_str() || value["roomId"].as_str().is_none(){continue;}if sink.send(Message::Text(value.to_string())).await.is_err(){break;}},Event::Status(value)=>emit("media-status",value)}}},
+                         event=media_events.recv()=>{if let Some(event)=event{match event{Event::Control(value)=>{if desired_room.lock().unwrap().as_deref()!=value["roomId"].as_str() || value["roomId"].as_str().is_none(){continue;}if sink.send(Message::Text(value.to_string())).await.is_err(){break;}},Event::Status(value)=>emit("media-status",value),Event::Network(value)=>emit("webrtc-status",value)}}},
                          _=interval.tick()=>{if online.load(Ordering::Relaxed) && sink.send(Message::Text(json!({"type":"clock","requestId":uuid::Uuid::new_v4().to_string(),"clientSentAt":now_ms()}).to_string())).await.is_err(){break;}},
                         }
                     }

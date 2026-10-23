@@ -9,21 +9,24 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@music-share/shared": "0.1.0",
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
     "@nestjs/platform-ws": "^11.1.0",
     "@nestjs/websockets": "^11.1.0",
-    "@music-share/shared": "0.1.0",
+    "ali-oss": "^6.23.0",
+    "express": "^5.2.1",
+    "NeteaseCloudMusicApi": "^4.32.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
     "ws": "^8.18.3",
-    "zod": "^3.24.4",
-    "express": "^5.2.1"
+    "zod": "^3.24.4"
   },
   "devDependencies": {
-    "tsx": "^4.20.0",
+    "@types/ali-oss": "^6.23.3",
+    "@types/express": "^5.0.3",
     "@types/ws": "^8.18.1",
-    "@types/express": "^5.0.3"
+    "tsx": "^4.20.0"
   }
 }

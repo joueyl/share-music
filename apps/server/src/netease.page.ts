@@ -1,0 +1,11 @@
+export const loginPage = `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>网易云音乐扫码登录</title>
+<style>[hidden]{display:none!important}body{font:16px system-ui;background:#13151d;color:#eee;display:grid;place-items:center;min-height:95vh}main{padding:32px;text-align:center;max-width:480px}img{display:block;margin:24px auto;background:white;width:240px;height:240px}button{padding:12px 24px;cursor:pointer}p{line-height:1.8}</style>
+<main><h1>网易云音乐扫码登录</h1><p>使用网易云音乐 App 扫码并确认。新登录成功后覆盖服务端旧凭据。</p><img id="qr" alt="登录二维码" hidden><p id="status" role="status">正在获取二维码…</p><button id="retry">重新登录</button><p>凭据仅保存在服务端，不会显示在此页面。</p></main>
+<script>
+const status=document.getElementById('status'),image=document.getElementById('qr'),button=document.getElementById('retry');let generation=0,timer;
+const errors={NETEASE_UNAVAILABLE:'网易云接口暂不可用，请稍后重试',NETEASE_INVALID_RESPONSE:'网易云返回异常，请重试',NETEASE_LOGIN_REPLACED:'登录会话已被新的二维码替代，请重新登录',UNAUTHORIZED:'没有登录管理权限',RATE_LIMITED:'操作过于频繁，请稍后重试'};
+async function request(path,data){const r=await fetch('/loginServe/'+path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data||{}),cache:'no-store'});const result=await r.json();if(!r.ok)throw new Error(errors[result.error]||'请求失败，请稍后重试');return result;}
+async function start(){const v=++generation;clearTimeout(timer);image.hidden=true;button.disabled=true;status.textContent='正在获取二维码…';try{const result=await request('qr');if(v!==generation)return;image.src=result.image;image.hidden=false;status.textContent='等待扫码';poll(result.sessionId,v);}catch(e){if(v===generation)status.textContent=e.message;}finally{if(v===generation)button.disabled=false;}}
+async function poll(id,v){try{const result=await request('check',{sessionId:id});if(v!==generation)return;const labels={800:'二维码已过期，请重新登录',801:'等待扫码',802:'已扫码，请在 App 确认',803:'登录成功，服务端凭据已保存并覆盖旧凭据'};status.textContent=labels[result.code]||'未知状态';if(result.code===800||result.code===803){image.hidden=true;return;}timer=setTimeout(()=>poll(id,v),2500);}catch(e){if(v===generation)status.textContent=e.message;}}
+button.onclick=start;window.addEventListener('pagehide',()=>{generation++;clearTimeout(timer)});start();
+</script></html>`;

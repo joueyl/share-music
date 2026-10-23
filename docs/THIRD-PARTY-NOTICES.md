@@ -1,4 +1,4 @@
-# Windows 媒体依赖与源码
+# 媒体依赖与源码
 
 安装包动态链接 FFmpeg、FLAC、Opus、SDL2、libdatachannel、libjuice、OpenSSL、Ogg 等组件。各组件的原始许可证随安装包放在 `licenses/<组件>/copyright`。这些许可证仅适用于对应第三方组件，不为本项目指定许可证。
 
@@ -17,4 +17,4 @@ FFmpeg 与 SDL2 使用 LGPL；请保留对应许可和通知。动态库独立�
 - libjuice：https://github.com/paullouisageneau/libjuice
 - OpenSSL：https://github.com/openssl/openssl
 
-Windows 安装包也包含 Tauri 打包工具提供的 Microsoft Visual C++ 运行库，按 Microsoft 的再分发条款使用。
+Windows 安装包也包含 Tauri 打包工具提供的 Microsoft Visual C++ 运行库，按 Microsoft 的再分发条款使用。macOS/Linux 打包命令使用动态链接 triplet；Linux 的 GTK、WebKitGTK、PipeWire 等系统组件由发行版提供，按其各自许可证使用。

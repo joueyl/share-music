@@ -88,9 +88,24 @@ npm run package:win
 
 当前生成的是未签名安装包。安装包只包含客户端，NestJS 服务需单独启动或部署；登录界面填写服务地址。若仅需可执行文件，仍可运行 `npm run tauri -w @music-share/client -- build --no-bundle`。
 
+## 打包 macOS 与 Linux 客户端
+
+在对应系统构建原生媒体动态库后，在项目根目录执行：
+
+```sh
+# macOS：生成 .app 和 .dmg
+pnpm run package:mac
+# Linux：生成 .deb 和 .AppImage
+pnpm run package:linux
+```
+
+也可使用 `npm run`。打包前检查命令分别为 `package:mac:check`、`package:linux:check`。支持本机 x64/arm64 架构，自动携带媒体依赖与许可证，输出到 `apps/client/src-tauri/target/release/bundle/`。媒体库必须使用提供的 dynamic triplet；完整环境准备、原生库构建、签名与命令见 [客户端打包说明](docs/PACKAGING.md)。
+
 登录后可在侧栏账号区域点击“退出登录”，自动停止本地媒体、断开连接并回到登录页。
 
 退出房间会停止本地播放与采集，释放 P2P 连接、音频缓冲和旧播放快照；断网时也可以退出，恢复连接不会自动回到已退出的房间。
+
+房间页单独显示 WebRTC 连接失败、断开或超时，标出受影响成员；直连等待超过 7 秒时提供者尝试 TURN，已获批的中继连接等待超过 12 秒仍未建立则提示超时。TURN 配置缺失、服务不可用或预算不足也会明确提示。提示不被缓冲状态覆盖，连接恢复后自动消失；切歌、退出或过期代次的提示不继续展示。
 
 ## 房间与权限
 
@@ -181,3 +196,5 @@ docs/                 协议、验证和发布验收
 ```
 
 第三方媒体库使用各自许可证；分发需要附带相应许可及 LGPL 相关材料。原生依赖保持动态链接，FFmpeg manifest 未启用 GPL/nonfree 功能。发布前按实际构建的库核对授权文件。
+
+> 架构更新：系统音频推流功能已删除，旧版推流章节仅为历史说明。当前使用 OSS 音乐上传与 WebSocket 进度同步，详见 [OSS 架构](docs/OSS-SYNC.md)。

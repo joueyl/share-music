@@ -100,6 +100,17 @@ impl Native {
         if path.is_file() {
             return path.canonicalize().map_err(|e| e.to_string());
         }
+        #[cfg(target_os = "macos")]
+        {
+            let framework = executable
+                .parent()
+                .unwrap()
+                .join("../Frameworks")
+                .join(Self::filename());
+            if framework.is_file() {
+                return framework.canonicalize().map_err(|e| e.to_string());
+            }
+        }
         Err({
             format!(
                 "缺少原生媒体库 {}；请按 README 构建并放到可执行文件旁",

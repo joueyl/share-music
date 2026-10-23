@@ -95,3 +95,17 @@ Vue 类型检查与生产构建、Rust Release 构建、NSIS 打包均通过。�
 补充 pnpm-workspace.yaml 和从 npm 锁文件导入的 pnpm-lock.yaml，根目录可识别客户端、服务端及共享包，启用本地共享包链接和必要的 esbuild 安装脚本；服务端直接声明实际使用的 express。桌面启动和 Windows 打包脚本从客户端包解析 Tauri CLI，兼容 pnpm 独立依赖布局。npm 工作区与锁文件保持可用。
 
 在独立的干净源码目录用 pnpm 10.26.1 执行 frozen-lockfile 安装：识别 4 个工作区，195 个依赖安装成功。随后 pnpm run build（NestJS 与 Vue）、38 项回归测试和 tauri-cli 2.12.1 调用均通过。本机全局 offline=true 会导致首次缺缓存安装失败，验证时仅对命令临时关闭离线模式，未修改全局设置或替换原工程正在使用的 node_modules。
+
+## 2026-10-09 macOS/Linux 打包命令
+
+新增 package:mac（app/dmg）、package:linux（deb/AppImage）和两平台 :check 命令，支持目标系统本机 x64/arm64；提供四个 vcpkg dynamic triplet 以及 docs/PACKAGING.md。脚本将媒体库与 vcpkg 动态依赖暂存到新目录，附许可证，拒绝缺少主要动态依赖、静态媒体链接、架构不符、缺失依赖及外部构建目录引用。macOS 改写 dylib 依赖、签名副本并使用 Tauri Frameworks；Linux 改写 RPATH 为 $ORIGIN，将媒体放到资源目录并声明 PipeWire/GTK/WebKit 系统依赖。Rust 加载器支持 macOS Frameworks，并通过 Tauri resource_dir 加载 Linux 包内媒体。
+
+Windows 环境验证：四项打包脚本测试通过（模拟 otool/lipo/codesign/readelf/patchelf/ldd，验证脚本流程与拒绝条件，未执行这些 Unix 工具）；两个现有启动器测试、12 项 Rust 核心测试、桌面 cargo check、Windows 打包预检查通过。生成配置字段对照本地 Tauri schema；icns 已由 Tauri CLI 从现有图标生成。非对应宿主平台调用会明确拒绝。
+
+当前没有 macOS/Linux 构建主机，未生成这两平台安装包，未验证原生依赖在其 SDK 上编译、实际安装启动、Apple 签名/公证、PipeWire 会话与三平台采集权限。Windows 安装包不因这次源码命令更新而重新生成。
+
+## 2026-10-09 WebRTC 连接失败提示
+
+Rust 媒体工作线程输出独立 webrtc-status 事件，包含房间、成员、音源代次和原因。覆盖 RTC failed/closed、直连超过 7 秒等待、提供者 TURN 申请、已获批 TURN 超过 12 秒连接超时，以及中继预算不足/未配置/服务不可用。每条链路按状态及原因去重，DataChannel open 输出恢复事件；失败提示不通过全房间停止来实现。
+
+Vue 房间页新增按成员显示的连接异常面板，与播放/缓冲状态独立；连接恢复隐藏提示，退出清空状态，过期房间、代次及离线成员的提示不展示。42 项 TypeScript 测试、13 项 Rust 核心测试、Vue 类型检查与生产构建、桌面 cargo check 通过。验证包含提示保持、恢复、旧事件隔离、退出清理及错误文案/事件去重；未模拟公网 NAT 故障或真实 TURN 故障。Windows Release 安装包同步更新。

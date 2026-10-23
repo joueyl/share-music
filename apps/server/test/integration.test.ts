@@ -44,3 +44,9 @@ it('HTTP auth plus two real WebSocket clients: room snapshots, forbidden control
  const invalidRelay = randomUUID(); host.send({ type: 'admission', requestId: invalidRelay, roomId: room.id, sourceEpoch: pending.playback.sourceEpoch, relay: true, peerId: b.user.id, receiveBps: 0, sourceUploadBps: 0 }); expect((await host.wait(m => m.type === 'admission' && m.requestId === invalidRelay)).error).toBe('INVALID_RELAY_PEER');
  const clock = randomUUID(); host.send({ type: 'clock', requestId: clock, clientSentAt: Date.now() }); const sample = await host.wait(m => m.type === 'clock' && m.requestId === clock); expect(sample.serverSentAt).toBeGreaterThanOrEqual(sample.serverReceivedAt);
 }, 10000);
+
+it('serves an uncached local QR login page and protects music proxy requests',async()=>{
+ const page=await fetch(base+'/loginServe');expect(page.status).toBe(200);expect(page.headers.get('cache-control')).toBe('no-store');expect(await page.text()).toContain('网易云音乐扫码登录');
+ const remote=await fetch(base+'/loginServe',{headers:{'X-Forwarded-For':'203.0.113.1'}});expect(remote.status).toBe(401);
+ expect((await api('/netease/song_detail')).status).toBe(401);
+});

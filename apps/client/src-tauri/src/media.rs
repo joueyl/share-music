@@ -32,6 +32,38 @@ pub enum Input {
 pub enum Event {
     Control(Value),
     Status(Value),
+    Network(Value),
+}
+#[derive(Default)]
+struct ConnectionDiagnostic {
+    last: String,
+}
+impl ConnectionDiagnostic {
+    fn update(
+        &mut self,
+        room: &str,
+        peer: &str,
+        epoch: u64,
+        status: &str,
+        detail: &str,
+    ) -> Option<Value> {
+        let key = format!("{status}:{detail}");
+        if self.last == key {
+            return None;
+        }
+        self.last = key;
+        Some(
+            json!({"roomId":room,"peerId":peer,"sourceEpoch":epoch,"status":status,"detail":detail}),
+        )
+    }
+}
+fn relay_failure(code: &str) -> String {
+    match code {
+        "RELAY_BUDGET_EXHAUSTED" => "TURN 中继带宽预算不足，稍后重试或由房主切换 Opus 模式".into(),
+        "TURN_NOT_CONFIGURED" => "服务器尚未配置 TURN 中继，请联系房主或服务器管理员".into(),
+        "TURN_PROVIDER_UNAVAILABLE" => "TURN 中继服务暂时不可用，请稍后重新加入房间".into(),
+        _ => format!("TURN 中继申请失败（{code}），请检查网络或稍后重新加入房间"),
+    }
 }
 struct Link {
     peer: Peer,
@@ -47,6 +79,7 @@ struct Link {
     capacity_bps: u64,
     lease_id: Option<String>,
     remote_offer: Option<String>,
+    diagnostic: ConnectionDiagnostic,
 }
 impl Link {
     fn new(peer: Peer, next: u64, relay: bool) -> Self {
@@ -64,6 +97,7 @@ impl Link {
             capacity_bps: 0,
             lease_id: None,
             remote_offer: None,
+            diagnostic: ConnectionDiagnostic::default(),
         }
     }
 }
@@ -262,7 +296,22 @@ impl Worker {
                 let request = value["requestId"].as_str().unwrap_or("");
                 if let Some((epoch, peer, relay)) = self.admissions.remove(request) {
                     if value["ok"] != true {
-                        return Err(value["error"].as_str().unwrap_or("ADMISSION_FAILED").into());
+                        let code = value["error"].as_str().unwrap_or("ADMISSION_FAILED");
+                        if relay {
+                            let event = self.pipelines.get_mut(&epoch).and_then(|p| {
+                                p.peers.get_mut(&peer)?.diagnostic.update(
+                                    &p.room_id,
+                                    &peer,
+                                    epoch,
+                                    "relay_rejected",
+                                    &relay_failure(code),
+                                )
+                            });
+                            if let Some(event) = event {
+                                self.event(Event::Network(event));
+                            }
+                        }
+                        return Err(code.into());
                     }
                     let native = self.native.as_ref().ok_or("原生媒体库未就绪")?;
                     let ice: Vec<String> = value["iceServers"]
@@ -450,6 +499,7 @@ impl Worker {
         let server_now = self.server_now();
         let local_now = now_ms();
         let mut controls = vec![];
+        let mut network_events = vec![];
         let pending = self
             .snapshot
             .as_ref()
@@ -498,8 +548,12 @@ impl Worker {
                             serde_json::from_slice(&event[1..]).map_err(|e| e.to_string())?;
                         match event["kind"].as_str(){
        Some("description")|Some("candidate")=>controls.push(json!({"type":"signal","roomId":p.room_id,"toId":peer_id,"sourceEpoch":epoch,"data":event})),
-       Some("open")=>link.open=true,
-       Some("closed")|Some("failed")=>link.open=false,
+       Some("open")=>{link.open=true;if let Some(event)=link.diagnostic.update(&p.room_id,peer_id,epoch,"connected",""){network_events.push(event);}},
+       Some("closed")|Some("failed")=>{
+        link.open=false;
+        let detail=if link.tried_relay && link.lease_id.is_some(){"WebRTC TURN 中继连接失败或断开，请检查网络、防火墙或 TURN 服务；可重新加入房间重试"}else{"WebRTC 连接失败或断开，正在等待可用连接；请检查网络及防火墙对客户端的授权"};
+        if let Some(event)=link.diagnostic.update(&p.room_id,peer_id,epoch,"failed",detail){network_events.push(event);}
+       },
        _=>{},
       }
                     } else if event[0] == 2 {
@@ -564,6 +618,19 @@ impl Worker {
                         }
                     }
                 }
+                if !link.open
+                    && local_now.saturating_sub(link.created_at) > 7000
+                    && !link.tried_relay
+                {
+                    if let Some(event)=link.diagnostic.update(&p.room_id,peer_id,epoch,"timeout","WebRTC 连接尚未建立，可能受到 NAT 或防火墙限制；提供者将尝试已配置的 TURN 中继") { network_events.push(event); }
+                }
+                if !link.open
+                    && link.tried_relay
+                    && link.lease_id.is_some()
+                    && local_now.saturating_sub(link.created_at) > 12000
+                {
+                    if let Some(event)=link.diagnostic.update(&p.room_id,peer_id,epoch,"relay_timeout","WebRTC TURN 中继连接超时，请检查网络或 TURN 服务；可退出后重新加入房间重试") { network_events.push(event); }
+                }
                 if link.open && p.is_provider && !link.probe_sent {
                     link.probe_sent = true;
                     link.probe_started = local_now;
@@ -594,6 +661,15 @@ impl Worker {
                     && p.is_provider
                 {
                     link.tried_relay = true;
+                    if let Some(event) = link.diagnostic.update(
+                        &p.room_id,
+                        peer_id,
+                        epoch,
+                        "relay_retry",
+                        "WebRTC 直连未成功，正在申请 TURN 中继",
+                    ) {
+                        network_events.push(event);
+                    }
                     let request = uuid::Uuid::new_v4().to_string();
                     self.admissions
                         .insert(request.clone(), (epoch, peer_id.clone(), true));
@@ -768,6 +844,9 @@ impl Worker {
                 controls.push(json!({"type":"ready","roomId":p.room_id,"transitionId":p.transition_id,"sourceEpoch":epoch}));
             }
         }
+        for event in network_events {
+            self.event(Event::Network(event));
+        }
         for control in controls {
             self.control(control);
         }
@@ -878,6 +957,29 @@ impl Worker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn connection_diagnostics_deduplicate_and_report_recovery() {
+        let mut diagnostic = ConnectionDiagnostic::default();
+        let failure = diagnostic
+            .update("room", "peer", 7, "failed", "WebRTC 连接失败")
+            .unwrap();
+        assert_eq!(failure["peerId"], "peer");
+        assert_eq!(failure["sourceEpoch"], 7);
+        assert!(diagnostic
+            .update("room", "peer", 7, "failed", "WebRTC 连接失败")
+            .is_none());
+        assert_eq!(
+            diagnostic
+                .update("room", "peer", 7, "connected", "")
+                .unwrap()["status"],
+            "connected"
+        );
+        assert!(diagnostic
+            .update("room", "peer", 7, "failed", "WebRTC 连接失败")
+            .is_some());
+        assert!(relay_failure("RELAY_BUDGET_EXHAUSTED").contains("预算不足"));
+        assert!(relay_failure("TURN_NOT_CONFIGURED").contains("尚未配置"));
+    }
     #[test]
     fn stop_discards_the_snapshot_even_when_a_late_signal_arrives() {
         let (events, _rx) = tokio::sync::mpsc::channel(16);

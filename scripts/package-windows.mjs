@@ -23,16 +23,17 @@ export function windowsResources(library, shareDirectory) {
   return resources;
 }
 
-export function findLicenseDirectory(root, library, override) {
+export function findLicenseDirectory(root, library, override, platform = process.platform, arch = process.arch) {
   if (override) return resolve(override);
-  const cachePath = join(dirname(dirname(library)), 'CMakeCache.txt');
-  if (existsSync(cachePath)) {
+  const tripletDefault = `${arch === 'arm64' ? 'arm64' : 'x64'}-${platform === 'darwin' ? 'osx-dynamic' : platform === 'linux' ? 'linux-dynamic' : 'windows'}`;
+  for (const cachePath of [join(dirname(library), 'CMakeCache.txt'), join(dirname(dirname(library)), 'CMakeCache.txt')]) {
+    if (!existsSync(cachePath)) continue;
     const cache = readFileSync(cachePath, 'utf8');
     const installed = cache.match(/^VCPKG_INSTALLED_DIR:[^=]+=(.+)$/m)?.[1].trim();
-    const triplet = cache.match(/^VCPKG_TARGET_TRIPLET:[^=]+=(.+)$/m)?.[1].trim() ?? 'x64-windows';
+    const triplet = cache.match(/^VCPKG_TARGET_TRIPLET:[^=]+=(.+)$/m)?.[1].trim() ?? tripletDefault;
     if (installed) return join(installed, triplet, 'share');
   }
-  return [join(root, 'native/vcpkg_installed/x64-windows/share'), join(root, 'vcpkg_installed/x64-windows/share')].find(existsSync);
+  return [join(root, `native/vcpkg_installed/${tripletDefault}/share`), join(root, `vcpkg_installed/${tripletDefault}/share`)].find(existsSync);
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');

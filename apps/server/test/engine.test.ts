@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { RoomEngine, DomainError, type RoomRecord } from '../src/engine';
-import { type Action, type Command, type TrackMetadata, DEFAULT_PERMISSIONS } from '../../../packages/shared/src';
+import { type Action, type Command, type TrackMetadata, DEFAULT_PERMISSIONS, commandSchema } from '../../../packages/shared/src';
 describe('authoritative room engine', () => {
  let now: number, engine: RoomEngine, roomId: string, host: { id: string; name: string }, member: { id: string; name: string }, saved: RoomRecord[];
  const spec = { sampleRate: 48000, bits: 24, channels: 2 };
@@ -10,9 +10,28 @@ describe('authoritative room engine', () => {
  function start(t: TrackMetadata) { cmd(host.id, { type: 'enqueue', payload: t }); cmd(host.id, { type: 'play', payload: { trackId: t.id } }); readyAll(); }
  function readyAll() { const p = engine.snapshot(roomId).pending!; for (const m of engine.snapshot(roomId).members.filter(m => m.online)) engine.ready(roomId, m.id, p.id, p.playback.sourceEpoch); engine.tick(); now = Math.max(now + 3000, p.playback.effectiveAtServerMs); engine.tick(); }
  beforeEach(() => { now = 100000; saved = []; engine = new RoomEngine(r => saved.push(r), () => {}, () => now); host = { id: randomUUID(), name: 'host' }; member = { id: randomUUID(), name: 'member' }; roomId = engine.create('room', host.id).id; engine.join(roomId, host); engine.join(roomId, member); });
+ it('OSS elects first ready member and keeps uploaded music available after uploader leaves', () => {
+  const t = { ...track(), ossKey: `music/${host.id}/${randomUUID()}` };
+  cmd(host.id, { type: 'enqueue', payload: t }); cmd(host.id, { type: 'play', payload: { trackId: t.id } });
+  let p = engine.snapshot(roomId).pending!;
+  now += 6000; engine.tick(); expect(engine.snapshot(roomId).pending!.committed).toBe(false);
+  engine.ready(roomId, member.id, p.id, p.playback.sourceEpoch);
+  engine.ready(roomId, host.id, p.id, p.playback.sourceEpoch);
+  now += 200; engine.tick();
+  expect(engine.snapshot(roomId).playback.leaderId).toBe(member.id);
+  engine.reportProgress(roomId, host.id, p.playback.sourceEpoch, 1000);
+  expect(engine.snapshot(roomId).playback.positionMs).toBe(0);
+  engine.reportProgress(roomId, member.id, p.playback.sourceEpoch, 1000);
+  expect(engine.snapshot(roomId).playback.positionMs).toBe(1000);
+  engine.leave(roomId, host.id); expect(engine.snapshot(roomId).playlist[0].available).toBe(true);
+  engine.leave(roomId, member.id); expect(engine.snapshot(roomId).playback.leaderId).toBeNull();
+ });
+ it.each(['startLive', 'requestLive', 'approveLive', 'rejectLive', 'stopLive'])('rejects removed system streaming command %s', type => {
+  expect(commandSchema.safeParse({ type, payload: { spec, bitrateBps: 2304000, requestId: randomUUID(), sourceEpoch: 1 } }).success).toBe(false);
+ });
  it('defaults allow enqueue but reject forged skip/seek/stream controls', () => {
   const t = track(); cmd(member.id, { type: 'enqueue', payload: t });
-  for (const action of [{ type: 'play', payload: { trackId: t.id } }, { type: 'seek', payload: { positionMs: 0 } }, { type: 'startLive', payload: { spec, bitrateBps: 2304000 } }] as Action[]) expect(() => cmd(member.id, action)).toThrow('FORBIDDEN');
+  for (const action of [{ type: 'play', payload: { trackId: t.id } }, { type: 'seek', payload: { positionMs: 0 } }] as Action[]) expect(() => cmd(member.id, action)).toThrow('FORBIDDEN');
   expect(engine.snapshot(roomId).playlist[0].providerId).toBe(member.id);
  });
  it('enforces the eight-online-member limit and allows reconnect', () => { for (let i = 0; i < 6; i++) engine.join(roomId, { id: randomUUID(), name: `m${i}` }); expect(() => engine.join(roomId, { id: randomUUID(), name: 'extra' })).toThrow('ROOM_FULL'); engine.leave(roomId, member.id); engine.join(roomId, member); expect(engine.snapshot(roomId).members.filter(m => m.online)).toHaveLength(8); });
@@ -24,8 +43,7 @@ describe('authoritative room engine', () => {
  });
  it('prepares before switching and commits at a shared time', () => { const t = track(); cmd(host.id, { type: 'enqueue', payload: t }); cmd(host.id, { type: 'play', payload: { trackId: t.id } }); expect(engine.snapshot(roomId).playback.sourceId).toBeNull(); const pending = engine.snapshot(roomId).pending!; engine.ready(roomId, member.id, pending.id, pending.playback.sourceEpoch); engine.tick(); expect(engine.snapshot(roomId).pending!.committed).toBe(false); now += 5000; engine.tick(); expect(engine.snapshot(roomId).pending!.committed).toBe(true); now += 200; engine.tick(); expect(engine.snapshot(roomId).playback.sourceId).toBe(t.id); });
  it('rejects overlapping playback transitions without changing state', () => { const t = track(); cmd(host.id, { type: 'enqueue', payload: t }); cmd(host.id, { type: 'play', payload: { trackId: t.id } }); const before = engine.snapshot(roomId); expect(() => cmd(host.id, { type: 'next', payload: {} })).toThrow('PLAYBACK_TRANSITION_PENDING'); expect(engine.snapshot(roomId)).toEqual(before); });
- it('member override wins and only host can grant it', () => { cmd(host.id, { type: 'permission', payload: { memberId: member.id, overrides: { skip: true, enqueue: false } } }); const permissions = engine.snapshot(roomId).members.find(m => m.id === member.id)!.permissions; expect(permissions.skip).toBe(true); expect(permissions.enqueue).toBe(false); expect(() => cmd(member.id, { type: 'defaults', payload: DEFAULT_PERMISSIONS })).toThrow('HOST_ONLY'); expect(saved.at(-1)!.overrides[member.id].skip).toBe(true); });
- it('revocation terminates an instant live source and rejects live seek/pause', () => { cmd(host.id, { type: 'permission', payload: { memberId: member.id, overrides: { skip: true, stream: true, seek: true } } }); cmd(member.id, { type: 'startLive', payload: { spec, bitrateBps: 2304000 } }); readyAll(); expect(() => cmd(member.id, { type: 'seek', payload: { positionMs: 1 } })).toThrow('FILE_ONLY'); expect(() => cmd(member.id, { type: 'pause', payload: {} })).toThrow('FILE_ONLY'); cmd(host.id, { type: 'permission', payload: { memberId: member.id, overrides: { stream: false } } }); expect(engine.snapshot(roomId).playback.playState).toBe('stopped'); });
+ it('member override wins and only host can grant it', () => { cmd(host.id, { type: 'permission', payload: { memberId: member.id, overrides: { skip: true, enqueue: false } } }); const permissions = engine.snapshot(roomId).members.find(m => m.id === member.id)!.permissions; expect(permissions.skip).toBe(true); expect(permissions.enqueue).toBe(false); expect(() => cmd(member.id, { type: 'defaults', payload: DEFAULT_PERMISSIONS, commandSchema })).toThrow('HOST_ONLY'); expect(saved.at(-1)!.overrides[member.id].skip).toBe(true); });
  it('enqueue authorization permits automatic file supply without stream permission', () => { const t = track(); cmd(member.id, { type: 'enqueue', payload: t }); cmd(host.id, { type: 'play', payload: { trackId: t.id } }); readyAll(); expect(engine.snapshot(roomId).playback.providerId).toBe(member.id); expect(engine.snapshot(roomId).playback.instant).toBe(false); });
  it('file seek retains paused state and rejects positions outside duration', () => { const t = track(); start(t); cmd(host.id, { type: 'pause', payload: {} }); readyAll(); expect(engine.snapshot(roomId).playback.playState).toBe('paused'); cmd(host.id, { type: 'seek', payload: { positionMs: 50000 } }); readyAll(); expect(engine.snapshot(roomId).playback.positionMs).toBe(50000); expect(engine.snapshot(roomId).playback.playState).toBe('paused'); expect(() => cmd(host.id, { type: 'seek', payload: { positionMs: t.durationMs } })).toThrow('SEEK_OUT_OF_RANGE'); });
  it('quality changes are explicit and cannot label lossy originals lossless', () => { const t = { ...track(), lossless: false }; start(t); expect(engine.snapshot(roomId).playback.qualityMode).toBe('source'); expect(() => cmd(host.id, { type: 'quality', payload: { qualityMode: 'lossless' } })).toThrow('SOURCE_IS_LOSSY'); cmd(host.id, { type: 'quality', payload: { qualityMode: 'opus' } }); readyAll(); expect(engine.snapshot(roomId).playback.bitrateBps).toBe(230400); });
@@ -36,28 +54,5 @@ describe('authoritative room engine', () => {
  it('pause follows the original timeline when readiness times out', () => { const t = track(); start(t); now += 1000; cmd(host.id, { type: 'pause', payload: {} }); const pending = engine.snapshot(roomId).pending!; now = pending.deadlineAt; engine.tick(); const committed = engine.snapshot(roomId).pending!; expect(committed.playback.positionMs).toBe(6200); now = committed.playback.effectiveAtServerMs; engine.tick(); expect(engine.snapshot(roomId).playback.positionMs).toBe(6200); });
  it('natural EOF stops instead of looping the last file', () => { const t = track(); start(t); now += t.durationMs; engine.tick(); expect(engine.snapshot(roomId).playback.playState).toBe('stopped'); expect(engine.snapshot(roomId).pending).toBeNull(); });
 
- it('an approved provider can stop their live stream without skip permission', () => {
-  cmd(host.id, { type: 'permission', payload: { memberId: member.id, overrides: { stream: true } } });
-  cmd(member.id, { type: 'requestLive', payload: { spec, bitrateBps: 2304000 } });
-  cmd(host.id, { type: 'approveLive', payload: { requestId: engine.snapshot(roomId).requests[0].id } }); readyAll();
-  const epoch = engine.snapshot(roomId).playback.sourceEpoch;
-  const other = { id: randomUUID(), name: 'other' }; engine.join(roomId, other);
-  expect(() => cmd(other.id, { type: 'stopLive', payload: { sourceEpoch: epoch } })).toThrow('FORBIDDEN');
-  cmd(member.id, { type: 'stopLive', payload: { sourceEpoch: epoch } }); expect(engine.snapshot(roomId).playback.playState).toBe('stopped');
- });
- it('stopping live resumes an available queued file and rejects stale stop requests', () => {
-  const t = track(); cmd(host.id, { type: 'enqueue', payload: t });
-  cmd(host.id, { type: 'startLive', payload: { spec, bitrateBps: 2304000 } }); readyAll();
-  const epoch = engine.snapshot(roomId).playback.sourceEpoch;
-  cmd(host.id, { type: 'stopLive', payload: { sourceEpoch: epoch } }); expect(engine.snapshot(roomId).pending!.playback.sourceId).toBe(t.id); readyAll();
-  expect(() => cmd(host.id, { type: 'stopLive', payload: { sourceEpoch: epoch } })).toThrow('STALE_SOURCE');
- });
- it('cancels prepared live without stopping the previous file or reusing epochs', () => {
-  const t = track(); start(t);
-  cmd(host.id, { type: 'startLive', payload: { spec, bitrateBps: 2304000 } });
-  const epoch = engine.snapshot(roomId).pending!.playback.sourceEpoch;
-  cmd(host.id, { type: 'stopLive', payload: { sourceEpoch: epoch } }); expect(engine.snapshot(roomId).pending).toBeNull(); expect(engine.snapshot(roomId).playback.sourceId).toBe(t.id);
-  cmd(host.id, { type: 'startLive', payload: { spec, bitrateBps: 2304000 } }); expect(engine.snapshot(roomId).pending!.playback.sourceEpoch).toBeGreaterThan(epoch);
- });
 
 });

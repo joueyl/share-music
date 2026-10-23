@@ -16,7 +16,12 @@
     "typecheck": "npm run typecheck -w @music-share/server && npm run typecheck -w @music-share/client",
     "test:desktop-launcher": "node --test scripts/desktop.test.mjs",
     "package:win": "node scripts/package-windows.mjs",
-    "package:win:check": "node scripts/package-windows.mjs --check"
+    "package:win:check": "node scripts/package-windows.mjs --check",
+    "package:mac": "node scripts/package-unix.mjs mac",
+    "package:mac:check": "node scripts/package-unix.mjs mac --check",
+    "package:linux": "node scripts/package-unix.mjs linux",
+    "package:linux:check": "node scripts/package-unix.mjs linux --check",
+    "test:packaging": "node --test scripts/package-unix.test.mjs"
   },
   "devDependencies": {
     "vitest": "^5.0.3",
