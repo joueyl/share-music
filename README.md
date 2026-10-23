@@ -146,7 +146,7 @@ TURN 凭证有效 60 秒，容量保留 95 秒用于连接拆除。当前 libdat
 
 ## 服务部署
 
-复制 `apps/server/.env.example` 为 `.env`，填写随机 TOKEN_SECRET、与 coturn 一致的 TURN_SECRET、公网 TURN 主机与 STUN_URL。Node 进程使用 `--env-file` 加载：
+复制 `apps/server/.env.example` 为 `apps/server/.env`，按模板的中文说明填写随机 `TOKEN_SECRET`、OSS 服务端凭据及实际前端 `ALLOWED_ORIGINS`。公网 `/loginServe` 还需配置独立管理密码 `NETEASE_ADMIN_TOKEN` 和浏览器实际访问的 `NETEASE_LOGIN_ORIGIN`。当前 OSS 音乐播放与 WebSocket 同步不依赖 TURN，模板末尾保留旧版兼容配置。普通部署修改环境变量后重启；Docker Compose 需重新创建 API 容器才能更新 env_file。Node 进程使用 `--env-file` 加载：
 
 ```sh
 npm run build
