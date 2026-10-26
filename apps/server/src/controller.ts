@@ -39,6 +39,12 @@ export class ApiController {
       return { url: await this.oss.url(track.ossKey) };
     } catch (e) { httpError(e); }
   }
+  @Get('rooms/:id/music/:trackId/cover') async cover(@Param('id') id:string,@Param('trackId') trackId:string,@Headers('authorization') header?:string) {
+    try {
+      const user=this.user(header);this.app.limit(`music-cover:${user.id}`,30,60000);
+      return {coverUrl:await this.app.musicImport.cover(z.string().uuid().parse(id),user.id,z.string().uuid().parse(trackId))};
+    }catch(e){httpError(e);}
+  }
   private user(header?: string) { if (!header?.startsWith('Bearer ')) throw new DomainError('UNAUTHORIZED'); return this.app.auth.verify(header.slice(7)); }
   @Get('health') health() { return { ok: true, protocolVersion: 1, relayUsedBps: this.app.capacity.usedBps, relayBudgetBps: this.app.capacity.budget, turnProvider: this.app.turn.provider, publicRelayUsedBps: this.app.publicCapacity.usedBps, publicRelayBudgetBps: this.app.publicCapacity.budget }; }
   @Post('login') async login(@Body() body: unknown, @Req() req: Request) {

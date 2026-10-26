@@ -32,6 +32,8 @@ OSS_ACCESS_POINT_ALIAS=node-c20dbedd7a8f7525f7acb47894c523771a-ossalias
 
 当前验证只覆盖本地配置、签名、HTTP 上传请求构造及错误处理；只有真实凭据与策略齐备后，才能验证云端上传、签名播放和 Range/CORS。没有执行真实上传。
 
+房间背景的实时波形在客户端本地通过 Web Audio API 的 createMediaElementSource 和 AnalyserNode 直接分析当前播放器，不使用随机动画，不采集麦克风或系统声音，也不会上传采样数据。桌面端通过 Rust HTTP 客户端读取私有 OSS 签名音频的原始字节，再建立本地 Blob 供同一个播放器播放和实时分析；不再依赖 OSS 的浏览器 CORS 授权，也不请求任何预生成波形。未缓存的歌曲首次播放需要先缓冲完整文件（上限 100MB、60 秒超时），校验 SHA-256 和文件大小后原子写入系统应用缓存目录的 music 子目录。再次播放先读取并校验磁盘缓存，命中时跳过签名地址请求和 OSS 下载；客户端重启、切换房间、签名 URL 变化不影响内容相同的文件复用。暂停和拖动复用本地数据，换歌/离房释放内存 Blob，但保留磁盘缓存。缓存损坏会重新下载，缓存目录无法写入时继续播放并提示。原生下载只接受 HTTPS 阿里云 OSS 的 music/ 路径，不跟随重定向，不记录或回传签名 URL。浏览器预览仍直连 OSS，须配置实际来源的匿名 GET/Range CORS，失败时只降级普通播放。播放源节点连接 destination，分析节点旁路读取；房间重挂载复用音频图。首次可能需要点击页面启用音频分析；后台页停止绘图，减少动态效果模式不连续刷新。此修改包含原生模块，旧客户端须重新构建并重启，单独刷新网页不能更新原生命令。
+
 参考：[接入点说明](https://help.aliyun.com/zh/oss/user-guide/access-point/)、[V4 URL 签名](https://help.aliyun.com/zh/oss/developer-reference/add-signatures-to-urls)。
 
 ## 上传故障诊断

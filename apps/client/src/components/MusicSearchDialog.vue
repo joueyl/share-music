@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Search, X, Plus, Check, LoaderCircle } from 'lucide-vue-next';
+import { Search, X, Plus, Check, LoaderCircle, Disc3 } from 'lucide-vue-next';
 import { useMusicSuggestions } from '../useMusicSuggestions';
 import { useApp } from '../store';
 import * as bridge from '../bridge';
@@ -8,6 +8,7 @@ const props=defineProps<{roomId:string}>(), emit=defineEmits<{close:[]}>(), app=
 const keywords=ref(''),songs=ref<bridge.MusicSearchItem[]>([]),total=ref(0),offset=ref(0),query=ref('');
 const searching=ref(false),searched=ref(false),adding=ref<string|null>(null),added=ref(new Set<string>()),message=ref('');
 const focused=ref(false),composing=ref(false),suggestionsSuppressed=ref(false);
+const failedCovers=ref(new Set<string>());
 watch(keywords,()=>{suggestionsSuppressed.value=false;},{flush:'sync'});
 const suggestEnabled=computed(()=>focused.value&&!suggestionsSuppressed.value&&!composing.value&&!adding.value&&!searching.value);
 const suggestions=useMusicSuggestions(keywords,suggestEnabled);
@@ -53,7 +54,7 @@ async function search(page=0){
 async function add(song:bridge.MusicSearchItem){
  if(adding.value||!app.permission.enqueue||!app.connected)return;
  adding.value=song.id;app.notice='';message.value='服务端正在获取音源并上传 OSS，请稍候…';
- try{const requestId=requestIds.get(song.id)??crypto.randomUUID();requestIds.set(song.id,requestId);await bridge.addSearchedMusic(props.roomId,song.id,requestId);if(!alive)return;added.value=new Set([...added.value,song.id]);message.value='添加成功，音乐已上传 OSS 并加入播放列表';app.notice=`添加成功：${song.name}`;}
+ try{const requestId=requestIds.get(song.id)??crypto.randomUUID();requestIds.set(song.id,requestId);await bridge.addSearchedMusic(props.roomId,song.id,requestId,song.coverUrl);if(!alive)return;added.value=new Set([...added.value,song.id]);message.value='添加成功，音乐已上传 OSS 并加入播放列表';app.notice=`添加成功：${song.name}`;}
  catch(e){if(alive){app.error(e);message.value=app.notice;}}
  finally{if(alive)adding.value=null;}
 }
@@ -70,7 +71,7 @@ const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toSt
    <p v-if="searching" class="empty-state">正在搜索…</p>
    <p v-else-if="!searched" class="empty-state">输入关键词，找到想一起听的音乐</p>
    <p v-else-if="!songs.length" class="empty-state">没有找到相关音乐，换个关键词试试</p>
-   <div v-for="song in searching?[]:songs" :key="song.id" class="music-search-row"><div class="music-search-info"><strong>{{ song.name }}</strong><small>{{ song.artists || '未知歌手' }} · {{ song.album || '未知专辑' }}</small></div><span class="track-duration">{{ format(song.durationMs) }}</span><button class="secondary" :disabled="!!adding||added.has(song.id)||!app.permission.enqueue||!app.connected" :aria-label="`添加 ${song.name}`" @click="add(song)"><LoaderCircle v-if="adding===song.id" class="spinning" :size="15" /><Check v-else-if="added.has(song.id)" :size="15" /><Plus v-else :size="15" />{{ added.has(song.id)?'已添加':adding===song.id?'上传中…':'添加' }}</button></div>
+   <div v-for="song in searching?[]:songs" :key="song.id" class="music-search-row"><div class="music-search-cover"><img v-if="song.coverUrl&&!failedCovers.has(song.coverUrl)" :key="song.coverUrl" :src="song.coverUrl" :alt="`${song.album || song.name}专辑封面`" width="48" height="48" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="failedCovers.add(song.coverUrl)" /><Disc3 v-else :size="24" aria-hidden="true" /></div><div class="music-search-info"><strong>{{ song.name }}</strong><small>{{ song.artists || '未知歌手' }} · {{ song.album || '未知专辑' }}</small></div><span class="track-duration">{{ format(song.durationMs) }}</span><button class="secondary" :disabled="!!adding||added.has(song.id)||!app.permission.enqueue||!app.connected" :aria-label="`添加 ${song.name}`" @click="add(song)"><LoaderCircle v-if="adding===song.id" class="spinning" :size="15" /><Check v-else-if="added.has(song.id)" :size="15" /><Plus v-else :size="15" />{{ added.has(song.id)?'已添加':adding===song.id?'上传中…':'添加' }}</button></div>
   </div>
   <div v-if="searched&&total>20" class="music-search-pagination"><button class="text-button" :disabled="offset===0||searching||!!adding" @click="search(offset-20)">上一页</button><span>{{ Math.floor(offset/20)+1 }} / {{ Math.ceil(total/20) }}</span><button class="text-button" :disabled="offset+20>=total||searching||!!adding" @click="search(offset+20)">下一页</button></div>
   <p class="muted small">仅添加当前账号可获取的完整音源，请确保拥有上传与共享权限。添加期间请勿关闭弹窗。</p>

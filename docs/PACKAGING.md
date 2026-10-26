@@ -39,13 +39,13 @@ pnpm run package:mac
 
 ## Linux
 
-需要 GTK3、WebKitGTK 4.1、PipeWire 的开发依赖，以及 CMake、Ninja、pkg-config、patchelf、binutils（readelf）、Rust、Node.js 和 vcpkg。运行时需要 PipeWire 桌面会话。Ubuntu 22.04 的依赖示例：
+需要 GTK3、WebKitGTK 4.1、PipeWire、D-Bus 的开发依赖，以及 CMake、Ninja、pkg-config、patchelf、binutils（readelf）、Rust、Node.js 和 vcpkg。运行时需要 PipeWire 桌面会话；MPRIS 系统媒体控制需要可用的用户 D-Bus 会话。Ubuntu 22.04 的依赖示例：
 
 ```sh
 sudo apt update
 sudo apt install build-essential cmake ninja-build pkg-config curl zip unzip tar git \
   patchelf binutils libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev \
-  libssl-dev libpipewire-0.3-dev libfuse2
+  libssl-dev libpipewire-0.3-dev libdbus-1-dev libfuse2
 ```
 
 其他发行版按 [Tauri 前置条件](https://v2.tauri.app/start/prerequisites/)安装对应包。AppImage 构建需联网下载 Tauri/linuxdeploy 工具；无 FUSE 的构建环境可按工具支持使用 `APPIMAGE_EXTRACT_AND_RUN=1`。为兼容旧系统，在计划支持的最旧发行版上构建并验收。

@@ -3,7 +3,8 @@ import { WebSocketGateway, WebSocketServer, OnGatewayConnection, OnGatewayDiscon
 import { WebSocket, WebSocketServer as WSS } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import { z } from 'zod';
-import { envelopeSchema, type RoomSnapshot } from '../../../packages/shared/src';
+import { randomUUID } from 'node:crypto';
+import { envelopeSchema, chatRequestSchema, type ChatMessage, type RoomSnapshot } from '../../../packages/shared/src';
 import { AppService } from './app.service';
 import { DomainError } from './engine';
 type Session = { user: { id: string; name: string; expiresAt: number }; roomId: string | null; lastPong: number };
@@ -22,6 +23,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   @WebSocketServer() server!: WSS;
   private sessions = new Map<WebSocket, Session>();
   private authTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>();
+  private chats = new Map<string, ChatMessage[]>();
   private heartbeat: ReturnType<typeof setInterval>;
   private publish = (room: RoomSnapshot) => { for (const [ws, s] of this.sessions) if (s.roomId === room.id) this.send(ws, { type: 'snapshot', data: room }); };
   constructor(@Inject(AppService) private app: AppService) {
@@ -36,6 +38,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
     ws.on('pong', () => { const s = this.sessions.get(ws); if (s) s.lastPong = Date.now(); });
     ws.on('message', async raw => {
       let commandId: string | undefined;
+      let chatRequestId: string | undefined;
       try {
         const message = JSON.parse(raw.toString());
         let s = this.sessions.get(ws);
@@ -48,8 +51,27 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           clearTimeout(this.authTimers.get(ws)); this.authTimers.delete(ws);
           s = { user, roomId: null, lastPong: Date.now() }; this.sessions.set(ws, s); this.send(ws, { type: 'authenticated', user: { id: user.id, name: user.name }, iceServers: this.app.turn.stun() }); return;
         }
+        if (message.type === 'chat' && uuid.safeParse(message.requestId).success) chatRequestId = message.requestId;
         if (Date.now() >= s.user.expiresAt) throw new DomainError('UNAUTHORIZED');
         this.app.limit(`ws:${s.user.id}`, 120, 10000);
+        if (message.type === 'chat') {
+          const v = chatRequestSchema.parse(message); this.requireRoom(s, v.roomId);
+          const room = this.app.engine.snapshot(v.roomId);
+          if (!room.members.some(m => m.id === s!.user.id && m.online)) throw new DomainError('NOT_IN_ROOM');
+          const history = this.chats.get(v.roomId) ?? [];
+          const prior = history.find(m => m.userId === s!.user.id && m.requestId === v.requestId);
+          if (prior) {
+            if (prior.text !== v.text) throw new DomainError('COMMAND_ID_REUSED');
+            this.send(ws, { type: 'chat', data: prior }); return;
+          }
+          this.app.limit(`chat:${s.user.id}`, 10, 10000);
+          const data: ChatMessage = { id: randomUUID(), requestId: v.requestId, roomId: v.roomId, userId: s.user.id, userName: s.user.name, text: v.text, sentAt: Date.now() };
+          history.push(data); if (history.length > 100) history.shift();
+          this.chats.delete(v.roomId); this.chats.set(v.roomId, history);
+          if (this.chats.size > 1000) this.chats.delete(this.chats.keys().next().value!);
+          for (const [peer, session] of this.sessions) if (session.roomId === v.roomId) this.send(peer, { type: 'chat', data });
+          return;
+        }
         if (message.type === 'command') {
           const command = envelopeSchema.parse(message.data); commandId = command.commandId;
           this.requireRoom(s, command.roomId);
@@ -67,7 +89,8 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           const target = this.app.engine.snapshot(v.roomId);
           if (!target.members.some(m => m.id === s!.user.id && m.online) && target.members.filter(m => m.online).length >= 8) throw new DomainError('ROOM_FULL');
           if (s.roomId && s.roomId !== v.roomId) this.app.engine.leave(s.roomId, s.user.id);
-          s.roomId = v.roomId; const snapshot = this.app.engine.join(v.roomId, s.user); this.send(ws, { type: 'snapshot', data: snapshot }); return;
+          s.roomId = v.roomId; const snapshot = this.app.engine.join(v.roomId, s.user); this.send(ws, { type: 'snapshot', data: snapshot });
+          this.send(ws, { type: 'chat-history', roomId: v.roomId, messages: this.chats.get(v.roomId) ?? [] }); return;
         }
         if (message.type === 'clock') { const received = Date.now(); const v = schemas.clock.parse(message); this.send(ws, { ...v, serverReceivedAt: received, serverSentAt: Date.now() }); return; }
         if (message.type === 'progress') { const v = z.object({ type: z.literal('progress'), roomId: uuid, sourceEpoch: z.number().int().nonnegative(), positionMs: z.number().finite().nonnegative(), sampledAtServerMs: z.number().finite().nonnegative().optional() }).strict().parse(message); this.requireRoom(s, v.roomId); this.app.engine.reportProgress(v.roomId, s.user.id, v.sourceEpoch, v.positionMs, v.sampledAtServerMs); return; }
@@ -114,7 +137,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         throw new DomainError('UNKNOWN_MESSAGE');
       } catch (e) {
         const error = e instanceof DomainError ? e.code : e instanceof z.ZodError || e instanceof SyntaxError ? 'INVALID_REQUEST' : 'INTERNAL_ERROR';
-        this.send(ws, commandId ? { type: 'result', commandId, ok: false, error } : { type: 'error', error });
+        this.send(ws, chatRequestId ? { type: 'chat-error', requestId: chatRequestId, error } : commandId ? { type: 'result', commandId, ok: false, error } : { type: 'error', error });
         if (error === 'STATE_CONFLICT') { const s = this.sessions.get(ws); if (s?.roomId) this.send(ws, { type: 'snapshot', data: this.app.engine.snapshot(s.roomId) }); }
       }
     });

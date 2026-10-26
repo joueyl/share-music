@@ -57,3 +57,32 @@ it('allows same-origin HTTPS proxy QR polling but still blocks foreign origins',
  const denied=await fetch(base+'/loginServe/check',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://evil.example.com','X-Forwarded-Proto':'https'},body:JSON.stringify({sessionId:randomUUID()})});
  expect(denied.status).toBe(403);expect((await denied.json()).error).toBe('NETEASE_LOGIN_ORIGIN_FORBIDDEN');
 });
+
+it('isolates room chat, validates messages, confirms retries and restores history on rejoin',async()=>{
+ const a=(await api('/login',{name:'chat-alice',password:'chat-password-alice',register:true})).data;
+ const b=(await api('/login',{name:'chat-bob',password:'chat-password-bob',register:true})).data;
+ const c=(await api('/login',{name:'chat-other',password:'chat-password-other',register:true})).data;
+ const room=(await api('/rooms',{name:'chat room'},a.token)).data;
+ const other=(await api('/rooms',{name:'other chat room'},c.token)).data;
+ const host=new Client(a.token),member=new Client(b.token),outsider=new Client(c.token);
+ for(const client of [host,member,outsider])await client.wait(m=>m.type==='authenticated');
+ const outsideId=randomUUID();outsider.send({type:'chat',roomId:room.id,requestId:outsideId,text:'cannot enter'});
+ expect((await outsider.wait(m=>m.type==='chat-error'&&m.requestId===outsideId)).error).toBe('NOT_IN_ROOM');
+ for(const [client,id] of [[host,room.id],[member,room.id],[outsider,other.id]] as const){client.send({type:'join',roomId:id});await client.wait(m=>m.type==='chat-history');}
+ const requestId=randomUUID();const payload={type:'chat',roomId:room.id,requestId,text:'  一起听歌 🎵\n你好  '};
+ host.send(payload);
+ const own=(await host.wait(m=>m.type==='chat'&&m.data.requestId===requestId)).data;
+ const received=(await member.wait(m=>m.type==='chat'&&m.data.requestId===requestId)).data;
+ expect(received).toEqual(own);expect(own).toMatchObject({roomId:room.id,userId:a.user.id,userName:'chat-alice',text:'一起听歌 🎵\n你好'});expect(own.sentAt).toBeGreaterThan(0);
+ host.send(payload);expect((await host.wait(m=>m.type==='chat'&&m.data.requestId===requestId)).data.id).toBe(own.id);
+ const reuse={...payload,text:'different'};host.send(reuse);expect((await host.wait(m=>m.type==='chat-error')).error).toBe('COMMAND_ID_REUSED');
+ for(const text of ['   ','x'.repeat(501)]){const id=randomUUID();member.send({type:'chat',roomId:room.id,requestId:id,text});expect((await member.wait(m=>m.type==='chat-error'&&m.requestId===id)).error).toBe('INVALID_REQUEST');}
+ const forged=randomUUID();member.send({type:'chat',roomId:room.id,requestId:forged,text:'test',userName:'fake'});expect((await member.wait(m=>m.type==='chat-error'&&m.requestId===forged)).error).toBe('INVALID_REQUEST');
+ member.send({type:'leave'});member.send({type:'join',roomId:room.id});const history=await member.wait(m=>m.type==='chat-history');expect(history.messages).toEqual([own]);
+ // A subsequent clock reply is an ordering barrier on the outsider's socket.
+ const clock=randomUUID();outsider.send({type:'clock',requestId:clock,clientSentAt:Date.now()});await outsider.wait(m=>m.type==='clock'&&m.requestId===clock);
+ expect(outsider.queue.some(m=>m.type==='chat')).toBe(false);
+ for(let i=0;i<10;i++){const id=randomUUID();member.send({type:'chat',roomId:room.id,requestId:id,text:`message ${i}`});await member.wait(m=>m.type==='chat'&&m.data.requestId===id);}
+ const limited=randomUUID();member.send({type:'chat',roomId:room.id,requestId:limited,text:'too fast'});expect((await member.wait(m=>m.type==='chat-error'&&m.requestId===limited)).error).toBe('RATE_LIMITED');
+ member.send({type:'leave'});const left=randomUUID();member.send({type:'chat',roomId:room.id,requestId:left,text:'after leave'});expect((await member.wait(m=>m.type==='chat-error'&&m.requestId===left)).error).toBe('NOT_IN_ROOM');
+},10000);

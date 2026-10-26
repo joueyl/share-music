@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { OssStorage } from '../src/oss';
 import { Database } from '../src/database';
 import { RoomEngine } from '../src/engine';
-import { MusicImport, downloadMusic, musicDownloadUrl, mp3Spec, songFilename } from '../src/music-import';
+import { MusicImport, downloadMusic, musicDownloadUrl, mp3Spec, songFilename, songCover } from '../src/music-import';
+import { trackSchema } from '../../../packages/shared/src';
 const bytes=Buffer.concat([Buffer.from([255,251,144,0]),Buffer.alloc(1000)]);
 function setup(){
  const engine=new RoomEngine(),user=randomUUID(),room=engine.create('test',user);engine.join(room.id,{id:user,name:'host'});
@@ -89,4 +90,53 @@ it('includes real artist names, supports both artist schemas and deduplicates fe
  expect(songFilename({name:'合唱歌曲',ar:[{name:'歌手甲'},{name:'歌手乙'},{name:'歌手甲'}]})).toBe('合唱歌曲 - 歌手甲、歌手乙.mp3');
  expect(songFilename({name:'Love Story',artists:[{name:'Taylor Swift'}]})).toBe('Love Story - Taylor Swift.mp3');
  expect(()=>songFilename({name:'缺少歌手'})).toThrow('MUSIC_SOURCE_INVALID');
+});
+
+it('preserves album artwork in uploaded metadata, persisted assets and room snapshots',async()=>{
+ const f=setup(),db=new Database(':memory:');
+ f.call.mockImplementation(async(method:string)=>method==='song_detail'?{songs:[{id:123,name:'歌曲',ar:[{name:'歌手'}],dt:120000,al:{picUrl:'http://p1.music.126.net/cover.jpg'}}]}:{data:[{id:123,url:'https://m801.music.126.net/audio.mp3',code:200,type:'mp3'}]} as any);
+ try{
+  const service=new MusicImport(f.engine,{call:f.call},{upload:f.upload},f.request as typeof fetch,db);
+  const track=await service.add(f.room.id,f.user,'123',randomUUID());
+  expect(track.coverUrl).toBe('https://p1.music.126.net/cover.jpg');
+  expect(f.engine.snapshot(f.room.id).playlist[0].coverUrl).toBe(track.coverUrl);
+  expect(db.getMusicSource('default','netease:standard:123')?.coverUrl).toBe(track.coverUrl);
+  expect(trackSchema.parse(track).coverUrl).toBe(track.coverUrl);
+ }finally{db.close();}
+});
+it('backfills older cached artwork without re-uploading audio and tolerates unavailable metadata',async()=>{
+ const f=setup(),db=new Database(':memory:');
+ try{
+  const service=new MusicImport(f.engine,{call:f.call},{upload:f.upload,exists:async()=>true},f.request as typeof fetch,db);
+  const original=await service.add(f.room.id,f.user,'123',randomUUID());
+  expect(original.coverUrl).toBeNull();
+  const {coverUrl,...legacy}=original;db.saveMusicSource('default','netease:standard:123',legacy);
+  f.call.mockRejectedValueOnce(new Error('offline'));
+  const fallback=await service.add(f.room.id,f.user,'123',randomUUID());
+  expect(fallback.coverUrl).toBeUndefined();expect(fallback.ossKey).toBe(original.ossKey);
+  f.call.mockResolvedValueOnce({songs:[{id:123,album:{picUrl:'https://p2.music.126.net/legacy.jpg'}}]} as any);
+  const updated=await service.add(f.room.id,f.user,'123',randomUUID());
+  expect(updated.coverUrl).toBe('https://p2.music.126.net/legacy.jpg');
+  expect(f.upload).toHaveBeenCalledOnce();expect(f.request).toHaveBeenCalledOnce();
+ }finally{db.close();}
+});
+it('treats missing, malformed and untrusted artwork as absent',()=>{
+ for(const song of [{},{al:{picUrl:123}},{al:{picUrl:'javascript:alert(1)'}},{al:{picUrl:'https://evil.test/art.jpg'}}])expect(songCover(song)).toBeNull();
+ expect(songCover({album:{picUrl:'http://p1.music.126.net/art.jpg'}})).toBe('https://p1.music.126.net/art.jpg');
+});
+
+it('recovers missing artwork for an existing playlist track using its exact source hash without re-importing audio',async()=>{
+ const f=setup(),db=new Database(':memory:');
+ try{
+  const service=new MusicImport(f.engine,{call:f.call},{upload:f.upload},f.request as typeof fetch,db);
+  const original=await service.add(f.room.id,f.user,'123',randomUUID());expect(original.coverUrl).toBeNull();
+  f.call.mockResolvedValueOnce({songs:[{id:123,al:{picUrl:'http://p1.music.163.com/cover.jpg'}}]} as any);
+  expect(await service.cover(f.room.id,f.user,original.id)).toBe('https://p1.music.163.com/cover.jpg');
+  expect(db.getMusicSource('default','netease:standard:123')?.coverUrl).toBe('https://p1.music.163.com/cover.jpg');
+  const requests=f.call.mock.calls.length;
+  expect(await service.cover(f.room.id,f.user,original.id)).toBe('https://p1.music.163.com/cover.jpg');
+  expect(f.call.mock.calls.length).toBe(requests);expect(f.upload).toHaveBeenCalledOnce();expect(f.request).toHaveBeenCalledOnce();
+  await expect(service.cover(f.room.id,randomUUID(),original.id)).rejects.toThrow('NOT_IN_ROOM');
+  await expect(service.cover(f.room.id,f.user,randomUUID())).rejects.toThrow('TRACK_NOT_FOUND');
+ }finally{db.close();}
 });

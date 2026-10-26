@@ -3,6 +3,7 @@ import type { Playback, RoomSnapshot } from '@music-share/shared';
 import { CloudPlayer } from '../src/cloud-player';
 
 class FakeAudio {
+  crossOrigin: string | null = null;
   src = ''; readyState = 0; seeking = false; paused = true;
   onloadedmetadata?: () => void; oncanplay?: () => void; onseeked?: () => void; onerror?: () => void;
   seeks: number[] = []; private position = 0;
@@ -11,11 +12,45 @@ class FakeAudio {
   pause = vi.fn(() => { this.paused = true; });
   play = vi.fn(async () => { this.paused = false; });
   load = vi.fn(() => { this.readyState = 0; });
-  removeAttribute() { this.src = ''; }
+  removeAttribute(name: string) { if (name === 'crossorigin') this.crossOrigin = null; else if (name === 'src') this.src = ''; }
   buffered() { this.readyState = 3; this.oncanplay?.(); }
   seeked() { this.seeking = false; this.readyState = 3; this.onseeked?.(); }
   advance(seconds: number) { this.position += seconds; }
 }
+
+it('requests CORS-readable audio and falls back to ordinary playback once when analysis is blocked', async () => {
+  const { player, audio } = setup();
+  await player.sync(room(), 0);
+  expect(audio.crossOrigin).toBe('anonymous');
+  const url = audio.src;
+  audio.onerror?.();
+  expect(audio.crossOrigin).toBeNull(); expect(audio.src).toBe(url); expect(audio.load).toHaveBeenCalledTimes(2);
+  audio.buffered();
+});
+
+it('replaces an analyser-bound element for non-CORS fallback and retains playback synchronization', async () => {
+  const previous = new FakeAudio(), next = new FakeAudio(), replace = vi.fn(() => next as unknown as HTMLAudioElement), emit = vi.fn();
+  const player = new CloudPlayer(previous as unknown as HTMLAudioElement, async () => 'https://oss.test/song.mp3', vi.fn(), emit, () => 100000, replace);
+  const active = room(); active.pending = null; active.playback.effectiveAtServerMs = 100000;
+  await player.sync(active, 0); previous.onerror?.();
+  expect(replace).toHaveBeenCalledExactlyOnceWith(previous); expect(previous.pause).toHaveBeenCalled();
+  expect(next.src).toBe('https://oss.test/song.mp3'); expect(next.crossOrigin).toBeNull();
+  next.buffered(); player.tick(); expect(next.play).toHaveBeenCalledOnce();
+  next.onerror?.(); expect(emit).toHaveBeenCalledWith('server-message', expect.objectContaining({type:'error'}));
+  expect(replace).toHaveBeenCalledOnce();
+});
+
+it('revokes a local audio Blob on leaving and ignores/revokes a stale download', async () => {
+  const audio = new FakeAudio(), release = vi.fn(), staleRelease = vi.fn();
+  let finish!: (source: {url:string;release:()=>void}) => void;
+  const load = vi.fn().mockResolvedValueOnce({url:'blob:first',release}).mockImplementationOnce(() => new Promise(resolve => {finish=resolve;}));
+  const player = new CloudPlayer(audio as unknown as HTMLAudioElement, load, vi.fn(), vi.fn());
+  await player.sync(room(),0); expect(audio.src).toBe('blob:first'); expect(audio.crossOrigin).toBe('anonymous');
+  const next = room(2); next.playlist[0].ossKey = 'music/second'; const pending = player.sync(next,0);
+  expect(release).toHaveBeenCalledOnce(); player.clear();
+  finish({url:'blob:stale',release:staleRelease}); await pending;
+  expect(staleRelease).toHaveBeenCalledOnce(); expect(audio.src).toBe('');
+});
 function room(epoch = 1, positionMs = 0, playState = 'playing'): RoomSnapshot {
   const p = { sourceId: 'song', sourceEpoch: epoch, sourceType: 'file', positionMs, playState, effectiveAtServerMs: 103000 } as Playback;
   return { id: 'room', playlist: [{ id: 'song', ossKey: 'music/song.mp3', durationMs: 300000 }], playback: p,

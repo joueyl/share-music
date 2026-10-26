@@ -18,7 +18,7 @@ export function unixBundle(platform, libraries, resources) {
   if (platform === 'darwin') bundle.macOS = { minimumSystemVersion: '13.0', frameworks: libraries };
   else {
     for (const library of libraries) resources[library] = `media/${basename(library)}`;
-    bundle.linux = { deb: { depends: ['libwebkit2gtk-4.1-0', 'libgtk-3-0', 'libpipewire-0.3-0'] } };
+    bundle.linux = { deb: { depends: ['libwebkit2gtk-4.1-0', 'libgtk-3-0', 'libpipewire-0.3-0', 'libdbus-1-3'] } };
   }
   return { bundle };
 }
@@ -31,7 +31,7 @@ export function stageUnix(root, platform, library, shareDirectory, dependenciesD
   if (!library || !existsSync(library)) throw new Error('缺少媒体库，请先构建 native 的 Release 动态库。');
   if (basename(library) !== (platform === 'darwin' ? 'libmusic_native.dylib' : 'libmusic_native.so')) throw new Error('媒体库文件名必须保留为 libmusic_native.dylib 或 libmusic_native.so。');
   if (!shareDirectory || !existsSync(shareDirectory)) throw new Error('缺少许可证目录，请设置 MUSIC_NATIVE_LICENSES 为 vcpkg 的 <triplet>/share。');
-  const resources = { [join(root, 'docs/THIRD-PARTY-NOTICES.md')]: 'licenses/THIRD-PARTY-NOTICES.md' };
+  const resources = { [join(root, 'docs/THIRD-PARTY-NOTICES.md')]: 'licenses/THIRD-PARTY-NOTICES.md', [join(root, 'docs/licenses/souvlaki-LICENSE')]: 'licenses/souvlaki/LICENSE' };
   for (const port of readdirSync(shareDirectory)) {
     const license = join(shareDirectory, port, 'copyright');
     if (existsSync(license)) resources[license] = `licenses/${port}/copyright`;

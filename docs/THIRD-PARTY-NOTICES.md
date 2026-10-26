@@ -1,5 +1,7 @@
 # 媒体依赖与源码
 
+系统媒体控制使用 [souvlaki 0.8.3](https://github.com/Sinono3/souvlaki)（MIT License），通过 Windows SMTC / Linux MPRIS 与操作系统交互；许可证原文随安装包置于 `licenses/souvlaki/LICENSE`。Windows 任务栏缩略图按钮另外使用 Microsoft Win32 Taskbar API。
+
 安装包动态链接 FFmpeg、FLAC、Opus、SDL2、libdatachannel、libjuice、OpenSSL、Ogg 等组件。各组件的原始许可证随安装包放在 `licenses/<组件>/copyright`。这些许可证仅适用于对应第三方组件，不为本项目指定许可证。
 
 本次依赖由 vcpkg baseline `2750401336fb7c95f6619657a46a7e798661341c` 构建，具体版本、源码地址及补丁见 [对应 vcpkg ports](https://github.com/microsoft/vcpkg/tree/2750401336fb7c95f6619657a46a7e798661341c/ports)。原生构建配置见随源码交付的 `native/vcpkg.json` 与 `native/CMakeLists.txt`；FFmpeg 未启用 GPL/nonfree 功能。

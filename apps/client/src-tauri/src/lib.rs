@@ -3,9 +3,13 @@ pub mod clock;
 pub mod control;
 pub mod media;
 pub mod model;
+pub mod music_cache;
 pub mod native;
 pub mod packet;
+pub mod playback_audio;
+pub mod saved_login;
 pub mod stun;
+pub mod system_media;
 
 #[cfg(feature = "desktop")]
 mod desktop {
@@ -32,6 +36,66 @@ mod desktop {
         native: Option<Arc<native::Native>>,
         native_error: String,
         http: reqwest::Client,
+        music_cache: music_cache::MusicCache,
+    }
+    #[tauri::command]
+    fn update_system_media(
+        app: tauri::AppHandle,
+        mut snapshot: system_media::Snapshot,
+    ) -> Result<(), String> {
+        snapshot.validate()?;
+        app.run_on_main_thread(move || system_media::update(snapshot))
+            .map_err(|_| "SYSTEM_MEDIA_UNAVAILABLE".into())
+    }
+    #[tauri::command]
+    async fn load_playback_audio(
+        app: tauri::AppHandle,
+        state: State<'_, AppState>,
+        url: String,
+        content_hash: String,
+        size_bytes: u64,
+    ) -> Result<tauri::ipc::Response, String> {
+        let audio = state
+            .music_cache
+            .load(&state.http, &url, &content_hash, size_bytes)
+            .await?;
+        if !audio.stored {
+            let _ = app.emit(
+                "playback-cache-warning",
+                json!({"error":"PLAYBACK_AUDIO_CACHE_WRITE_FAILED"}),
+            );
+        }
+        Ok(tauri::ipc::Response::new(audio.bytes))
+    }
+    #[tauri::command]
+    async fn read_cached_audio(
+        state: State<'_, AppState>,
+        content_hash: String,
+        size_bytes: u64,
+    ) -> Result<tauri::ipc::Response, String> {
+        Ok(tauri::ipc::Response::new(
+            state
+                .music_cache
+                .read(&content_hash, size_bytes)
+                .await?
+                .unwrap_or_default(),
+        ))
+    }
+    #[tauri::command]
+    fn can_remember_login() -> bool {
+        cfg!(windows)
+    }
+    #[tauri::command]
+    fn load_saved_login() -> Result<Option<saved_login::SavedLogin>, String> {
+        saved_login::load()
+    }
+    #[tauri::command]
+    fn save_login(credentials: saved_login::SavedLogin) -> Result<(), String> {
+        saved_login::save(&credentials)
+    }
+    #[tauri::command]
+    fn clear_saved_login() -> Result<(), String> {
+        saved_login::clear()
     }
     #[tauri::command]
     fn media_capabilities(state: State<'_, AppState>) -> Value {
@@ -237,6 +301,9 @@ mod desktop {
                     Err(error) => (None, error),
                 };
                 app.manage(AppState {
+                    music_cache: music_cache::MusicCache::new(
+                        app.path().app_cache_dir()?.join("music"),
+                    ),
                     session: Mutex::new(None),
                     auth_generation: Arc::new(AtomicU64::new(0)),
                     event_generation: Arc::new(AtomicU64::new(0)),
@@ -244,10 +311,18 @@ mod desktop {
                     native_error,
                     http,
                 });
+                system_media::initialize(app.handle().clone());
                 Ok(())
             })
             .invoke_handler(tauri::generate_handler![
                 media_capabilities,
+                update_system_media,
+                load_playback_audio,
+                read_cached_audio,
+                can_remember_login,
+                load_saved_login,
+                save_login,
+                clear_saved_login,
                 login,
                 logout,
                 list_rooms,
@@ -262,6 +337,7 @@ mod desktop {
             .expect("Build Tauri application")
             .run(|handle, event| {
                 if matches!(event, tauri::RunEvent::Exit) {
+                    system_media::shutdown();
                     if let Ok(mut session) = handle.state::<AppState>().session.lock() {
                         session.take();
                     }

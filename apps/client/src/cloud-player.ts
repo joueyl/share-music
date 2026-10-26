@@ -1,4 +1,5 @@
-import { positionAt, type RoomSnapshot } from '@music-share/shared';
+import { positionAt, type RoomSnapshot, type TrackMetadata } from '@music-share/shared';
+import type { PlaybackSource } from './playback-source';
 
 /** A transition is ready only after the media has actually sought and buffered at its target. */
 export class CloudPlayer {
@@ -10,22 +11,44 @@ export class CloudPlayer {
   private loading = false;
   private ready = false;
   private reported = 0;
+  private releaseSource: (() => void) | undefined;
 
   constructor(
     private audio: HTMLAudioElement,
-    private url: (roomId: string, trackId: string) => Promise<string>,
+    private url: (roomId: string, trackId: string, track: TrackMetadata) => Promise<string | PlaybackSource>,
     private send: (message: unknown) => Promise<void>,
     private emit: (name: string, value: unknown) => void,
     private now = () => Date.now(),
+    private replaceAudio?: (previous: HTMLAudioElement) => HTMLAudioElement,
   ) {
+    this.bindAudio();
+  }
+  private bindAudio() {
+    const audio = this.audio;
     audio.onloadedmetadata = audio.oncanplay = audio.onseeked = () => this.prepare();
-    audio.onerror = () => this.emit('server-message', { type: 'error', error: '音乐加载失败，请检查 OSS 或格式' });
+    audio.onerror = () => {
+      // CORS enables waveform access. Older buckets can still play without analysis.
+      if (audio.crossOrigin === 'anonymous' && audio.src && !audio.src.startsWith('blob:')) {
+        this.ready = false;
+        if (this.replaceAudio) {
+          // A source node permanently owns its element. Use a fresh element for
+          // non-CORS playback rather than silently routing opaque audio into it.
+          const url = audio.src; audio.pause();
+          audio.onloadedmetadata = audio.oncanplay = audio.onseeked = audio.onerror = null;
+          this.audio = this.replaceAudio(audio); this.bindAudio();
+          this.audio.removeAttribute('crossorigin'); this.audio.src = url; this.audio.load();
+        } else { audio.removeAttribute('crossorigin'); audio.load(); }
+        return;
+      }
+      this.emit('server-message', { type: 'error', error: '音乐加载失败，请检查 OSS 或格式' });
+    };
   }
 
   clear() {
     this.room = null; this.epoch = -1; this.source = ''; ++this.generation;
     this.ready = false; this.loading = false;
     this.audio.pause(); this.audio.removeAttribute('src'); this.audio.load();
+    this.releaseSource?.(); this.releaseSource = undefined;
   }
 
   async sync(room: RoomSnapshot, offset: number) {
@@ -40,10 +63,15 @@ export class CloudPlayer {
     const source = `${room.id}/${track.ossKey}`;
     if (this.source === source) { this.prepare(); return; }
     this.source = source; this.loading = true;
+    if (this.audio.src) { this.audio.removeAttribute('src'); this.audio.load(); }
+    this.releaseSource?.(); this.releaseSource = undefined;
     const generation = ++this.generation;
     try {
-      const url = await this.url(room.id, track.id);
-      if (generation !== this.generation) return;
+      const result = await this.url(room.id, track.id, track);
+      if (generation !== this.generation) { if (typeof result !== 'string') result.release(); return; }
+      const url = typeof result === 'string' ? result : result.url;
+      this.releaseSource = typeof result === 'string' ? undefined : result.release;
+      this.audio.crossOrigin = 'anonymous';
       this.audio.src = url; this.audio.load(); this.loading = false;
       this.prepare();
     } catch (error) {

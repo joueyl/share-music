@@ -44,6 +44,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     if (!library) throw new Error('缺少媒体库，请先构建 native（Release）。');
     const resources = windowsResources(library, findLicenseDirectory(root, library, process.env.MUSIC_NATIVE_LICENSES));
     resources[join(root, 'docs/THIRD-PARTY-NOTICES.md')] = 'licenses/THIRD-PARTY-NOTICES.md';
+    resources[join(root, 'docs/licenses/souvlaki-LICENSE')] = 'licenses/souvlaki/LICENSE';
     const configDirectory = join(root, 'native/build/packaging');
     mkdirSync(configDirectory, { recursive: true });
     const config = join(configDirectory, 'tauri.windows.generated.json');

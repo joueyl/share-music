@@ -3,11 +3,28 @@ import { onMounted, ref, watch } from 'vue';
 import { Radio, Music2, ArrowRight, X, ShieldCheck, LogOut } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import { useApp } from './store';
+import { canRememberLogin, clearSavedLogin } from './saved-login';
 const app = useApp(), router = useRouter();
-const server = ref('http://127.0.0.1:3000'), name = ref(''), password = ref(''), register = ref(false);
+const name = ref(''), password = ref(''), register = ref(false);
+const remember = ref(false), rememberAvailable = ref(false), starting = ref(true);
 watch(() => app.user, () => { password.value = ''; });
 async function logout() { await app.logout(); if (!app.user) await router.replace('/'); }
-onMounted(() => app.initialize().catch(app.error));
+onMounted(async () => {
+  try {
+    await app.initialize();
+    rememberAvailable.value = await canRememberLogin();
+    if (rememberAvailable.value) {
+      const saved = await app.restoreLogin();
+      if (saved) {
+        name.value = saved.name; remember.value = true;
+      }
+    }
+  } catch (e) { app.error(e); }
+  finally { starting.value = false; }
+});
+async function changeRemember() {
+  if (!remember.value) try { await clearSavedLogin(); } catch (e) { app.error(e); }
+}
 </script>
 <template>
   <div class="shell">
@@ -22,7 +39,7 @@ onMounted(() => app.initialize().catch(app.error));
       <div v-if="app.notice" class="toast" role="alert">{{ app.notice }}<button class="icon-button" aria-label="关闭提示" @click="app.notice = ''"><X :size="16" /></button></div>
       <template v-if="!app.user">
         <div class="login-layout"><div class="login-copy"><span class="eyebrow">LISTEN TOGETHER</span><h1>音乐在这里，<br><em>我们也在。</em></h1><p>把本地收藏带进房间，<br>和朋友一起听，不错过同一个节拍。</p><div class="quality-note"><ShieldCheck :size="18" /> 无损优先 · 同步播放 · 自主权限</div></div>
-        <form class="login-card" @submit.prevent="app.login(server, name, password, register)"><h2>{{ register ? '创建账号' : '进入你的音乐空间' }}</h2><p class="muted">连接自己的共鸣服务器</p><label>服务器地址<input v-model="server" type="url" required placeholder="https://music.example.com" /></label><label>用户名<input v-model="name" autocomplete="username" minlength="2" maxlength="40" required /></label><label>密码<input v-model="password" type="password" :autocomplete="register ? 'new-password' : 'current-password'" minlength="10" maxlength="128" required placeholder="至少 10 个字符" /></label><button class="primary full" :disabled="app.busy">{{ app.busy ? '连接中…' : register ? '创建并进入' : '登录' }}<ArrowRight :size="18" /></button><button type="button" class="text-button full" @click="register = !register">{{ register ? '已有账号，去登录' : '首次使用？创建账号' }}</button><p v-if="!app.native" class="native-note">{{ app.nativeReason }}</p></form></div>
+        <form class="login-card" @submit.prevent="!starting && app.login(name, password, register, remember)"><h2>{{ register ? '创建账号' : '进入你的音乐空间' }}</h2><p class="muted">登录账号，和朋友一起听歌</p><label>用户名<input v-model="name" :disabled="starting || app.busy" autocomplete="username" minlength="2" maxlength="40" required /></label><label>密码<input v-model="password" :disabled="starting || app.busy" type="password" :autocomplete="register ? 'new-password' : 'current-password'" minlength="10" maxlength="128" required placeholder="至少 10 个字符" /></label><label v-if="rememberAvailable" class="remember-login"><input v-model="remember" type="checkbox" :disabled="starting || app.busy" @change="changeRemember" /><span>记住密码并自动登录<small>仅在个人设备上启用，退出登录会清除已保存密码</small></span></label><button class="primary full" :disabled="starting || app.busy">{{ starting || app.busy ? '连接中…' : register ? '创建并进入' : '登录' }}<ArrowRight :size="18" /></button><button type="button" class="text-button full" :disabled="starting || app.busy" @click="register = !register">{{ register ? '已有账号，去登录' : '首次使用？创建账号' }}</button><p v-if="!app.native" class="native-note">{{ app.nativeReason }}</p></form></div>
       </template>
       <router-view v-else />
     </main>

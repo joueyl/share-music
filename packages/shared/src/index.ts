@@ -13,12 +13,25 @@ export type Quality = 'lossless' | 'source' | 'opus';
 export const audioSpecSchema = z.object({ sampleRate: z.number().int().positive().max(192000), bits: z.number().int().positive().max(32), channels: z.number().int().min(1).max(8) }).strict();
 export type AudioSpec = z.infer<typeof audioSpecSchema>;
 export const trackSchema = z.object({
+  coverUrl: z.string().max(2048).url().startsWith('https://').nullable().optional(),
   ossKey: z.string().max(500).optional(), id: z.string().uuid(), name: z.string().trim().min(1).max(200), durationMs: z.number().int().min(1).max(86_400_000),
   sizeBytes: z.number().int().positive().max(10_000_000_000), spec: audioSpecSchema,
   lossless: z.boolean(), bitrateBps: z.number().int().positive().max(20_000_000), contentHash: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
 export type TrackMetadata = z.infer<typeof trackSchema>;
 export type Track = TrackMetadata & { providerId: string; available: boolean };
+export function normalizeAlbumCover(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length > 2048) return null;
+  try {
+    const url = new URL(value);
+    if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.port ||
+      !['.music.126.net', '.music.163.com'].some(domain => url.hostname.endsWith(domain))) return null;
+    url.protocol = 'https:';
+    return url.href.length <= 2048 ? url.href : null;
+  } catch { return null; }
+}
+export const chatRequestSchema = z.object({ type: z.literal('chat'), roomId: z.string().uuid(), requestId: z.string().uuid(), text: z.string().trim().min(1).max(500) }).strict();
+export type ChatMessage = { id: string; requestId: string; roomId: string; userId: string; userName: string; text: string; sentAt: number };
 export type Member = { id: string; name: string; joinedAt: number; online: boolean; overrides: Partial<Permissions>; permissions: Permissions };
 export type Playback = {
   leaderId?: string | null; sourceId: string | null; sourceEpoch: number; sourceType: 'file' | 'live' | null;
@@ -55,6 +68,9 @@ export type Action = z.infer<typeof commandSchema>;
 export const envelopeSchema = z.object({ commandId: id, roomId: id, expectedStateVersion: z.number().int().nonnegative(), action: commandSchema }).strict();
 export type Command = z.infer<typeof envelopeSchema>;
 export type ServerMessage =
+  | { type: 'chat'; data: ChatMessage }
+  | { type: 'chat-history'; roomId: string; messages: ChatMessage[] }
+  | { type: 'chat-error'; requestId: string; error: string }
   | { type: 'snapshot'; data: RoomSnapshot }
   | { type: 'result'; commandId: string; ok: boolean; error?: string; stateVersion?: number }
   | { type: 'clock'; requestId: string; clientSentAt: number; serverReceivedAt: number; serverSentAt: number }

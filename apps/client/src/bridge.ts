@@ -1,8 +1,13 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { apiResponse } from './api-response';
 import { CloudPlayer } from './cloud-player';
+import { AudioWaveform, releaseWaveformAudio } from './audio-waveform';
+import { loadPlaybackSource } from './playback-source';
+import { rememberTrackArtwork, trackArtwork } from './track-artwork';
+import { normalizeAlbumCover } from '@music-share/shared';
+import type { SystemMediaState } from './system-media';
 import { listen } from '@tauri-apps/api/event';
-import type { Command, RoomSnapshot, TrackMetadata } from '@music-share/shared';
+import type { ChatMessage, Command, RoomSnapshot, TrackMetadata } from '@music-share/shared';
 type Listener = (event: any) => void;
 let socket: WebSocket | undefined, token = '', base = '', joinedRoom: string | null = null;
 let browserGeneration = 0, reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -16,7 +21,7 @@ async function browserRequest(path: string, body?: unknown, signal?: AbortSignal
 export async function subscribe(name: string, handler: Listener) {
   const receive = handler;
   handler = event => {
-    if (roomLeft && (name === 'webrtc-status' || name === 'media-status' && event.status !== 'idle' || name === 'server-message' && ['snapshot', 'signal', 'admission'].includes(event.type))) return;
+    if (roomLeft && (name === 'webrtc-status' || name === 'media-status' && event.status !== 'idle' || name === 'server-message' && ['snapshot', 'signal', 'admission', 'chat', 'chat-history'].includes(event.type))) return;
     receive(event);
   };
   if (isTauri() && !['connection','server-message','media-status'].includes(name)) return listen(name, e => handler(e.payload));
@@ -24,6 +29,7 @@ export async function subscribe(name: string, handler: Listener) {
   const set = listeners.get(name) ?? new Set(); set.add(handler); listeners.set(name, set); return () => { set.delete(handler); nativeUnsubscribe?.(); };
 }
 export const desktop = isTauri();
+export async function updateSystemMedia(state:SystemMediaState) { if(desktop)await invoke('update_system_media',{snapshot:state}); }
 export async function login(serverUrl: string, name: string, password: string, register: boolean): Promise<{ user: { id: string; name: string } }> {
   roomLeft = false;
 
@@ -96,6 +102,21 @@ export async function leave() {
   if (socket?.readyState === WebSocket.OPEN) await send({ type: 'leave' });
 }
 export async function command(data: Command) { return send({ type: 'command', data }); }
+export async function sendChat(roomId: string, text: string, requestId: string): Promise<ChatMessage> {
+  let unsubscribe: (() => void) | undefined, timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    let resolve!: (message: ChatMessage) => void, reject!: (error: Error) => void;
+    const response = new Promise<ChatMessage>((yes, no) => { resolve = yes; reject = no; });
+    unsubscribe = await subscribe('server-message', message => {
+      if (message.type === 'chat' && message.data.roomId === roomId && message.data.requestId === requestId) resolve(message.data);
+      if (message.type === 'chat-error' && message.requestId === requestId) reject(new Error(message.error));
+    });
+    timer = setTimeout(() => reject(new Error('聊天消息发送超时，请重试')), 8000);
+    // Handle synchronous send failures through the same promise to avoid orphaned rejections.
+    void send({ type: 'chat', roomId, requestId, text }).catch(reject);
+    return await response;
+  } finally { clearTimeout(timer); unsubscribe?.(); }
+}
 export async function importFile(): Promise<TrackMetadata> {
  const file = await new Promise<File>((resolve,reject)=>{ const i=document.createElement('input'); i.type='file'; i.accept='audio/*'; i.onchange=()=>i.files?.[0]?resolve(i.files[0]):reject(new Error('CANCELLED')); i.oncancel=()=>reject(new Error('CANCELLED')); i.click(); });
  if(file.size>100*1024*1024) throw new Error('音乐不能超过100MB');
@@ -110,28 +131,46 @@ export async function importFile(): Promise<TrackMetadata> {
 export async function setVolume(volume: number) { if (audio) audio.volume=volume; }
 export async function capabilities(): Promise<{ native: boolean; reason: string; capture: boolean }> { return desktop ? invoke('media_capabilities') : { native: false, capture: false, reason: 'OSS 音乐播放与 WebSocket 同步' }; }
 
-const audio = typeof Audio === 'undefined' ? null : new Audio();
+let audio = typeof Audio === 'undefined' ? null : new Audio();
+export function createPlaybackWaveform() { return audio ? new AudioWaveform(() => audio) : null; }
+function replacePlaybackAudio(previous: HTMLAudioElement) {
+  const next = new Audio(); next.volume = previous.volume; next.muted = previous.muted; next.playbackRate = previous.playbackRate;
+  releaseWaveformAudio(previous); previous.removeAttribute('src'); previous.load();
+  audio = next; return next;
+}
 const cloudPlayer = audio ? new CloudPlayer(audio,
-  async (roomId, trackId) => (await browserRequest(`/rooms/${roomId}/music/${trackId}`)).url,
-  send, emit) : null;
+  async (roomId, trackId, track) => loadPlaybackSource(async () => (await browserRequest(`/rooms/${roomId}/music/${trackId}`)).url, desktop, track),
+  send, emit, Date.now, replacePlaybackAudio) : null;
 function clearCloud() { cloudPlayer?.clear(); }
 export async function syncCloud(room: RoomSnapshot, clockOffset: number) {
   if (room.playlist) await cloudPlayer?.sync(room, clockOffset);
 }
 setInterval(() => { if (socket?.readyState === WebSocket.OPEN) cloudPlayer?.tick(); }, 100);
 
-export type MusicSearchItem = { id: string; name: string; artists: string; album: string; durationMs: number };
+export type MusicSearchItem = { id: string; name: string; artists: string; album: string; coverUrl: string; durationMs: number };
+function albumCover(value: unknown): string {
+ return normalizeAlbumCover(value)??'';
+}
 export async function searchMusic(keywords: string, offset = 0): Promise<{ songs: MusicSearchItem[]; total: number }> {
  const query = new URLSearchParams({keywords:keywords.trim(),type:'1',limit:'20',offset:String(offset)});
  const data = await browserRequest('/netease/cloudsearch?' + query);
  if(data.code!==200) throw new Error(data.code===301?'NETEASE_LOGIN_REQUIRED':'NETEASE_UNAVAILABLE');
- const songs = (data.result?.songs ?? []).map((s:any)=>({id:String(s.id),name:String(s.name??''),artists:(s.ar??s.artists??[]).map((a:any)=>a.name).join(' / '),album:String(s.al?.name??s.album?.name??''),durationMs:Number(s.dt??s.duration??0)}));
+ const songs = (data.result?.songs ?? []).map((s:any)=>({id:String(s.id),name:String(s.name??''),artists:(s.ar??s.artists??[]).map((a:any)=>a.name).join(' / '),album:String(s.al?.name??s.album?.name??''),coverUrl:albumCover(s.al?.picUrl??s.album?.picUrl),durationMs:Number(s.dt??s.duration??0)}));
  return {songs,total:Number(data.result?.songCount??songs.length)};
 }
-export async function addSearchedMusic(roomId:string,songId:string,requestId:string) {
+export async function addSearchedMusic(roomId:string,songId:string,requestId:string,coverUrl?:string) {
  const result = await browserRequest(`/rooms/${roomId}/music/netease`,{songId,requestId});
  if(!result.ok || !result.track?.ossKey)throw new Error('MUSIC_IMPORT_FAILED');
+ rememberTrackArtwork(base,result.track.contentHash,albumCover(result.track.coverUrl)||coverUrl);
  return result.track as TrackMetadata;
+}
+export function playingTrackCover(track:TrackMetadata|null|undefined) { return trackArtwork(base,track); }
+export async function loadTrackCover(roomId:string,track:TrackMetadata):Promise<string> {
+ const known=playingTrackCover(track);if(known)return known;
+ try{
+  const data=await browserRequest(`/rooms/${roomId}/music/${track.id}/cover`);
+  const cover=albumCover(data.coverUrl);rememberTrackArtwork(base,track.contentHash,cover);return cover;
+ }catch{return '';}// Older servers may lack the backfill endpoint; never interrupt playback.
 }
 
 export async function suggestMusic(keywords:string,signal?:AbortSignal):Promise<string[]> {

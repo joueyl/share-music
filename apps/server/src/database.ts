@@ -14,6 +14,10 @@ export class Database {
   getAsset(scope: string, hash: string): string | undefined { return (this.db.prepare('SELECT oss_key FROM music_assets WHERE scope=? AND hash=?').get(scope,hash) as {oss_key:string}|undefined)?.oss_key; }
   saveAsset(scope:string,hash:string,key:string) { this.db.prepare('INSERT INTO music_assets(scope,hash,oss_key) VALUES(?,?,?) ON CONFLICT(scope,hash) DO UPDATE SET oss_key=excluded.oss_key').run(scope,hash,key); }
   getMusicSource(scope:string,source:string): TrackMetadata | undefined { const row=this.db.prepare('SELECT track FROM music_sources WHERE scope=? AND source=?').get(scope,source) as {track:string}|undefined;return row?JSON.parse(row.track):undefined; }
+  getMusicSourceByHash(scope:string,hash:string): {source:string;track:TrackMetadata} | undefined {
+    const row=this.db.prepare("SELECT source,track FROM music_sources WHERE scope=? AND json_extract(track,'$.contentHash')=? LIMIT 1").get(scope,hash) as {source:string;track:string}|undefined;
+    return row?{source:row.source,track:JSON.parse(row.track)}:undefined;
+  }
   saveMusicSource(scope:string,source:string,track:TrackMetadata) { this.db.prepare('INSERT INTO music_sources(scope,source,track) VALUES(?,?,?) ON CONFLICT(scope,source) DO UPDATE SET track=excluded.track').run(scope,source,JSON.stringify(track)); }
   getSetting(key: string): string | undefined { return (this.db.prepare('SELECT value FROM settings WHERE key=?').get(key) as { value: string } | undefined)?.value; }
   setSetting(key: string, value: string) { this.db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value); }

@@ -1,8 +1,23 @@
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
-import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, positionAt, type Action, type RoomSnapshot } from '@music-share/shared';
+import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, positionAt, type Action, type ChatMessage, type RoomSnapshot } from '@music-share/shared';
 import * as bridge from './bridge';
+import { saveLogin, loadSavedLogin, clearSavedLogin } from './saved-login';
+import { getServerUrl } from './server-config';
+import { systemMediaAction, systemMediaState, type SystemMediaEvent } from './system-media';
 const messages: Record<string, string> = {
+  PLAYBACK_AUDIO_METADATA_INVALID: '音频缓存信息无效',
+  PLAYBACK_AUDIO_INTEGRITY_FAILED: '音乐文件校验失败，请重新添加该歌曲',
+  PLAYBACK_AUDIO_CACHE_READ_FAILED: '读取音乐缓存失败，请重试',
+  PLAYBACK_AUDIO_CACHE_WRITE_FAILED: '音乐可正常播放，但缓存目录无法写入，下次可能需要重新下载',
+  PLAYBACK_AUDIO_URL_INVALID: '播放地址无效，已阻止获取本地音频',
+  PLAYBACK_AUDIO_DOWNLOAD_FAILED: '本地音频加载失败，请检查网络并重启客户端更新音频模块',
+  PLAYBACK_AUDIO_TOO_LARGE: '音频超过本地播放的 100MB 限制',
+  SAVED_LOGIN_UNSUPPORTED: '当前环境不支持安全保存密码，请手动登录',
+  SAVED_LOGIN_INVALID: '保存的登录信息无效，请重新输入',
+  SAVED_LOGIN_READ_FAILED: '无法读取系统保存的密码，请手动登录',
+  SAVED_LOGIN_WRITE_FAILED: '登录成功，但无法保存密码，下次启动请手动登录',
+  SAVED_LOGIN_DELETE_FAILED: '无法清除系统保存的密码，请重试退出登录',
   NETEASE_LOGIN_REQUIRED: '服务端网易云账号未登录，请管理员访问 /loginServe 扫码', NETEASE_UNAVAILABLE: '网易云服务暂不可用，请稍后重试',
   MUSIC_NOT_AVAILABLE: '当前账号无法获取这首歌曲的完整音源', MUSIC_TRIAL_ONLY: '这首歌曲仅能试听，不能上传完整音乐', MUSIC_AUDIO_UNSUPPORTED: '音源不是受支持的 MP3，暂无法添加',
   MUSIC_SOURCE_INVALID: '网易云返回的音源地址无效，已阻止下载', MUSIC_DOWNLOAD_FAILED: '服务端下载音乐失败，请稍后重试', MUSIC_TOO_LARGE: '音乐超过 100MB 限制', MUSIC_IMPORT_BUSY: '服务端正在处理其他音乐，请稍后重试', MUSIC_IMPORT_FAILED: '添加未完成，请重试',
@@ -20,6 +35,7 @@ export const useApp = defineStore('app', () => {
   const stun = ref<{ checking: boolean; servers: { url: string; ok: boolean; error: string }[] }>({ checking: false, servers: [] });
   const media = ref({ status: 'idle', detail: '', bufferedMs: 0, driftMs: 0, receiveBps: 0 });
   const webrtc = ref<Record<string, { roomId: string; peerId: string; sourceEpoch: number; status: string; detail: string }>>({});
+  const chatMessages = ref<ChatMessage[]>([]);
   function currentConnection(event: { roomId: string; peerId: string; sourceEpoch: number }) {
     const current = room.value;
     return !!current && event.roomId === current.id &&
@@ -34,13 +50,28 @@ export const useApp = defineStore('app', () => {
   const permission = computed(() => !!room.value && !!user.value && room.value.hostId === user.value.id ? ALL_PERMISSIONS : room.value?.members.find(m => m.id === user.value?.id)?.permissions ?? DEFAULT_PERMISSIONS);
   const host = computed(() => !!room.value && room.value.hostId === user.value?.id);
   const progress = computed(() => room.value ? positionAt(room.value.playback, now.value + offset.value) : 0);
+  let systemMediaActive=false,lastSystemMedia='';
+  function syncSystemMedia() {
+    if(!bridge.desktop||(!room.value&&!systemMediaActive))return;
+    const state=systemMediaState(room.value,user.value?.id??null,connected.value,offset.value);
+    systemMediaActive=!!room.value;
+    const signature=JSON.stringify({...state,positionMs:Math.floor(state.positionMs/1000)*1000});if(signature===lastSystemMedia)return;lastSystemMedia=signature;
+    void bridge.updateSystemMedia(state).catch(()=>{}); // Optional desktop integration must not interrupt playback.
+  }
+  watch(()=>[room.value?.id,room.value?.playback.sourceId,room.value?.playback.sourceEpoch,room.value?.playback.playState,!!room.value?.pending,connected.value,permission.value.skip,permission.value.seek],syncSystemMedia);
   function error(e: unknown) { const code = e instanceof Error ? e.message : String(e); notice.value = code.startsWith('CAPTURE_RATE_OR_CHANNEL_MISMATCH') ? `采集格式与输出设备不匹配，请刷新音源面板的设备格式，或调整 Windows 输出设备设置。${code.slice(code.indexOf(':') + 1)}` : messages[code] ?? code; }
   async function initialize() {
     if (initialized) return; initialized = true;
     const cap = await bridge.capabilities(); native.value = cap.native; nativeReason.value = cap.reason;
     await bridge.subscribe('connection', e => { if (!acceptEvents) return; connected.value = e.connected; if (e.connected) requestClock(); else stun.value = { checking: false, servers: [] }; });
     await bridge.subscribe('stun-status', e => { if (!acceptEvents) return; stun.value = e; });
+    await bridge.subscribe('playback-cache-warning', e => { if (acceptEvents) error(e.error); });
     await bridge.subscribe('media-status', e => { if (!acceptEvents) return; media.value = e; });
+    await bridge.subscribe('system-media-control', (event:SystemMediaEvent) => {
+      if(!acceptEvents)return;
+      const action=systemMediaAction(event,room.value,user.value?.id??null,connected.value);
+      if(action)void act(action);
+    });
     await bridge.subscribe('webrtc-status', event => {
       if (!acceptEvents || !currentConnection(event)) return;
       webrtc.value = { ...webrtc.value, [`${event.peerId}:${event.sourceEpoch}`]: event };
@@ -49,10 +80,15 @@ export const useApp = defineStore('app', () => {
     await bridge.subscribe('server-message', message => {
       if (!acceptEvents) return;
       if (message.type === 'snapshot') {
+        if (room.value?.id !== message.data.id) chatMessages.value = [];
         if (room.value?.id !== message.data.id) webrtc.value = {};
         if (!clockSynced && Number.isFinite(message.data.serverNow)) offset.value = message.data.serverNow - Date.now();
         room.value = message.data; void bridge.syncCloud(message.data, offset.value);
         webrtc.value = Object.fromEntries(Object.entries(webrtc.value).filter(([, event]) => currentConnection(event)));
+      }
+      else if (message.type === 'chat-history' && message.roomId === room.value?.id) chatMessages.value = message.messages.slice(-100);
+      else if (message.type === 'chat' && message.data.roomId === room.value?.id) {
+        if (!chatMessages.value.some(m => m.id === message.data.id)) chatMessages.value = [...chatMessages.value, message.data].slice(-100);
       }
       else if (message.type === 'error' || message.type === 'result' && !message.ok || message.type === 'admission' && !message.ok) error(message.error);
       else if (message.type === 'clock') {
@@ -66,16 +102,47 @@ export const useApp = defineStore('app', () => {
     });
     clockTimer = setInterval(() => { now.value = Date.now(); }, 50);
     setInterval(() => { if (connected.value) requestClock(); }, 5000);
+    setInterval(syncSystemMedia,1000);
   }
-  async function login(serverUrl: string, name: string, password: string, register: boolean) {
-    acceptEvents = true; clockSynced = false; offset.value = 0; busy.value = true; notice.value = ''; try { user.value = (await bridge.login(serverUrl, name, password, register)).user; } catch (e) { error(e); } finally { busy.value = false; }
+  async function login(name: string, password: string, register: boolean, remember = false) {
+    if (busy.value) return;
+    acceptEvents = true; clockSynced = false; offset.value = 0; busy.value = true; notice.value = '';
+    try {
+      const serverUrl = getServerUrl();
+      user.value = (await bridge.login(serverUrl, name, password, register)).user;
+      // Persist only after authentication succeeds; never use browser storage for passwords.
+      try {
+        if (remember) await saveLogin({ serverUrl: new URL(serverUrl).origin, name, password });
+        else await clearSavedLogin();
+      } catch (e) { error(e); }
+    } catch (e) {
+      if ((e instanceof Error ? e.message : String(e)) === 'INVALID_CREDENTIALS') {
+        try { await clearSavedLogin(); } catch { /* Preserve the authentication error. */ }
+      }
+      error(e);
+    } finally { busy.value = false; }
+  }
+  async function restoreLogin() {
+    const saved = await loadSavedLogin();
+    if (!saved) return null;
+    const serverUrl = getServerUrl();
+    let savedOrigin = '';
+    try { savedOrigin = new URL(saved.serverUrl).origin; } catch { /* Invalid or legacy credentials are not reused. */ }
+    if (savedOrigin !== serverUrl) {
+      notice.value = '当前环境的服务器已更改，请重新登录';
+      return null;
+    }
+    await login(saved.name, saved.password, false, true);
+    return { name: saved.name };
   }
   async function logout() {
     if (busy.value) return;
     busy.value = true; acceptEvents = false;
     try {
+      await clearSavedLogin();
       await bridge.logout();
       user.value = null; room.value = null; connected.value = false; notice.value = ''; offset.value = 0;
+      chatMessages.value = [];
       media.value = { status: 'idle', detail: '', bufferedMs: 0, driftMs: 0, receiveBps: 0 };
       webrtc.value = {};
       stun.value = { checking: false, servers: [] };
@@ -89,10 +156,10 @@ export const useApp = defineStore('app', () => {
   async function addFile(instant = false) { try { const track = await bridge.importFile(); await act({ type: instant ? 'instant' : 'enqueue', payload: track }); } catch (e) { if (String(e) !== 'Error: CANCELLED') error(e); } }
   async function exitRoom() {
     try {
-      await bridge.leave(); room.value = null;
+      await bridge.leave(); room.value = null; chatMessages.value = [];
       webrtc.value = {};
       media.value = { status: 'idle', detail: '', bufferedMs: 0, driftMs: 0, receiveBps: 0 };
     } catch (e) { error(e); }
   }
-  return { user, room, connected, notice, native, nativeReason, media, stun, webrtcWarnings, busy, host, permission, progress, offset, initialize, login, logout, act, addFile, exitRoom, error };
+  return { user, room, chatMessages, connected, notice, native, nativeReason, media, stun, webrtcWarnings, busy, host, permission, progress, offset, initialize, login, restoreLogin, logout, act, addFile, exitRoom, error };
 });

@@ -1,0 +1,53 @@
+import { afterEach, expect, it, vi } from 'vitest';
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
+import { invoke } from '@tauri-apps/api/core';
+import { loadPlaybackSource } from '../src/playback-source';
+import { trackArtwork, rememberTrackArtwork } from '../src/track-artwork';
+import { mp3WithPictures, png } from './fixtures/embedded-audio';
+const metadata = { contentHash:'a'.repeat(64), sizeBytes:4, name:'song.mp3', ossKey:'music/files/song.mp3' };
+const key = {contentHash:metadata.contentHash,sizeBytes:metadata.sizeBytes};
+afterEach(() => { vi.restoreAllMocks(); vi.mocked(invoke).mockReset(); });
+it('downloads and caches a miss and plays the same native bytes as a local Blob', async () => {
+  const bytes = new Uint8Array([255,251,144,0]).buffer;
+  vi.mocked(invoke).mockResolvedValueOnce(new ArrayBuffer(0)).mockResolvedValueOnce(bytes);
+  const create = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:local-song');
+  const revoke = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => {});
+  const getUrl = vi.fn(async () => 'https://bucket.oss-cn-hangzhou.aliyuncs.com/music/song.mp3');
+  const source = await loadPlaybackSource(getUrl, true, metadata);
+  expect(invoke).toHaveBeenNthCalledWith(1,'read_cached_audio',key);
+  expect(invoke).toHaveBeenNthCalledWith(2,'load_playback_audio',{url:await getUrl.mock.results[0].value,...key});
+  expect(getUrl).toHaveBeenCalledOnce();
+  if (typeof source === 'string') throw new Error('expected local source');
+  const blob = create.mock.calls[0][0] as Blob; expect(blob.type).toBe('audio/mpeg');
+  expect(new Uint8Array(await blob.arrayBuffer())).toEqual(new Uint8Array(bytes));
+  source.release(); expect(revoke).toHaveBeenCalledWith('blob:local-song');
+});
+it('reads a persistent cache hit without requesting a signed URL or downloading from OSS', async () => {
+  vi.mocked(invoke).mockResolvedValueOnce(new Uint8Array([1,2,3,4]).buffer);
+  vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:cached-song');
+  const getUrl=vi.fn(async()=>{throw new Error('offline or signed URL expired');});
+  const source=await loadPlaybackSource(getUrl,true,metadata);
+  expect(typeof source).toBe('object');expect(getUrl).not.toHaveBeenCalled();
+  expect(invoke).toHaveBeenCalledExactlyOnceWith('read_cached_audio',key);
+});
+it('leaves browser playback unchanged and rejects missing native audio bytes', async () => {
+  expect(await loadPlaybackSource('https://oss.test/song', false, metadata)).toBe('https://oss.test/song');
+  expect(invoke).not.toHaveBeenCalled();
+  vi.mocked(invoke).mockResolvedValue(new ArrayBuffer(0));
+  await expect(loadPlaybackSource('https://oss.test/song', true, metadata)).rejects.toThrow('PLAYBACK_AUDIO_DOWNLOAD_FAILED');
+});
+it('extracts the embedded image from cached audio, gives it priority, and releases both local URLs',async()=>{
+  const bytes=mp3WithPictures(),track={...metadata,contentHash:'f'.repeat(64),sizeBytes:bytes.length};
+  const server='https://share.jouei.cn',remote='https://p1.music.126.net/network.jpg';
+  rememberTrackArtwork(server,track.contentHash,remote);
+  vi.mocked(invoke).mockResolvedValueOnce(bytes.buffer);
+  const create=vi.spyOn(URL,'createObjectURL').mockImplementation(blob=>(blob as Blob).type==='image/png'?'blob:embedded-cover':'blob:audio');
+  const revoke=vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{}),getUrl=vi.fn(async()=>{throw new Error('must not download');});
+  const source=await loadPlaybackSource(getUrl,true,track);
+  expect(getUrl).not.toHaveBeenCalled();expect(trackArtwork(server,{...track,coverUrl:remote})).toBe('blob:embedded-cover');
+  const picture=create.mock.calls.map(([blob])=>blob as Blob).find(blob=>blob.type==='image/png')!;
+  expect(new Uint8Array(await picture.arrayBuffer())).toEqual(png);
+  if(typeof source==='string')throw new Error('expected local source');
+  source.release();source.release();
+  expect(trackArtwork(server,track)).toBe(remote);expect(revoke.mock.calls).toEqual([['blob:audio'],['blob:embedded-cover']]);
+});
