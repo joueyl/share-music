@@ -68,6 +68,7 @@ export type Action = z.infer<typeof commandSchema>;
 export const envelopeSchema = z.object({ commandId: id, roomId: id, expectedStateVersion: z.number().int().nonnegative(), action: commandSchema }).strict();
 export type Command = z.infer<typeof envelopeSchema>;
 export type ServerMessage =
+  | { type: 'chat-result'; requestId: string; data: ChatMessage }
   | { type: 'chat'; data: ChatMessage }
   | { type: 'chat-history'; roomId: string; messages: ChatMessage[] }
   | { type: 'chat-error'; requestId: string; error: string }

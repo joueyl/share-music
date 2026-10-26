@@ -71,10 +71,13 @@ it('isolates room chat, validates messages, confirms retries and restores histor
  for(const [client,id] of [[host,room.id],[member,room.id],[outsider,other.id]] as const){client.send({type:'join',roomId:id});await client.wait(m=>m.type==='chat-history');}
  const requestId=randomUUID();const payload={type:'chat',roomId:room.id,requestId,text:'  一起听歌 🎵\n你好  '};
  host.send(payload);
+ const receipt=await host.wait(m=>m.type==='chat-result'&&m.requestId===requestId);
  const own=(await host.wait(m=>m.type==='chat'&&m.data.requestId===requestId)).data;
+ expect(receipt.data).toEqual(own);
  const received=(await member.wait(m=>m.type==='chat'&&m.data.requestId===requestId)).data;
  expect(received).toEqual(own);expect(own).toMatchObject({roomId:room.id,userId:a.user.id,userName:'chat-alice',text:'一起听歌 🎵\n你好'});expect(own.sentAt).toBeGreaterThan(0);
  host.send(payload);expect((await host.wait(m=>m.type==='chat'&&m.data.requestId===requestId)).data.id).toBe(own.id);
+ expect((await host.wait(m=>m.type==='chat-result'&&m.requestId===requestId)).data).toEqual(own);
  const reuse={...payload,text:'different'};host.send(reuse);expect((await host.wait(m=>m.type==='chat-error')).error).toBe('COMMAND_ID_REUSED');
  for(const text of ['   ','x'.repeat(501)]){const id=randomUUID();member.send({type:'chat',roomId:room.id,requestId:id,text});expect((await member.wait(m=>m.type==='chat-error'&&m.requestId===id)).error).toBe('INVALID_REQUEST');}
  const forged=randomUUID();member.send({type:'chat',roomId:room.id,requestId:forged,text:'test',userName:'fake'});expect((await member.wait(m=>m.type==='chat-error'&&m.requestId===forged)).error).toBe('INVALID_REQUEST');

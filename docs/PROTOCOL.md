@@ -12,6 +12,19 @@ WebSocket `/ws` 建立后 5 秒内发送 `auth` 与 token；成功后发送 `joi
 
 客户端发送 clock 消息测量往返；采用低延迟样本估计服务器偏移，渲染时本地计算锚点后的进度。服务端快照始终是权威状态。
 
+## 房间聊天与生产部署检查
+
+客户端通过同一条 `/ws` 发送 `{type:"chat",roomId,requestId,text}`，`requestId` 为 UUID。
+服务端保存消息后向发送者返回 `{type:"chat-result",requestId,data}`，再向房内广播 `{type:"chat",data}`；失败返回 `{type:"chat-error",requestId,error}`。
+客户端兼容旧版仅广播的成功确认；收到旧服务端 `UNKNOWN_MESSAGE` 时提示更新服务端，不再笼统等待超时。
+相同用户、相同 requestId 的重试在最近 100 条历史范围内返回原消息，不重复广播；超时只代表未确认，并不保证消息未发送。
+
+生产环境必须同步更新服务端与客户端，不能只重新打包桌面客户端。
+使用仓库提供的 Compose 部署时，在仓库根目录执行 `docker compose -f deploy/compose.yml up -d --build api`，保留现有数据卷，不要使用 `down -v`。
+更新后检查 `/api/health` 返回 `chatProtocolVersion: 1`，再让客户端重新连接。
+缺少该字段只能说明未部署本次回执版本，不能单独据此判定旧服务端是否支持聊天。
+若经负载均衡部署了多个实例，当前房间状态与聊天历史均在进程内，不能无状态地跨实例分发同一房间的连接。
+
 ## 媒体
 
 Rust `packet.rs` 定义固定 76 字节头：魔数/版本、编码、规格、音源代次、块序号、媒体位置、分片索引/数量、总长及 SHA-256。消息上限为协商上限与 16KiB 的较小值；单块 ≤256KiB，最多 64 个在途重组，超时 5 秒。接收端核对当前代次、规格和校验。

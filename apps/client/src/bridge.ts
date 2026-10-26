@@ -12,6 +12,8 @@ type Listener = (event: any) => void;
 let socket: WebSocket | undefined, token = '', base = '', joinedRoom: string | null = null;
 let browserGeneration = 0, reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let roomLeft = false;
+const pendingChats = new Set<(error: Error) => void>();
+function cancelChats(code: string) { for (const reject of pendingChats) reject(new Error(code)); }
 const listeners = new Map<string, Set<Listener>>();
 function emit(name: string, value: unknown) { listeners.get(name)?.forEach(fn => fn(value)); }
 async function browserRequest(path: string, body?: unknown, signal?: AbortSignal) {
@@ -21,7 +23,7 @@ async function browserRequest(path: string, body?: unknown, signal?: AbortSignal
 export async function subscribe(name: string, handler: Listener) {
   const receive = handler;
   handler = event => {
-    if (roomLeft && (name === 'webrtc-status' || name === 'media-status' && event.status !== 'idle' || name === 'server-message' && ['snapshot', 'signal', 'admission', 'chat', 'chat-history'].includes(event.type))) return;
+    if (roomLeft && (name === 'webrtc-status' || name === 'media-status' && event.status !== 'idle' || name === 'server-message' && ['snapshot', 'signal', 'admission', 'chat', 'chat-result', 'chat-history'].includes(event.type))) return;
     receive(event);
   };
   if (isTauri() && !['connection','server-message','media-status'].includes(name)) return listen(name, e => handler(e.payload));
@@ -31,6 +33,7 @@ export async function subscribe(name: string, handler: Listener) {
 export const desktop = isTauri();
 export async function updateSystemMedia(state:SystemMediaState) { if(desktop)await invoke('update_system_media',{snapshot:state}); }
 export async function login(serverUrl: string, name: string, password: string, register: boolean): Promise<{ user: { id: string; name: string } }> {
+  cancelChats('SESSION_EXPIRED');
   roomLeft = false;
 
 
@@ -56,12 +59,14 @@ function connectBrowser() {
   };
   current.onclose = event => {
     if (!active()) return;
+    cancelChats('CHAT_DISCONNECTED');
     audio?.pause(); emit('connection', { connected: false });
     if (event.code === 4001 || event.code === 4009) { emit('server-message', { type: 'error', error: 'SESSION_EXPIRED' }); return; }
     reconnectTimer = setTimeout(() => { if (active()) connectBrowser(); }, 2000);
   };
 }
 export async function logout(): Promise<void> {
+  cancelChats('SESSION_EXPIRED');
   clearCloud();
   if (desktop) await invoke('logout');
   ++browserGeneration;
@@ -80,6 +85,7 @@ export async function send(message: unknown): Promise<void> {
   socket.send(JSON.stringify(message));
 }
 export async function join(roomId: string): Promise<void> {
+  cancelChats('NOT_IN_ROOM');
   roomLeft = false;
   let unsubscribe: (() => void) | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -97,6 +103,7 @@ export async function join(roomId: string): Promise<void> {
   } finally { clearTimeout(timer); unsubscribe?.(); }
 }
 export async function leave() {
+  cancelChats('NOT_IN_ROOM');
   roomLeft = true; joinedRoom = null;
   clearCloud();
   if (socket?.readyState === WebSocket.OPEN) await send({ type: 'leave' });
@@ -104,18 +111,32 @@ export async function leave() {
 export async function command(data: Command) { return send({ type: 'command', data }); }
 export async function sendChat(roomId: string, text: string, requestId: string): Promise<ChatMessage> {
   let unsubscribe: (() => void) | undefined, timer: ReturnType<typeof setTimeout> | undefined;
+  let cancel: ((error: Error) => void) | undefined;
   try {
     let resolve!: (message: ChatMessage) => void, reject!: (error: Error) => void;
     const response = new Promise<ChatMessage>((yes, no) => { resolve = yes; reject = no; });
+    // Observe cancellation even while the native event subscription is being installed.
+    void response.catch(() => {});
+    let cancelled = false;
+    cancel = error => { cancelled = true; reject(error); }; pendingChats.add(cancel);
+    const generation = browserGeneration, current = socket;
     unsubscribe = await subscribe('server-message', message => {
       if (message.type === 'chat' && message.data.roomId === roomId && message.data.requestId === requestId) resolve(message.data);
+      if (message.type === 'chat-result' && message.requestId === requestId && message.data.roomId === roomId && message.data.requestId === requestId) resolve(message.data);
       if (message.type === 'chat-error' && message.requestId === requestId) reject(new Error(message.error));
+      // Older deployments reply with an uncorrelated protocol error instead of chat-error.
+      if (message.type === 'error' && ['UNKNOWN_MESSAGE', 'INVALID_REQUEST', 'NOT_IN_ROOM', 'UNAUTHORIZED', 'SESSION_EXPIRED', 'RATE_LIMITED'].includes(message.error)) {
+        reject(new Error(message.error === 'UNKNOWN_MESSAGE' ? 'CHAT_UNSUPPORTED' : message.error));
+      }
     });
-    timer = setTimeout(() => reject(new Error('聊天消息发送超时，请重试')), 8000);
+    timer = setTimeout(() => reject(new Error('聊天消息发送超时，尚未收到确认；可重试，若持续失败请检查服务端聊天版本')), 8000);
     // Handle synchronous send failures through the same promise to avoid orphaned rejections.
-    void send({ type: 'chat', roomId, requestId, text }).catch(reject);
+    if (cancelled) { /* Do not send after leaving or changing sessions during subscription. */ }
+    else if (generation !== browserGeneration || current !== socket) reject(new Error('SESSION_EXPIRED'));
+    else if (roomLeft) reject(new Error('NOT_IN_ROOM'));
+    else void send({ type: 'chat', roomId, requestId, text }).catch(reject);
     return await response;
-  } finally { clearTimeout(timer); unsubscribe?.(); }
+  } finally { clearTimeout(timer); unsubscribe?.(); if (cancel) pendingChats.delete(cancel); }
 }
 export async function importFile(): Promise<TrackMetadata> {
  const file = await new Promise<File>((resolve,reject)=>{ const i=document.createElement('input'); i.type='file'; i.accept='audio/*'; i.onchange=()=>i.files?.[0]?resolve(i.files[0]):reject(new Error('CANCELLED')); i.oncancel=()=>reject(new Error('CANCELLED')); i.click(); });

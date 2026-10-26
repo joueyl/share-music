@@ -153,6 +153,32 @@ it('waits for chat confirmation, propagates rejection and times out without losi
  const timed=bridge.sendChat('room','hello','timed');const timeout=expect(timed).rejects.toThrow('发送超时');await vi.advanceTimersByTimeAsync(8001);await timeout;
  await bridge.logout();await expect(bridge.sendChat('room','hello','offline')).rejects.toThrow('控制连接未就绪');
 });
+it('accepts an independent chat receipt without waiting for a broadcast',async()=>{
+ const bridge=await import('../src/bridge');await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
+ const socket=Socket.instances[0];socket.open();
+ const data={id:'message',requestId:'request',roomId:'room',userId:'test-user',userName:'tester',text:'hello',sentAt:Date.now()};
+ const pending=bridge.sendChat('room','hello','request');await Promise.resolve();
+ socket.message({type:'chat-result',requestId:'other',data});
+ socket.message({type:'chat-result',requestId:'request',data});await expect(pending).resolves.toEqual(data);
+});
+it('reports an old server protocol rejection immediately instead of timing out',async()=>{
+ const bridge=await import('../src/bridge');await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
+ const socket=Socket.instances[0];socket.open();
+ for(const [error,expected] of [['UNKNOWN_MESSAGE','CHAT_UNSUPPORTED'],['INVALID_REQUEST','INVALID_REQUEST']]){
+  const pending=bridge.sendChat('room','hello','request');const rejected=expect(pending).rejects.toThrow(expected);await Promise.resolve();
+  socket.message({type:'error',error});await rejected;
+ }
+});
+it('ends pending chat confirmation on disconnect or room leave',async()=>{
+ const bridge=await import('../src/bridge');await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
+ const socket=Socket.instances[0];socket.open();
+ const pending=bridge.sendChat('room','hello','request');const disconnected=expect(pending).rejects.toThrow('CHAT_DISCONNECTED');await Promise.resolve();
+ socket.close();await disconnected;
+ socket.open();
+ const next=bridge.sendChat('room','hello','retry');const left=expect(next).rejects.toThrow('NOT_IN_ROOM');
+ await bridge.leave();await left;
+ expect(socket.sent.some(m=>m.type==='chat'&&m.requestId==='retry')).toBe(false);
+});
 it('keeps room chat isolated, deduplicated and bounded and clears it on leave',async()=>{
  const {useApp}=await import('../src/store');const app=useApp();await app.initialize();await app.login('tester','test-password',false);
  const socket=Socket.instances[0];socket.open();socket.message({type:'authenticated'});
@@ -160,12 +186,14 @@ it('keeps room chat isolated, deduplicated and bounded and clears it on leave',a
  const message=(i:number)=>({id:`msg-${i}`,roomId:'room',requestId:`request-${i}`,userId:'test-user',userName:'tester',text:`hello ${i}`,sentAt:Date.now()});
  socket.message({type:'chat-history',roomId:'other',messages:[message(0)]});expect(app.chatMessages).toEqual([]);
  socket.message({type:'chat-history',roomId:'room',messages:[message(0)]});
+ socket.message({type:'chat-result',requestId:'request-0',data:message(0)});expect(app.chatMessages).toHaveLength(1);
  socket.message({type:'chat',data:message(0)});expect(app.chatMessages).toHaveLength(1);
  socket.message({type:'chat',data:{...message(1),roomId:'other'}});expect(app.chatMessages).toHaveLength(1);
  for(let i=1;i<=105;i++)socket.message({type:'chat',data:message(i)});
  expect(app.chatMessages).toHaveLength(100);expect(app.chatMessages[0].id).toBe('msg-6');
  socket.message({type:'snapshot',data:{...snapshot,id:'next'}});expect(app.chatMessages).toEqual([]);
- socket.message({type:'snapshot',data:snapshot});socket.message({type:'chat',data:message(1)});await app.exitRoom();expect(app.chatMessages).toEqual([]);
+ socket.message({type:'snapshot',data:snapshot});socket.message({type:'chat-result',requestId:'request-1',data:message(1)});expect(app.chatMessages).toHaveLength(1);await app.exitRoom();expect(app.chatMessages).toEqual([]);
+ socket.message({type:'chat-result',requestId:'request-2',data:message(2)});expect(app.chatMessages).toEqual([]);
  socket.message({type:'chat',data:message(2)});expect(app.chatMessages).toEqual([]);
 });
 

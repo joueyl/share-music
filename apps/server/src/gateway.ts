@@ -62,6 +62,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           const prior = history.find(m => m.userId === s!.user.id && m.requestId === v.requestId);
           if (prior) {
             if (prior.text !== v.text) throw new DomainError('COMMAND_ID_REUSED');
+            this.send(ws, { type: 'chat-result', requestId: v.requestId, data: prior });
             this.send(ws, { type: 'chat', data: prior }); return;
           }
           this.app.limit(`chat:${s.user.id}`, 10, 10000);
@@ -69,6 +70,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           history.push(data); if (history.length > 100) history.shift();
           this.chats.delete(v.roomId); this.chats.set(v.roomId, history);
           if (this.chats.size > 1000) this.chats.delete(this.chats.keys().next().value!);
+          this.send(ws, { type: 'chat-result', requestId: v.requestId, data });
           for (const [peer, session] of this.sessions) if (session.roomId === v.roomId) this.send(peer, { type: 'chat', data });
           return;
         }

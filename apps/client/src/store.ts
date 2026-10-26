@@ -87,7 +87,7 @@ export const useApp = defineStore('app', () => {
         webrtc.value = Object.fromEntries(Object.entries(webrtc.value).filter(([, event]) => currentConnection(event)));
       }
       else if (message.type === 'chat-history' && message.roomId === room.value?.id) chatMessages.value = message.messages.slice(-100);
-      else if (message.type === 'chat' && message.data.roomId === room.value?.id) {
+      else if ((message.type === 'chat' || message.type === 'chat-result') && message.data.roomId === room.value?.id) {
         if (!chatMessages.value.some(m => m.id === message.data.id)) chatMessages.value = [...chatMessages.value, message.data].slice(-100);
       }
       else if (message.type === 'error' || message.type === 'result' && !message.ok || message.type === 'admission' && !message.ok) error(message.error);

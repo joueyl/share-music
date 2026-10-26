@@ -46,7 +46,14 @@ async function submit() {
   } catch (e) {
     if (!alive || app.room?.id !== roomId) return;
     const code = e instanceof Error ? e.message : String(e);
-    error.value = code === 'RATE_LIMITED' ? '发送太快了，请稍后重试' : code === 'NOT_IN_ROOM' ? '你已离开房间，无法发送消息' : code === 'INVALID_REQUEST' ? '消息不能为空，且最多 500 字' : code;
+    const errors: Record<string, string> = {
+      RATE_LIMITED: '发送太快了，请稍后重试', NOT_IN_ROOM: '你已离开房间，无法发送消息',
+      INVALID_REQUEST: '服务端拒绝了聊天请求，请检查消息格式及客户端与服务端版本',
+      CHAT_UNSUPPORTED: '当前服务端不支持聊天，请更新生产环境服务端后重连',
+      CHAT_DISCONNECTED: '连接已断开，消息尚未确认；重连后可重试',
+      SESSION_EXPIRED: '登录已失效，请重新登录', UNAUTHORIZED: '登录已失效，请重新登录',
+    };
+    error.value = errors[code] ?? code;
   } finally { if (alive) sending.value = false; }
 }
 </script>

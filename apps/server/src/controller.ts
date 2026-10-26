@@ -46,7 +46,7 @@ export class ApiController {
     }catch(e){httpError(e);}
   }
   private user(header?: string) { if (!header?.startsWith('Bearer ')) throw new DomainError('UNAUTHORIZED'); return this.app.auth.verify(header.slice(7)); }
-  @Get('health') health() { return { ok: true, protocolVersion: 1, relayUsedBps: this.app.capacity.usedBps, relayBudgetBps: this.app.capacity.budget, turnProvider: this.app.turn.provider, publicRelayUsedBps: this.app.publicCapacity.usedBps, publicRelayBudgetBps: this.app.publicCapacity.budget }; }
+  @Get('health') health() { return { ok: true, protocolVersion: 1, chatProtocolVersion: 1, relayUsedBps: this.app.capacity.usedBps, relayBudgetBps: this.app.capacity.budget, turnProvider: this.app.turn.provider, publicRelayUsedBps: this.app.publicCapacity.usedBps, publicRelayBudgetBps: this.app.publicCapacity.budget }; }
   @Post('login') async login(@Body() body: unknown, @Req() req: Request) {
     try { this.app.limit(`login:${req.ip}`, 10, 60000); const v = loginSchema.parse(body); return await this.app.auth.login(v.name, v.password, v.register); } catch (e) { httpError(e); }
   }
