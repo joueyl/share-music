@@ -48,17 +48,17 @@ test('rejects mismatched tags and bad server URLs before writing action output',
 });
 test('collects only the installer, its real SHA-256 and versioned changelog, refusing stale artifacts',async t=>{
  const f=fixture(t),bytes=Buffer.from('installer fixture');writeFileSync(join(f.nsis,'Music Share setup.exe'),bytes);writeFileSync(join(f.nsis,'not-for-release.txt'),'ignored');
- const result=await collectRelease(f.root);
+ const result=await collectRelease(f.root,'windows-x64',{});
  assert.deepEqual(readdirSync(result.output).sort(),[result.name,'RELEASE-NOTES.md','SHA256SUMS-windows-x64.txt'].sort());
  assert.equal(readFileSync(join(result.output,result.name)).equals(bytes),true);
  assert.equal(readFileSync(join(result.output,'SHA256SUMS-windows-x64.txt'),'utf8'),`${createHash('sha256').update(bytes).digest('hex')}  ${result.name}\n`);
  assert.ok(readFileSync(join(result.output,'RELEASE-NOTES.md'),'utf8').startsWith(`# 共鸣 Music Share v${f.version}`));
- await assert.rejects(collectRelease(f.root),/非空/);
+ await assert.rejects(collectRelease(f.root,'windows-x64',{}),/非空/);
 });
 test('fails on absent or ambiguous installers rather than uploading a wrong package',async t=>{
- const f=fixture(t);await assert.rejects(collectRelease(f.root),/恰好一个/);
+ const f=fixture(t);await assert.rejects(collectRelease(f.root,'windows-x64',{}),/恰好一个/);
  writeFileSync(join(f.nsis,'old.exe'),'old');writeFileSync(join(f.nsis,'new.exe'),'new');
- await assert.rejects(collectRelease(f.root),/恰好一个/);
+ await assert.rejects(collectRelease(f.root,'windows-x64',{}),/恰好一个/);
 });
 test('workflow waits for Windows and every Unix matrix build and gives build jobs no write token',()=>{
  const workflow=read(project,'.github/workflows/desktop-release.yml').replace(/\r\n/g,'\n');
@@ -88,7 +88,7 @@ async function allArtifacts(t,signing){
  return {...f,downloaded};
 }
 test('collects Linux DEB/AppImage and two distinct macOS architecture packages then verifies all five installers',async t=>{
- const f=await allArtifacts(t),result=await mergeRelease(f.root);
+ const f=await allArtifacts(t),result=await mergeRelease(f.root,{});
  assert.equal(result.files.length,5);assert.equal(new Set(result.files).size,5);
  assert.equal(readdirSync(result.output).length,7);
  for(const target of ['macos-x64','macos-arm64'])assert.ok(result.files.some(name=>name.endsWith(`${target}.dmg`)));
@@ -97,17 +97,17 @@ test('collects Linux DEB/AppImage and two distinct macOS architecture packages t
 test('refuses corrupted installers before writing a merged release',async t=>{
  const f=await allArtifacts(t),target='linux-x64',directory=join(f.downloaded,`music-share-${target}-${f.version}`);
  writeFileSync(join(directory,`music-share-${f.version}-${target}.deb`),'corrupted');
- await assert.rejects(mergeRelease(f.root),/SHA-256/);assert.equal(existsSync(join(f.root,'release-artifacts')),false);
+ await assert.rejects(mergeRelease(f.root,{}),/SHA-256/);assert.equal(existsSync(join(f.root,'release-artifacts')),false);
 });
 test('refuses mismatched notes, incomplete platform sets and unsupported targets',async t=>{
  const f=await allArtifacts(t),directory=join(f.downloaded,`music-share-macos-arm64-${f.version}`);
  writeFileSync(join(directory,'RELEASE-NOTES.md'),'wrong version');
- await assert.rejects(mergeRelease(f.root),/版本说明不匹配/);
+ await assert.rejects(mergeRelease(f.root,{}),/版本说明不匹配/);
  assert.ok(resolve(directory).startsWith(resolve(f.root)+sep));
  assert.ok(resolve(join(f.downloaded,'stale-version')).startsWith(resolve(f.root)+sep));
  renameSync(directory,join(f.downloaded,'stale-version'));
- await assert.rejects(mergeRelease(f.root),/未齐全或版本不匹配/);
- await assert.rejects(collectRelease(f.root,'../../outside'),/不支持/);
+ await assert.rejects(mergeRelease(f.root,{}),/未齐全或版本不匹配/);
+ await assert.rejects(collectRelease(f.root,'../../outside',{}),/不支持/);
 });
 test('generates a signed four-platform latest.json for the configured repository, including macOS update archives',async t=>{
  const signing=syntheticSigning(),f=await allArtifacts(t,signing);
@@ -123,4 +123,17 @@ test('fails early for partial signing setup instead of exposing secrets or shipp
  assert.throws(()=>prepareRelease(f.root,{UPDATER_PUBLIC_KEY:signing.key}),/缺少/);
  assert.throws(()=>prepareRelease(f.root,{TAURI_SIGNING_PRIVATE_KEY:'synthetic-secret'}),/缺少/);
  assert.throws(()=>prepareRelease(f.root,{UPDATER_PUBLIC_KEY:signing.key,TAURI_SIGNING_PRIVATE_KEY:'synthetic-secret',GITHUB_REPOSITORY:'other/repo'}),/仓库/);
+});
+
+test('unsigned test fixtures stay isolated when Actions exports an updater public key',async t=>{
+ const previous=process.env.UPDATER_PUBLIC_KEY;
+ try{
+  process.env.UPDATER_PUBLIC_KEY=syntheticSigning().key;
+  const f=await allArtifacts(t),result=await mergeRelease(f.root,{});
+  assert.equal(result.files.length,5);
+  assert.equal(existsSync(join(result.output,'latest.json')),false);
+ }finally{
+  if(previous===undefined)delete process.env.UPDATER_PUBLIC_KEY;
+  else process.env.UPDATER_PUBLIC_KEY=previous;
+ }
 });
