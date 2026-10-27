@@ -2,6 +2,8 @@
 
 ## [未发布]
 
+## [0.2.2] - 2026-10-27
+
 ### 修复
 - 补齐 Linux 的 autoconf-archive，修复 libxcrypt 依赖构建失败。
 - 补齐 Linux 和 macOS 的 NASM 构建依赖，修复 FFmpeg 在 x64 runner 上构建失败。
