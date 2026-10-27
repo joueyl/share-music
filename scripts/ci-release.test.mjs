@@ -72,6 +72,7 @@ test('workflow waits for Windows and every Unix matrix build and gives build job
  for(const target of ['linux-x64','macos-x64','macos-arm64'])assert.ok(workflow.includes(`target: ${target}`));
  assert.match(workflow,/fail-fast: false/);assert.match(workflow,/node scripts\/ci-release.mjs merge/);
  assert.match(workflow,/sudo apt-get install -y[^\n]*\bnasm\b/);
+ assert.match(workflow,/sudo apt-get install -y[^\n]*\bautoconf autoconf-archive automake libtool\b/);
  assert.match(workflow,/brew install[^\n]*\bnasm\b/);
 });
 
