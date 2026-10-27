@@ -12,6 +12,7 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "共鸣 · Music Share",
         "width": 1320,
         "height": 900,
@@ -24,6 +25,7 @@
     }
   },
   "bundle": {
+    "icon": ["icons/icon.ico", "icons/icon.png", "icons/icon.icns"],
     "createUpdaterArtifacts": false,
     "active": false,
     "targets": "all",

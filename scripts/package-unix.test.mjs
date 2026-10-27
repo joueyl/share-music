@@ -35,6 +35,7 @@ test('Linux staging patches copies, leaves originals intact and maps media into 
   assert.equal(config.bundle.resources[join(staging, basename(f.library))], 'media/libmusic_native.so');
   assert(config.bundle.linux.deb.depends.includes('libpipewire-0.3-0'));
   assert(config.bundle.linux.deb.depends.includes('libdbus-1-3'));
+  assert(config.bundle.linux.deb.depends.includes('libayatana-appindicator3-1'));
   assert.equal(config.bundle.resources[join(f.root,'docs/licenses/souvlaki-LICENSE')],'licenses/souvlaki/LICENSE');
   assert.equal(readFileSync(f.library, 'utf8'), 'native fixture');
   const patches = f.calls.filter(([name, args]) => name === 'patchelf' && args[0] === '--set-rpath');

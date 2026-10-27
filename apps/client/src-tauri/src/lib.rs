@@ -1,5 +1,6 @@
 pub mod buffer;
 pub mod clock;
+pub mod close_to_tray;
 pub mod control;
 pub mod media;
 pub mod model;
@@ -284,6 +285,11 @@ mod desktop {
             .expect("HTTP client");
         tauri::Builder::default()
             .setup(move |app| {
+                app.manage(close_to_tray::CloseToTray::default());
+                if close_to_tray::install(app.handle()).is_err() {
+                    // Do not hide the only window when no usable tray was created.
+                    eprintln!("托盘初始化失败，保留正常窗口关闭行为。");
+                }
                 app.manage(app_updates::UpdateState::default());
                 if app_updates::configured(app.handle()) {
                     app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
@@ -320,6 +326,7 @@ mod desktop {
                 system_media::initialize(app.handle().clone());
                 Ok(())
             })
+            .on_window_event(close_to_tray::on_window_event)
             .invoke_handler(tauri::generate_handler![
                 app_updates::updater_status,
                 app_updates::check_app_update,
@@ -351,6 +358,10 @@ mod desktop {
                     if let Ok(mut session) = handle.state::<AppState>().session.lock() {
                         session.take();
                     }
+                }
+                #[cfg(target_os = "macos")]
+                if matches!(event, tauri::RunEvent::Reopen { .. }) {
+                    close_to_tray::show_main(handle);
                 }
             });
     }

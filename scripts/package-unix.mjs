@@ -20,7 +20,7 @@ export function unixBundle(platform, libraries, resources) {
   if (platform === 'darwin') bundle.macOS = { minimumSystemVersion: '13.0', frameworks: libraries };
   else {
     for (const library of libraries) resources[library] = `media/${basename(library)}`;
-    bundle.linux = { deb: { depends: ['libwebkit2gtk-4.1-0', 'libgtk-3-0', 'libpipewire-0.3-0', 'libdbus-1-3'] } };
+    bundle.linux = { deb: { depends: ['libwebkit2gtk-4.1-0', 'libgtk-3-0', 'libpipewire-0.3-0', 'libdbus-1-3', 'libayatana-appindicator3-1'] } };
   }
   return { bundle };
 }

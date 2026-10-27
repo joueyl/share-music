@@ -233,6 +233,8 @@ docs/                 协议、验证和发布验收
 > 架构更新：系统音频推流功能已删除，旧版推流章节仅为历史说明。当前使用 OSS 音乐上传与 WebSocket 进度同步，详见 [OSS 架构](docs/OSS-SYNC.md)。
 ## 版本管理与更新日志
 
+桌面端点击窗口关闭按钮默认隐藏到系统托盘，不退出房间或主动停止播放。点击托盘图标或菜单“显示主窗口”可恢复；右键托盘选择“退出”会关闭程序并清理播放和连接。托盘初始化失败时保留正常关闭行为，避免隐藏后无法找回。Linux 桌面需支持托盘/AppIndicator；网页版关闭行为不变。
+
 Web 页面提供手机底部导航、触控播放控制和窄屏弹窗；手机适配范围及浏览器仿真验证说明见 [手机网页适配](docs/MOBILE.md)。
 
 侧栏的“版本与更新日志”可查看当前版本和内置更新记录。使用 `npm run version:check` 检查版本一致性，`npm run release:version -- patch` 准备下一个修订版本，`npm run release:notes -- 版本号` 导出 GitHub Release 说明。详细流程见 [版本发布说明](docs/RELEASING.md)，变更记录见 [更新日志](CHANGELOG.md)。版本命令不自动发布 GitHub；已接入 joueyl/share-music 的桌面更新，首次配置签名后由 Actions 自动生成更新文件，详见 [GitHub 更新配置](docs/UPDATER.md)。
