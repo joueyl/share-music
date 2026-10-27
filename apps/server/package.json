@@ -1,6 +1,6 @@
 {
   "name": "@music-share/server",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "scripts": {
     "dev": "node --env-file-if-exists=.env --import tsx --watch src/main.ts",
@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@music-share/shared": "0.2.0",
+    "@music-share/shared": "0.2.1",
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
