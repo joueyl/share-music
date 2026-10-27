@@ -49,6 +49,18 @@ git push origin v0.1.2
 
 macOS 当前使用 ad-hoc 签名（APPLE_SIGNING_IDENTITY=-），未配置 Developer ID 与 Apple 公证，不能视为已满足正式公开分发签名要求。正式分发前应单独配置证书与公证并实机验收，不要用关闭系统安全机制替代签名。
 
+## Cargo 与 Rust 编译缓存
+
+Windows、Linux 和两种 macOS 架构均使用固定提交版本的 `Swatinem/rust-cache`，在选择 Rust 1.90.0 后恢复缓存：
+
+- 缓存 Cargo registry 下载、Git 依赖及 `apps/client/src-tauri/target` 中的第三方依赖编译产物。
+- 不缓存 Cargo 安装的工具或本项目最终安装包，不因缓存命中跳过构建、测试和签名检查。
+- 缓存键包含系统、架构、原生依赖配置；Action 自动纳入 Rust 编译器、Cargo.lock/Cargo.toml 与相关构建环境，避免不兼容产物混用。
+- `cache-on-failure` 允许普通任务失败后保存已生成的缓存，但缓存服务异常、任务取消或 runner 中断时不保证保存。
+- 第一次仍需冷构建。可先在默认分支 `main` 手动运行一次，后续标签构建可复用可访问的默认分支缓存；不同标签之间不保证直接共享。命中与保存结果可查看 **Cache Cargo downloads and Rust dependencies** 及其 Post 步骤。
+
+此修改仅增加 Cargo/Rust 缓存，原有 npm 与 vcpkg 缓存策略不变。缓存失效、依赖或工具链变化时仍可能重新编译，不保证固定加速比例。
+
 ## 验证边界
 
 本地可运行 `npm run test:ci-release` 和 `npm run test:version`。这些测试覆盖标签与版本匹配、公开地址校验、日志提取、四架构产物筛选、汇总和真实 SHA-256 计算，不代表已在 GitHub runner 上完成原生编译、安装包生成或实机安装验收。

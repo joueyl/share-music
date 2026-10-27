@@ -90,6 +90,21 @@ async function allArtifacts(t,signing){
  }
  return {...f,downloaded};
 }
+
+test('every desktop build caches Cargo downloads and compiled dependencies after selecting Rust',()=>{
+ const workflow=read(project,'.github/workflows/desktop-release.yml').replace(/\r\n/g,'\n');
+ const windows=workflow.slice(workflow.indexOf('\n  build:\n'),workflow.indexOf('\n  build-unix:\n'));
+ const unix=workflow.slice(workflow.indexOf('\n  build-unix:\n'),workflow.indexOf('\n  release-draft:\n'));
+ for(const job of [windows,unix]){
+  assert.match(job,/uses: Swatinem\/rust-cache@[a-f0-9]{40} # v2/);
+  assert.match(job,/workspaces: apps\/client\/src-tauri -> target/);
+  assert.match(job,/key: \$\{\{ runner.os \}\}-\$\{\{ runner.arch \}\}-desktop-\$\{\{ hashFiles\('native\/vcpkg.json', 'native\/triplets\/\*\*'\) \}\}/);
+  for(const option of ["cache-targets: 'true'","cache-workspace-crates: 'false'","cache-bin: 'false'","cache-on-failure: 'true'"])assert(job.includes(option));
+  assert(job.indexOf('rustup default 1.90.0')<job.indexOf('uses: Swatinem/rust-cache@'));
+  assert(job.indexOf('uses: Swatinem/rust-cache@')<job.indexOf('node scripts/ci-release.mjs collect'));
+  assert(!job.includes('add-rust-environment-hash-key: false'));
+ }
+});
 test('collects Linux DEB/AppImage and two distinct macOS architecture packages then verifies all five installers',async t=>{
  const f=await allArtifacts(t),result=await mergeRelease(f.root,{});
  assert.equal(result.files.length,5);assert.equal(new Set(result.files).size,5);
