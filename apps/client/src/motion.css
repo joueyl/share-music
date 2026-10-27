@@ -1,0 +1,47 @@
+/* Shared motion: short feedback, no artificial delay on requests or playback. */
+:root{--motion-fast:140ms;--motion-normal:220ms;--motion-ease:cubic-bezier(.2,.8,.2,1)}
+button,.nav-item,input,select,textarea{transition:background-color var(--motion-fast),border-color var(--motion-fast),color var(--motion-fast),opacity var(--motion-fast),box-shadow var(--motion-fast),transform var(--motion-fast) var(--motion-ease)}
+button:not(:disabled):active{transform:scale(.97)}
+button[aria-busy=true]:disabled{opacity:.8;cursor:wait}
+input[type=checkbox]{transition:accent-color var(--motion-fast),transform var(--motion-fast)}
+input[type=checkbox]:not(:disabled):active{transform:scale(.9)}
+.dot,.quality-pill,.player-status,.track-row,.music-search-row{transition:color var(--motion-normal),background-color var(--motion-normal),border-color var(--motion-normal),box-shadow var(--motion-normal)}
+.room-card,.playlist-card{transition:transform var(--motion-normal) var(--motion-ease),border-color var(--motion-normal),box-shadow var(--motion-normal),opacity var(--motion-fast)}
+@media(hover:hover){.room-card:not(:disabled):hover,.playlist-card:not(:disabled):hover{transform:translateY(-3px);box-shadow:0 10px 24px #0003}.icon-button:not(:disabled):hover{background:#c4e69a0d;border-radius:6px}}
+.spinning.lucide-loader-circle,.spinning.lucide-refresh-cw{animation:spin .85s linear infinite}
+.loading-state{display:flex;align-items:center;justify-content:center;gap:10px}
+.loading-state::before{content:"";display:inline-block;width:16px;height:16px;flex:0 0 16px;border:2px solid #c4e69a30;border-top-color:var(--accent);border-radius:50%;animation:spin .85s linear infinite}
+.loading-state>.spinning{display:none}
+.operation-progress{position:fixed;top:12px;left:calc(50% + 80px);transform:translateX(-50%);z-index:150;padding:10px 16px;border:1px solid #486447;border-radius:20px;background:#1c2c26f5;color:var(--accent);font-size:12px;box-shadow:0 5px 20px #0004;pointer-events:none}
+.motion-enter,.empty-state,.music-search-message,.library-message,.chat-error,.chat-unread,.music-suggestions,.player-cover-image,.chat-message{animation:motion-reveal var(--motion-normal) var(--motion-ease)}
+.music-search-row,.playlist-card{animation:motion-reveal var(--motion-normal) var(--motion-ease)}
+.lyric-line{transition:color var(--motion-normal),font-size var(--motion-normal),font-weight var(--motion-normal)}
+.fade-enter-active,.fade-leave-active{transition:opacity var(--motion-fast)}
+.fade-enter-from,.fade-leave-to{opacity:0}
+.page-enter-active,.page-leave-active{transition:opacity var(--motion-normal),transform var(--motion-normal) var(--motion-ease)}
+.page-enter-from{opacity:0;transform:translateY(8px)}
+.page-leave-to{opacity:0;transform:translateY(-4px)}
+.toast-enter-active,.toast-leave-active{transition:opacity var(--motion-normal),transform var(--motion-normal) var(--motion-ease)}
+.toast-enter-from,.toast-leave-to{opacity:0;transform:translateY(-10px)}
+.toast-leave-active{pointer-events:none}
+.modal-enter-active,.modal-leave-active{transition:opacity var(--motion-normal)}
+.modal-enter-active>.modal,.modal-leave-active>.modal{transition:transform var(--motion-normal) var(--motion-ease),opacity 180ms}
+.modal-enter-from,.modal-leave-to{opacity:0}
+.modal-enter-from>.modal,.modal-leave-to>.modal{transform:translateY(12px) scale(.98);opacity:0}
+.modal-leave-active{pointer-events:none}
+.list-enter-active,.list-leave-active,.list-move{transition:opacity var(--motion-normal),transform var(--motion-normal) var(--motion-ease)}
+.list-enter-from,.list-leave-to{opacity:0;transform:translateY(8px)}
+.list-leave-active{position:absolute;pointer-events:none}
+.track-list,.room-grid{position:relative}
+.track-list>.list-leave-active{left:0;right:0}
+.player-status.loading-state{justify-content:flex-start}
+.player-status.loading-state>.dot{display:none}
+@keyframes motion-reveal{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:720px){.operation-progress{left:calc(50% + 35px);max-width:calc(100vw - 100px);white-space:nowrap}}
+/* Keep loading text and static progress visible without motion. */
+@media(prefers-reduced-motion:reduce){
+ *,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+ button:not(:disabled):active,.room-card:not(:disabled):hover,.playlist-card:not(:disabled):hover{transform:none}
+ .page-enter-from,.page-leave-to,.toast-enter-from,.toast-leave-to,.list-enter-from,.list-leave-to{transform:none}
+ .modal-enter-from>.modal,.modal-leave-to>.modal{transform:none}
+}

@@ -161,6 +161,54 @@ it('accepts an independent chat receipt without waiting for a broadcast',async()
  socket.message({type:'chat-result',requestId:'other',data});
  socket.message({type:'chat-result',requestId:'request',data});await expect(pending).resolves.toEqual(data);
 });
+it('loads playlist metadata, user pages, paginated songs and word lyrics through the authenticated API',async()=>{
+ const bridge=await import('../src/bridge');await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
+ const song={id:123,name:'歌曲',ar:[{name:'歌手'}],al:{name:'专辑',picUrl:'http://p1.music.126.net/a.jpg'},dt:120000};
+ vi.mocked(fetch).mockImplementation(async(input)=>{
+  const url=String(input);const body=url.includes('playlist_detail')?{code:200,playlist:{id:2991837660,name:'收藏',trackCount:1,creator:{userId:288364640}}}:
+   url.includes('user_playlist')?{code:200,playlist:[],more:false}:url.includes('playlist_track_all')?{code:200,songs:[song]}:{code:200,yrc:{lyric:'[0,100](0,100,0)你'}};
+  return {ok:true,json:async()=>body} as Response;
+ });
+ expect(await bridge.playlistDetail('2991837660')).toMatchObject({id:'2991837660',creatorId:'288364640'});
+ await bridge.userPlaylists('288364640',30);
+ expect((await bridge.playlistSongs('2991837660',50))[0]).toMatchObject({id:'123',artists:'歌手',album:'专辑',coverUrl:'https://p1.music.126.net/a.jpg'});
+ expect((await bridge.songLyrics('123')).yrc.lyric).toContain('(0,100,0)');
+ expect(vi.mocked(fetch).mock.calls.some(([url])=>String(url).includes('offset=50'))).toBe(true);
+ expect(vi.mocked(fetch).mock.calls.at(-1)?.[1]?.headers).toMatchObject({Authorization:'Bearer test-token'});
+});
+
+it('adds uploaded music using its hash and a stable request ID without uploading audio',async()=>{
+ const bridge=await import('../src/bridge');await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
+ const hash='f'.repeat(64),track={id:crypto.randomUUID(),name:'已上传歌曲',contentHash:hash,ossKey:`music/files/${hash}/song.mp3`};
+ const fetcher=vi.fn(async()=>({ok:true,json:async()=>({ok:true,track})}));vi.stubGlobal('fetch',fetcher);
+ const requestId=crypto.randomUUID();expect(await bridge.addUploadedMusic('room-id',hash,requestId)).toEqual(track);
+ const [url,options]=fetcher.mock.calls[0] as unknown as [string,RequestInit];
+ expect(url).toBe('http://127.0.0.1:3000/api/rooms/room-id/music/uploaded');
+ expect(options.method).toBe('POST');expect(JSON.parse(options.body as string)).toEqual({hash,requestId});
+ expect(options.headers).toMatchObject({Authorization:'Bearer test-token'});
+});
+
+it('fetches Web playback bytes through the authenticated room endpoint and verifies integrity',async()=>{
+ const bridge=await import('../src/bridge');await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
+ const bytes=new Uint8Array([255,251,144,0]);const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+ const fetcher=vi.fn(async()=>new Response(bytes));vi.stubGlobal('fetch',fetcher);
+ const track={sizeBytes:bytes.length,contentHash:hash} as any;
+ expect(new Uint8Array(await bridge.browserAudio('room','song',track))).toEqual(bytes);
+ const [url,options]=fetcher.mock.calls[0] as unknown as [string,RequestInit];
+ expect(url).toBe('http://127.0.0.1:3000/api/rooms/room/music/song/audio');expect(options.headers).toMatchObject({Authorization:'Bearer test-token'});
+ await expect(bridge.browserAudio('room','song',{...track,contentHash:'0'.repeat(64)})).rejects.toThrow('PLAYBACK_AUDIO_INTEGRITY_FAILED');
+});
+
+it('loads and searches uploaded OSS music through the authenticated API with cancellation',async()=>{
+ const bridge=await import('../src/bridge');await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
+ const result={songs:[{id:'a'.repeat(64),name:'已上传歌曲',artists:'歌手',album:'专辑',coverUrl:'',durationMs:120000,sizeBytes:2048}],total:21};
+ const fetcher=vi.fn(async()=>({ok:true,json:async()=>result}));vi.stubGlobal('fetch',fetcher);
+ const abort=new AbortController();expect(await bridge.uploadedMusic(' 歌手 & 专辑 ',20,abort.signal)).toEqual(result);
+ const [url,options]=fetcher.mock.calls[0] as unknown as [string,RequestInit];
+ const parsed=new URL(url);expect(parsed.pathname).toBe('/api/music/uploaded');
+ expect(parsed.searchParams.get('keywords')).toBe('歌手 & 专辑');expect(parsed.searchParams.get('offset')).toBe('20');expect(parsed.searchParams.get('limit')).toBe('20');
+ expect(options.headers).toMatchObject({Authorization:'Bearer test-token'});expect(options.signal).toBe(abort.signal);
+});
 it('reports an old server protocol rejection immediately instead of timing out',async()=>{
  const bridge=await import('../src/bridge');await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
  const socket=Socket.instances[0];socket.open();
@@ -208,4 +256,19 @@ it('routes native media callbacks through the authenticated room command channel
  expect(socket.sent.at(-1)).toMatchObject({type:'command',data:{roomId,expectedStateVersion:9,action:{type:'pause',payload:{}}}});
  const count=socket.sent.length;callback({payload:{...event,sourceEpoch:6}} as any);expect(socket.sent).toHaveLength(count);
  await app.logout();callback({payload:event} as any);expect(socket.sent).toHaveLength(count);
+});
+
+it('keeps action feedback until each server receipt and clears it on failure, timeout or disconnect',async()=>{
+ const {useApp}=await import('../src/store');const app=useApp();await app.initialize();await app.login('tester','test-password',false);
+ const socket=Socket.instances[0];socket.open();socket.message({type:'authenticated'});
+ socket.message({type:'snapshot',data:{id:'room',hostId:'test-user',members:[],playlist:[],stateVersion:1,playback:{}}});
+ await app.act({type:'stop',payload:{}});const first=socket.sent.at(-1).data.commandId;
+ await app.act({type:'clear',payload:{}});const second=socket.sent.at(-1).data.commandId;
+ expect(app.pendingActions).toBe(2);
+ socket.message({type:'result',commandId:first,ok:true});expect(app.pendingActions).toBe(1);
+ socket.message({type:'result',commandId:first,ok:true});expect(app.pendingActions).toBe(1);
+ socket.message({type:'result',commandId:second,ok:false,error:'FORBIDDEN'});expect(app.pendingActions).toBe(0);
+ await app.act({type:'stop',payload:{}});await vi.advanceTimersByTimeAsync(15000);expect(app.pendingActions).toBe(0);
+ await app.act({type:'stop',payload:{}});expect(app.pendingActions).toBe(1);
+ socket.close();expect(app.pendingActions).toBe(0);await app.logout();
 });

@@ -160,8 +160,29 @@ function replacePlaybackAudio(previous: HTMLAudioElement) {
   audio = next; return next;
 }
 const cloudPlayer = audio ? new CloudPlayer(audio,
-  async (roomId, trackId, track) => loadPlaybackSource(async () => (await browserRequest(`/rooms/${roomId}/music/${trackId}`)).url, desktop, track),
+  async (roomId, trackId, track) => loadPlaybackSource(async () => (await browserRequest(`/rooms/${roomId}/music/${trackId}`)).url, desktop, track,
+    ()=>browserAudio(roomId,trackId,track)),
   send, emit, Date.now, replacePlaybackAudio) : null;
+export async function browserAudio(roomId:string,trackId:string,track:TrackMetadata):Promise<ArrayBuffer>{
+ if(!Number.isSafeInteger(track.sizeBytes)||track.sizeBytes<1||track.sizeBytes>100*1024*1024)throw new Error('PLAYBACK_AUDIO_TOO_LARGE');
+ let response:Response;
+ try{response=await fetch(base+`/api/rooms/${roomId}/music/${trackId}/audio`,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(75000),cache:'no-store'});}
+ catch{throw new Error('PLAYBACK_AUDIO_DOWNLOAD_FAILED');}
+ if(response.status===404)throw new Error('PLAYBACK_WEB_SERVER_OUTDATED');
+ if(!response.ok){await apiResponse(response);throw new Error('PLAYBACK_AUDIO_DOWNLOAD_FAILED');}
+ const reader=response.body?.getReader();if(!reader)throw new Error('PLAYBACK_AUDIO_DOWNLOAD_FAILED');
+ const parts:Uint8Array<ArrayBuffer>[]=[],expected=track.sizeBytes;let size=0;
+ try{
+  while(true){const {done,value}=await reader.read();if(done)break;size+=value.byteLength;
+   if(size>expected)throw new Error('PLAYBACK_AUDIO_INTEGRITY_FAILED');parts.push(new Uint8Array(value));
+  }
+ }finally{await reader.cancel().catch(()=>{});}
+ if(size!==expected)throw new Error('PLAYBACK_AUDIO_INTEGRITY_FAILED');
+ const data=await new Blob(parts).arrayBuffer();
+ const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)),b=>b.toString(16).padStart(2,'0')).join('');
+ if(hash!==track.contentHash)throw new Error('PLAYBACK_AUDIO_INTEGRITY_FAILED');
+ return data;
+}
 function clearCloud() { cloudPlayer?.clear(); }
 export async function syncCloud(room: RoomSnapshot, clockOffset: number) {
   if (room.playlist) await cloudPlayer?.sync(room, clockOffset);
@@ -169,6 +190,16 @@ export async function syncCloud(room: RoomSnapshot, clockOffset: number) {
 setInterval(() => { if (socket?.readyState === WebSocket.OPEN) cloudPlayer?.tick(); }, 100);
 
 export type MusicSearchItem = { id: string; name: string; artists: string; album: string; coverUrl: string; durationMs: number };
+export type UploadedMusicItem = Omit<MusicSearchItem,'durationMs'> & {durationMs:number|null;sizeBytes:number|null;canAdd?:boolean};
+export async function addUploadedMusic(roomId:string,hash:string,requestId:string):Promise<TrackMetadata> {
+ const result=await browserRequest(`/rooms/${roomId}/music/uploaded`,{hash,requestId});
+ if(!result.ok||!result.track?.ossKey)throw new Error('MUSIC_IMPORT_FAILED');
+ rememberTrackArtwork(base,result.track.contentHash,albumCover(result.track.coverUrl));
+ return result.track;
+}
+export async function uploadedMusic(keywords='',offset=0,signal?:AbortSignal):Promise<{songs:UploadedMusicItem[];total:number}> {
+ return browserRequest('/music/uploaded?'+new URLSearchParams({keywords:keywords.trim(),offset:String(offset),limit:'20'}),undefined,signal);
+}
 function albumCover(value: unknown): string {
  return normalizeAlbumCover(value)??'';
 }
@@ -202,3 +233,25 @@ export async function suggestMusic(keywords:string,signal?:AbortSignal):Promise<
  const items=Array.isArray(data.result?.allMatch)?data.result.allMatch:[];
  return [...new Set<string>(items.map((item:any)=>item.keyword).filter((s:unknown):s is string=>typeof s==='string'&&!!s.trim()&&s.length<=100).map((s:string)=>s.trim()))].slice(0,8);
 }
+
+function checkMusicResult(data:any) { if(data.code!==200)throw new Error(data.code===301?'NETEASE_LOGIN_REQUIRED':'NETEASE_UNAVAILABLE');return data; }
+function musicItem(song:any):MusicSearchItem {
+  return {id:String(song.id),name:String(song.name??''),artists:(song.ar??song.artists??[]).map((a:any)=>a.name).join(' / '),album:String(song.al?.name??song.album?.name??''),coverUrl:albumCover(song.al?.picUrl??song.album?.picUrl),durationMs:Number(song.dt??song.duration??0)};
+}
+export type MusicPlaylist={id:string;name:string;coverUrl:string;trackCount:number;creatorId:string};
+function playlistItem(p:any):MusicPlaylist { return {id:String(p.id),name:String(p.name??''),coverUrl:albumCover(p.coverImgUrl),trackCount:Number(p.trackCount??0),creatorId:String(p.creator?.userId??'')}; }
+export async function playlistDetail(id:string):Promise<MusicPlaylist> {
+  const data=checkMusicResult(await browserRequest('/netease/playlist_detail?'+new URLSearchParams({id})));return playlistItem(data.playlist);
+}
+export async function userPlaylists(uid:string,offset=0):Promise<{playlists:MusicPlaylist[];more:boolean}> {
+  const data=checkMusicResult(await browserRequest('/netease/user_playlist?'+new URLSearchParams({uid,offset:String(offset),limit:'30'})));
+  return {playlists:(data.playlist??[]).map(playlistItem),more:!!data.more};
+}
+export async function playlistSongs(id:string,offset=0):Promise<MusicSearchItem[]> {
+  const data=checkMusicResult(await browserRequest('/netease/playlist_track_all?'+new URLSearchParams({id,offset:String(offset),limit:'50'})));return (data.songs??[]).map(musicItem);
+}
+export async function trackMetadata(roomId:string,trackId:string):Promise<TrackMetadata> { return browserRequest(`/rooms/${roomId}/music/${trackId}/metadata`); }
+export async function songLyrics(id:string,signal?:AbortSignal) {
+  return checkMusicResult(await browserRequest('/netease/lyric_new?'+new URLSearchParams({id}),undefined,signal));
+}
+export async function playMusic(roomId:string,trackId:string,requestId:string) { return browserRequest(`/rooms/${roomId}/music/play`,{trackId,requestId}); }

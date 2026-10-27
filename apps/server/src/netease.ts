@@ -18,7 +18,7 @@ const invoke: MusicInvoker = (name, params) => new Promise((resolve, reject) => 
   worker.once('error', () => { finish(); reject(new DomainError('NETEASE_UNAVAILABLE')); });
   worker.once('exit', () => { clearTimeout(timer); reject(new DomainError('NETEASE_UNAVAILABLE')); });
 });
-export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'song_detail', 'song_url', 'song_url_v1', 'lyric', 'playlist_detail', 'user_playlist', 'user_account', 'user_cloud', 'login_status']);
+export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'song_detail', 'song_url', 'song_url_v1', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_account', 'user_cloud', 'login_status']);
 function publicBody(value: any): any {
   if (Array.isArray(value)) return value.map(publicBody);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([k]) => !/^(cookie|token|accessToken|refreshToken|__csrf|MUSIC_U)$/i.test(k)).map(([k, v]) => [k, publicBody(v)]));
@@ -43,6 +43,15 @@ export class NeteaseService {
     // Do not allow browser callers to inject credentials, proxies or network addresses.
     const allowed = new Set(['keywords', 'limit', 'offset', 'type', 'id', 'ids', 'uid', 'level', 'br']);
     const clean = Object.fromEntries(Object.entries(params).filter(([key]) => allowed.has(key)));
+    if(['lyric_new','playlist_track_all','playlist_detail','user_playlist'].includes(name)){
+      const key=name==='user_playlist'?'uid':'id';
+      if(!/^\d{1,20}$/.test(String(clean[key]??'')))throw new DomainError('INVALID_REQUEST');
+      if(name==='playlist_track_all'||name==='user_playlist'){
+        const limit=Number(clean.limit??(name==='user_playlist'?30:50)),offset=Number(clean.offset??0);
+        if(!Number.isInteger(limit)||limit<1||limit>100||!Number.isInteger(offset)||offset<0||offset>100000)throw new DomainError('INVALID_REQUEST');
+        clean.limit=limit;clean.offset=offset;
+      }
+    }
     return publicBody((await this.request(name, clean)).body);
   }
   async begin() {

@@ -4,6 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { spawn, spawnSync } from 'node:child_process';
 import { selectNativeLibrary, tauriCli } from './desktop.mjs';
 import { findLicenseDirectory } from './package-windows.mjs';
+import { checkVersions } from './version.mjs';
+import { withUpdater } from './updater-config.mjs';
 
 const primaryLibraries = ['avcodec', 'avformat', 'avutil', 'swresample', 'datachannel', 'FLAC', 'opus', 'SDL2'];
 export function dynamicLibrary(name, platform) {
@@ -98,6 +100,7 @@ export function stageUnix(root, platform, library, shareDirectory, dependenciesD
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
+    checkVersions(root);
     const platform = process.argv[2] === 'mac' ? 'darwin' : process.argv[2] === 'linux' ? 'linux' : undefined;
     if (!platform || process.platform !== platform || !['x64', 'arm64'].includes(process.arch)) throw new Error('mac 命令需在 macOS、linux 命令需在 Linux 上运行，支持本机 x64/arm64 架构。');
     const library = selectNativeLibrary(root, platform, process.env.MUSIC_NATIVE_LIBRARY);
@@ -106,7 +109,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const dependencies = process.env.MUSIC_NATIVE_DEPENDENCIES ? resolve(process.env.MUSIC_NATIVE_DEPENDENCIES) : share && join(dirname(share), 'lib');
     const { config, staging } = stageUnix(root, platform, library, share, dependencies);
     const configFile = join(staging, 'tauri.generated.json');
-    writeFileSync(configFile, JSON.stringify(config, null, 2));
+    writeFileSync(configFile, JSON.stringify(withUpdater(config,root), null, 2));
     console.log(`媒体库依赖、架构及许可证检查通过：${staging}`);
     if (!process.argv.includes('--check')) {
       const child = spawn(process.execPath, [tauriCli(root), 'build', '--bundles', ...config.bundle.targets, '--config', configFile], {

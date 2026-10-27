@@ -36,6 +36,15 @@ it('leaves browser playback unchanged and rejects missing native audio bytes', a
   vi.mocked(invoke).mockResolvedValue(new ArrayBuffer(0));
   await expect(loadPlaybackSource('https://oss.test/song', true, metadata)).rejects.toThrow('PLAYBACK_AUDIO_DOWNLOAD_FAILED');
 });
+it('plays authenticated Web audio as an analysable Blob without requesting OSS directly or invoking native APIs',async()=>{
+ const bytes=new Uint8Array([255,251,144,0]).buffer,web=vi.fn(async()=>bytes),signedUrl=vi.fn(async()=>{throw new Error('must not request OSS');});
+ const create=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:web-audio'),revoke=vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+ const source=await loadPlaybackSource(signedUrl,false,metadata,web);
+ expect(web).toHaveBeenCalledOnce();expect(signedUrl).not.toHaveBeenCalled();expect(invoke).not.toHaveBeenCalled();
+ if(typeof source==='string')throw new Error('expected Blob source');
+ expect(new Uint8Array(await (create.mock.calls[0][0] as Blob).arrayBuffer())).toEqual(new Uint8Array(bytes));
+ source.release();source.release();expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:web-audio');
+});
 it('extracts the embedded image from cached audio, gives it priority, and releases both local URLs',async()=>{
   const bytes=mp3WithPictures(),track={...metadata,contentHash:'f'.repeat(64),sizeBytes:bytes.length};
   const server='https://share.jouei.cn',remote='https://p1.music.126.net/network.jpg';

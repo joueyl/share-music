@@ -67,8 +67,15 @@ export function validMusicKey(key:string):boolean {
 }
 export class OssStorage {
   private inFlight=new Map<string,Promise<{ossKey:string}>>();
+  private audioReads=new Map<string,Promise<Buffer>>();
   constructor(private env: NodeJS.ProcessEnv = process.env, private request: typeof fetch = fetch, private db?: Database) {}
   scope(){return `${this.env.OSS_REGION ?? ''}:${this.env.OSS_BUCKET ?? ''}`;}
+  staticUrl(key:string) {
+    if(!validMusicKey(key))throw new DomainError('OSS_INVALID_KEY');
+    const options=ossOptions(this.env);
+    const host=new URL(options.endpoint).hostname;
+    return `https://${options.cname?host:options.bucket+'.'+host}/${key.split('/').map(encodeURIComponent).join('/')}`;
+  }
   registered(key:string,hash:string){return this.db?.getAsset(this.scope(),hash)===key;}
   async url(key: string, method: 'GET' | 'PUT' | 'HEAD' = 'GET', headers:Record<string,string>={}) {
     if (!validMusicKey(key)) throw new DomainError('OSS_INVALID_KEY');
@@ -82,6 +89,31 @@ export class OssStorage {
       if(res.ok)return true;if(res.status===404)return false;
       throw new OssUploadError(await ossFailure(res));
     }catch(e){if(e instanceof OssUploadError)throw e;throw new OssUploadError({ossCode:e instanceof Error&&['TimeoutError','AbortError'].includes(e.name)?'Timeout':'NetworkError'});}
+  }
+  readAudio(key:string,size:number,hash:string):Promise<Buffer> {
+    if(!validMusicKey(key)||!Number.isSafeInteger(size)||size<1||size>100*1024*1024||!/^[a-f0-9]{64}$/.test(hash))return Promise.reject(new DomainError('PLAYBACK_AUDIO_METADATA_INVALID'));
+    const id=JSON.stringify([key,size,hash]),prior=this.audioReads.get(id);if(prior)return prior;
+    if(this.audioReads.size>=2)return Promise.reject(new DomainError('PLAYBACK_AUDIO_BUSY'));
+    const job=this.downloadAudio(key,size,hash).finally(()=>this.audioReads.delete(id));this.audioReads.set(id,job);return job;
+  }
+  private async downloadAudio(key:string,size:number,hash:string):Promise<Buffer> {
+    try{
+      // URL is signed from validated OSS configuration, never supplied by the caller.
+      const url=await this.url(key);
+      const res=await this.request(url,{redirect:'error',signal:AbortSignal.timeout(60000)});
+      if(!res.ok||!res.body){await res.body?.cancel();throw new DomainError('PLAYBACK_AUDIO_DOWNLOAD_FAILED');}
+      const length=res.headers.get('content-length');
+      if(length!==null&&Number(length)!==size){await res.body.cancel();throw new DomainError('PLAYBACK_AUDIO_INTEGRITY_FAILED');}
+      const reader=res.body.getReader(),chunks:Uint8Array[]=[],digest=createHash('sha256');let received=0;
+      try{
+        while(true){const {done,value}=await reader.read();if(done)break;received+=value.byteLength;
+          if(received>size)throw new DomainError('PLAYBACK_AUDIO_INTEGRITY_FAILED');
+          chunks.push(value);digest.update(value);
+        }
+      }finally{await reader.cancel().catch(()=>{});}
+      if(received!==size||digest.digest('hex')!==hash)throw new DomainError('PLAYBACK_AUDIO_INTEGRITY_FAILED');
+      return Buffer.concat(chunks,received);
+    }catch(error){if(error instanceof DomainError)throw error;throw new DomainError('PLAYBACK_AUDIO_DOWNLOAD_FAILED');}
   }
   upload(_userId: string, data: Buffer, filename='音乐.bin'):Promise<{ossKey:string}> {
     if (!data.length || data.length > 100 * 1024 * 1024) return Promise.reject(new DomainError('INVALID_AUDIO'));

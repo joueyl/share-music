@@ -1,5 +1,7 @@
 # 客户端安装包构建
 
+GitHub Actions 现提供 Windows x64、Linux x64、macOS Intel / Apple Silicon 原生构建矩阵，使用本文的相同打包脚本。配置与签名限制见 [GitHub Actions 自动打包](GITHUB-ACTIONS.md)。工作流已配置不代表已在各平台 runner 上完成验收。
+
 在项目根目录运行，支持 npm 和 pnpm。先安装 JS 依赖、Rust、目标平台的 Tauri 开发依赖，以及原生媒体库；Node.js 22.18+、Rust 1.90+。三个平台的打包命令均构建 Release 客户端，NestJS 服务单独部署。
 
 | 平台 | 检查命令 | 打包命令 | 输出 |

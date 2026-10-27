@@ -1,16 +1,16 @@
 {
   "name": "@music-share/client",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 11420",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "node ../../scripts/version.mjs --check && vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
     "tauri": "tauri"
   },
   "dependencies": {
-    "@music-share/shared": "0.1.0",
+    "@music-share/shared": "0.1.1",
     "@tauri-apps/api": "^2.9.0",
     "vue": "^3.5.22",
     "vue-router": "^4.6.0",

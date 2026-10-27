@@ -22,7 +22,13 @@ beforeAll(async () => {
 afterAll(async () => { for (const ws of clients) ws.terminate(); if (child && child.exitCode === null) { const exit = new Promise<void>(r => child.once('exit', () => r())); child.kill(); await exit; } });
 it('HTTP auth plus two real WebSocket clients: room snapshots, forbidden controls, conflict recovery and isolated signaling', async () => {
  expect((await api('/rooms')).status).toBe(401);
+ expect((await api('/music/uploaded')).status).toBe(401);
+ expect((await api(`/rooms/${randomUUID()}/music/${randomUUID()}/audio`)).status).toBe(401);
  const a = (await api('/login', { name: 'alice', password: 'alice-password', register: true })).data;
+ expect((await api('/music/uploaded',undefined,a.token)).data).toEqual({songs:[],total:0});
+ expect((await api('/music/uploaded?offset=-1',undefined,a.token)).status).toBe(400);
+ expect((await api(`/rooms/${randomUUID()}/music/uploaded`,{hash:'a'.repeat(64),requestId:randomUUID()})).status).toBe(401);
+ expect((await api(`/rooms/${randomUUID()}/music/uploaded`,{hash:'invalid',requestId:randomUUID()},a.token)).status).toBe(400);
  const b = (await api('/login', { name: 'bob', password: 'bob-password-long', register: true })).data;
  const room = (await api('/rooms', { name: 'integration room' }, a.token)).data;
  const host = new Client(a.token), member = new Client(b.token);
@@ -50,6 +56,23 @@ it('serves an uncached local QR login page and protects music proxy requests',as
  const remote=await fetch(base+'/loginServe',{headers:{'X-Forwarded-For':'203.0.113.1'}});expect(remote.status).toBe(401);
  expect((await api('/netease/song_detail')).status).toBe(401);
 });
+it('serves song identity metadata only to room members and checks immediate playback permissions',async()=>{
+ const a=(await api('/login',{name:'library-host',password:'library-host-password',register:true})).data;
+ const b=(await api('/login',{name:'library-member',password:'library-member-password',register:true})).data;
+ const room=(await api('/rooms',{name:'library room'},a.token)).data;
+ const host=new Client(a.token),member=new Client(b.token);await host.wait(m=>m.type==='authenticated');await member.wait(m=>m.type==='authenticated');
+ host.send({type:'join',roomId:room.id});await host.wait(m=>m.type==='snapshot');
+ member.send({type:'join',roomId:room.id});const joined=(await host.wait(m=>m.type==='snapshot'&&m.data.members.length===2)).data;
+ const track={id:randomUUID(),name:'歌词测试',neteaseId:'123',artists:'测试歌手',album:'测试专辑',durationMs:120000,sizeBytes:1024,spec:{sampleRate:44100,bits:16,channels:2},lossless:false,bitrateBps:128000,contentHash:'b'.repeat(64)};
+ const commandId=randomUUID();host.send({type:'command',data:{commandId,roomId:room.id,expectedStateVersion:joined.stateVersion,action:{type:'enqueue',payload:track}}});await host.wait(m=>m.type==='result'&&m.commandId===commandId&&m.ok);
+ const path=`/rooms/${room.id}/music/${track.id}/metadata`;
+ expect((await api(path)).status).toBe(401);expect((await api(path,undefined,a.token)).data).toMatchObject({neteaseId:'123',artists:'测试歌手'});
+ const playPath=`/rooms/${room.id}/music/play`;
+ expect((await api(playPath,{trackId:track.id,requestId:randomUUID()},b.token)).status).toBe(403);
+ expect((await api(playPath,{trackId:track.id,requestId:randomUUID()},a.token)).data.ok).toBe(true);
+ member.send({type:'leave'});const barrier=randomUUID();member.send({type:'clock',requestId:barrier,clientSentAt:Date.now()});await member.wait(m=>m.type==='clock'&&m.requestId===barrier);
+ expect((await api(path,undefined,b.token)).data.error).toBe('NOT_IN_ROOM');
+},10000);
 
 it('allows same-origin HTTPS proxy QR polling but still blocks foreign origins',async()=>{
  const response=await fetch(base+'/loginServe/check',{method:'POST',headers:{'Content-Type':'application/json',Origin:`https://127.0.0.1:${port}`,'X-Forwarded-Proto':'https'},body:JSON.stringify({sessionId:randomUUID()})});

@@ -1,0 +1,254 @@
+name: Desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-installers-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: pwsh
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Validate version, tag and public server URL
+        id: release
+        env:
+          CLIENT_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+          UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: node scripts/ci-release.mjs prepare
+      - name: Install dependencies and run JavaScript tests
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm ci
+          npm run test:version
+          npm run test:ci-release
+          npm run test:updater
+          npm run test:desktop-launcher
+          npm run test:packaging
+          npm test
+      - name: Install Rust
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup default 1.90.0
+      - name: Prepare vcpkg binary cache
+        run: |
+          $cache = Join-Path $env:RUNNER_TEMP 'music-share-vcpkg-cache'
+          New-Item -ItemType Directory -Force -Path $cache | Out-Null
+          "VCPKG_BINARY_SOURCES=clear;files,$cache,readwrite" >> $env:GITHUB_ENV
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/music-share-vcpkg-cache
+          key: vcpkg-windows-2022-x64-${{ hashFiles('native/vcpkg.json', 'native/triplets/**') }}
+      - name: Install pinned vcpkg
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $vcpkg = Join-Path $env:RUNNER_TEMP 'music-share-vcpkg'
+          $baseline = (Get-Content -Raw native/vcpkg.json | ConvertFrom-Json).'builtin-baseline'
+          if ($baseline -notmatch '^[a-f0-9]{40}$') { throw 'Invalid vcpkg baseline' }
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$vcpkg"
+          git -C "$vcpkg" checkout --detach "$baseline"
+          & "$vcpkg/bootstrap-vcpkg.bat" -disableMetrics
+          "VCPKG_ROOT=$vcpkg" >> $env:GITHUB_ENV
+      - name: Build and test native media library
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          cmake -S native -B native/build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
+          cmake --build native/build --config Release --parallel 2
+          ctest --test-dir native/build -C Release --output-on-failure
+      - name: Package Windows installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          npm run package:win:check
+          npm run package:win
+          node scripts/ci-release.mjs collect windows-x64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: music-share-windows-x64-${{ steps.release.outputs.version }}
+          path: release-artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  build-unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: linux-x64
+            triplet: x64-linux-dynamic
+            arch: x64
+            package: linux
+          - runner: macos-15-intel
+            target: macos-x64
+            triplet: x64-osx-dynamic
+            arch: x64
+            package: mac
+          - runner: macos-15
+            target: macos-arm64
+            triplet: arm64-osx-dynamic
+            arch: arm64
+            package: mac
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Validate version, tag, server URL and host architecture
+        id: release
+        env:
+          CLIENT_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+          UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          node -e "if(process.arch!==process.env.EXPECTED_ARCH)throw new Error('Runner architecture mismatch')"
+          node scripts/ci-release.mjs prepare
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake ninja-build pkg-config curl zip unzip tar git file autoconf automake libtool \
+            patchelf binutils libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev \
+            libssl-dev libpipewire-0.3-dev libdbus-1-dev libfuse2 libudev-dev libasound2-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libwayland-dev libxkbcommon-dev
+      - name: Install macOS build tools
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          brew install cmake ninja pkg-config autoconf automake libtool
+          echo 'MACOSX_DEPLOYMENT_TARGET=13.0' >> "$GITHUB_ENV"
+          echo 'APPLE_SIGNING_IDENTITY=-' >> "$GITHUB_ENV"
+      - name: Install dependencies and run JavaScript tests
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run test:version
+          npm run test:ci-release
+          npm run test:updater
+          npm run test:packaging
+          npm test
+      - name: Install Rust
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup default 1.90.0
+      - name: Prepare vcpkg binary cache
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/music-share-vcpkg-cache"
+          echo "VCPKG_BINARY_SOURCES=clear;files,$RUNNER_TEMP/music-share-vcpkg-cache,readwrite" >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/music-share-vcpkg-cache
+          key: vcpkg-${{ matrix.runner }}-${{ matrix.triplet }}-${{ hashFiles('native/vcpkg.json', 'native/triplets/**') }}
+      - name: Install pinned vcpkg
+        run: |
+          set -euo pipefail
+          baseline=$(node -p "require('./native/vcpkg.json')['builtin-baseline']")
+          [[ "$baseline" =~ ^[a-f0-9]{40}$ ]]
+          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/music-share-vcpkg"
+          git -C "$RUNNER_TEMP/music-share-vcpkg" checkout --detach "$baseline"
+          "$RUNNER_TEMP/music-share-vcpkg/bootstrap-vcpkg.sh" -disableMetrics
+          echo "VCPKG_ROOT=$RUNNER_TEMP/music-share-vcpkg" >> "$GITHUB_ENV"
+      - name: Build and test native media library
+        env:
+          VCPKG_TRIPLET: ${{ matrix.triplet }}
+        run: |
+          set -euo pipefail
+          extra=()
+          if [[ "$RUNNER_OS" == 'macOS' ]]; then extra+=('-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0'); fi
+          cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            "-DVCPKG_OVERLAY_TRIPLETS=$PWD/native/triplets" "-DVCPKG_TARGET_TRIPLET=$VCPKG_TRIPLET" "${extra[@]}"
+          cmake --build native/build --parallel 2
+          ctest --test-dir native/build --output-on-failure
+      - name: Package desktop installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          PACKAGE_PLATFORM: ${{ matrix.package }}
+          RELEASE_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          npm run "package:$PACKAGE_PLATFORM:check"
+          npm run "package:$PACKAGE_PLATFORM"
+          node scripts/ci-release.mjs collect "$RELEASE_TARGET"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: music-share-${{ matrix.target }}-${{ steps.release.outputs.version }}
+          path: release-artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
+  release-draft:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: [build, build-unix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: music-share-*-${{ needs.build.outputs.version }}
+          path: downloaded-artifacts
+      - name: Verify all four platform artifacts and merge release files
+        env:
+          UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
+        run: node scripts/ci-release.mjs merge
+      - name: Create a draft release without publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(release-artifacts/*)
+          test "${#assets[@]}" -ge 7
+          gh release create "$RELEASE_TAG" "${assets[@]}" --draft --verify-tag --title "共鸣 Music Share $RELEASE_TAG" --notes-file release-artifacts/RELEASE-NOTES.md

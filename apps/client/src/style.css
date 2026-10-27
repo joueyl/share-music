@@ -12,6 +12,12 @@
 
 /* Keep native scrolling, with colors shared by the page and nested lists. */
 :root{color-scheme:dark;--scrollbar-thumb:#46594e;--scrollbar-hover:#718b69}
+.version-button{flex-shrink:0;justify-content:flex-start;gap:10px;margin-top:14px;text-align:left}.version-button small{font-size:10px;margin-top:4px;color:var(--muted)}
+.app-update-panel{border:1px solid var(--border);border-radius:10px;padding:14px;margin:0 0 18px;flex-shrink:0}.update-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.update-toolbar>span{font-size:11px;color:var(--muted)}.update-status{font-size:12px;line-height:1.7;margin:12px 0 0;overflow-wrap:anywhere}.remote-release-notes{font:inherit;font-size:12px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere;max-height:150px;overflow:auto;padding:12px;background:#111a20;border-radius:7px}.update-confirm{display:flex;flex-direction:row;align-items:flex-start;gap:10px;font-size:12px;line-height:1.7;margin:14px 0}.update-confirm input{flex-shrink:0;margin-top:3px}.update-progress{margin-top:12px}.update-progress progress{width:100%;height:8px;accent-color:var(--accent)}.update-progress small{font-size:11px;color:var(--muted);margin-top:8px}
+.version-history-modal{width:680px;max-height:88vh;overflow-y:auto;display:flex;flex-direction:column}.version-history-modal h2{display:flex;align-items:center;gap:10px;margin:0;font-size:21px}.version-history-modal .eyebrow{font-size:9px;margin-bottom:10px}
+.version-summary{display:flex;align-items:center;flex-wrap:wrap;gap:12px;padding:18px;margin:20px 0;border:1px solid #3a503a;border-radius:10px;background:#243528}.version-summary>span{color:#a1b49c;font-size:12px}.version-summary strong{color:var(--accent);font-size:24px}.version-summary small{flex-basis:100%;color:#9dad9e;font-size:11px}
+.release-scroll{overflow:auto;min-height:0;padding-right:8px;overscroll-behavior:contain}.release-scroll:focus-visible{outline:1px solid var(--accent);outline-offset:-1px}.release-entry{padding:4px 0 18px;margin-bottom:18px;border-bottom:1px solid var(--border)}.release-entry:last-child{margin-bottom:0}.release-heading{display:flex;align-items:center;gap:10px;margin-bottom:16px}.release-heading h3{margin:0;font-size:17px}.release-heading time{margin-left:auto;color:var(--muted);font-size:11px}.release-badge{padding:4px 8px;border:1px solid #49633f;border-radius:5px;background:#283a28;color:var(--accent);font-size:10px}.release-group h4{font-size:12px;color:#cbdac6;margin:14px 0 8px}.release-group ul{margin:0;padding-left:19px}.release-group li{padding:4px 0;color:#a7b4ae;font-size:12px;line-height:1.8;overflow-wrap:anywhere}.version-history-note{font-size:10px;margin:16px 0 0}
+@media(max-width:720px){.version-button{justify-content:center;margin-top:auto;padding-top:20px}.version-button>span{display:none}.version-history-modal{padding:22px}.version-history-modal h2{font-size:18px}.release-heading{flex-wrap:wrap}}
 *{scrollbar-width:thin;scrollbar-color:var(--scrollbar-thumb) transparent}
 @supports selector(::-webkit-scrollbar){
  *{scrollbar-width:auto;scrollbar-color:auto}
@@ -73,3 +79,23 @@
 .room-page .player{background:#182228b8}.room-page .room-aside,.room-page .room-chat{background:#151e23d6}
 .waveform-note{position:absolute;left:40px;right:40px;bottom:5px;margin:0;color:var(--muted);font-size:10px;line-height:1.6;text-align:right;pointer-events:none}
 @media(max-width:720px){.waveform-note{left:18px;right:18px;font-size:9px}}
+
+/* Lyrics follow the shared playback timeline; word fills support YRC timing. */
+.playlist-heading{gap:12px;flex-wrap:wrap}.playlist-heading h2{margin:0}.playlist-heading .inline-actions{flex-wrap:wrap}.playlist-heading button,.uploaded-music-modal button{white-space:nowrap}
+@media(max-width:640px){.uploaded-music-modal .music-search-form{flex-wrap:wrap}.uploaded-music-modal .music-search-form input{flex-basis:100%}.uploaded-music-modal .music-search-row{flex-wrap:wrap}.uploaded-music-modal .music-search-info{min-width:100px}}
+.lyrics-panel{margin:20px 0;border:1px solid var(--border);border-radius:12px;background:#182228b8;overflow:hidden}
+.lyrics-panel header{display:flex;align-items:center;justify-content:space-between;padding:14px 20px;border-bottom:1px solid var(--border,#e6e8ec)}
+.lyrics-panel h3{margin:0;font-size:15px}.lyrics-panel small{opacity:.55}
+.lyric-scroll{position:relative;height:240px;overflow:auto;overscroll-behavior:contain;padding:95px 20px;scrollbar-width:thin;scroll-padding:90px 0;text-align:center}
+.lyric-line{min-height:32px;margin:0;padding:10px 0;font-size:16px;line-height:1.8;color:#7b8190;transition:color .2s;white-space:pre-wrap;overflow-wrap:anywhere}
+.lyric-line.active{color:var(--accent);font-weight:700;font-size:18px}
+.lyric-word{background:linear-gradient(to right,var(--accent) var(--fill),#6f8077 var(--fill));background-clip:text;-webkit-background-clip:text;color:transparent;white-space:pre-wrap}
+.lyric-line:not(.active) .lyric-word{background:none;color:inherit}
+.library-page{max-width:1200px}.library-page .music-search-form>input{flex:1;min-width:0}
+.saved-playlists{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:18px 0}.saved-playlists button{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.playlist-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:20px;margin:25px 0}
+.playlist-card{display:flex;flex-direction:column;align-items:flex-start;gap:10px;text-align:left;padding:16px;border:1px solid var(--border);border-radius:12px;background:var(--surface);color:inherit;cursor:pointer;min-width:0}
+.playlist-card img{width:100%;aspect-ratio:1;object-fit:cover;border-radius:10px}.playlist-card strong{overflow-wrap:anywhere}.playlist-card small{opacity:.6}.playlist-card:hover{border-color:#6c998a}
+.library-actions{position:sticky;top:0;z-index:2;background:#182228;padding:12px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-radius:12px;margin:15px 0}.library-actions label{display:flex;flex-direction:row;align-items:center;gap:8px;margin:0 auto 0 0}
+.library-page input[type=checkbox]{width:17px;height:17px;flex:0 0 17px;accent-color:var(--accent)}.library-message{padding:12px 16px;background:#25372c;border-radius:10px;line-height:1.7;overflow-wrap:anywhere}.library-page .music-search-row{cursor:pointer;flex-direction:row;margin:0}.library-page .music-search-row input{margin-right:5px}
+@media(max-width:640px){.library-page .music-search-form{flex-wrap:wrap}.playlist-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.library-actions{position:static}.lyric-scroll{height:210px}}

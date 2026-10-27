@@ -8,14 +8,14 @@ function audioBytes(bytes: ArrayBuffer | number[] | null): ArrayBuffer | Uint8Ar
   return bytes instanceof ArrayBuffer ? bytes : Array.isArray(bytes) ? new Uint8Array(bytes) : null;
 }
 
-export async function loadPlaybackSource(source: string | (() => Promise<string>), desktop: boolean, track: CacheMetadata): Promise<string | PlaybackSource> {
+export async function loadPlaybackSource(source: string | (() => Promise<string>), desktop: boolean, track: CacheMetadata,webBytes?:()=>Promise<ArrayBuffer>): Promise<string | PlaybackSource> {
   const resolveUrl = () => typeof source === 'string' ? Promise.resolve(source) : source();
-  if (!desktop) return resolveUrl();
-  // Read song bytes via the native HTTP client, then analyse the exact same local
-  // Blob that the media element plays. No separate waveform file or fake data.
+  if (!desktop&&!webBytes) return resolveUrl();
+  // Desktop reads its verified native cache; Web uses the authenticated audio API.
+  // Both analyse the exact same Blob that the media element plays, not fake data.
   const key = { contentHash: track.contentHash, sizeBytes: track.sizeBytes };
-  let data = audioBytes(await invoke<ArrayBuffer | number[] | null>('read_cached_audio', key));
-  if (!data?.byteLength) {
+  let data = desktop?audioBytes(await invoke<ArrayBuffer | number[] | null>('read_cached_audio', key)):await webBytes!();
+  if (desktop&&!data?.byteLength) {
     const url = await resolveUrl();
     data = audioBytes(await invoke<ArrayBuffer | number[]>('load_playback_audio', { url, ...key }));
   }

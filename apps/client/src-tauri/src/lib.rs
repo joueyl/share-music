@@ -10,6 +10,8 @@ pub mod playback_audio;
 pub mod saved_login;
 pub mod stun;
 pub mod system_media;
+#[cfg(feature = "desktop")]
+pub mod app_updates;
 
 #[cfg(feature = "desktop")]
 mod desktop {
@@ -282,6 +284,10 @@ mod desktop {
             .expect("HTTP client");
         tauri::Builder::default()
             .setup(move |app| {
+                app.manage(app_updates::UpdateState::default());
+                if app_updates::configured(app.handle()) {
+                    app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+                }
                 let path = native::Native::locate().or_else(|error| {
                     let packaged = app
                         .path()
@@ -315,6 +321,10 @@ mod desktop {
                 Ok(())
             })
             .invoke_handler(tauri::generate_handler![
+                app_updates::updater_status,
+                app_updates::check_app_update,
+                app_updates::install_app_update,
+                app_updates::restart_after_update,
                 media_capabilities,
                 update_system_media,
                 load_playback_audio,

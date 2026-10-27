@@ -72,7 +72,7 @@ async function submit() {
     <form class="room-chat-form" @submit.prevent="submit">
       <label class="sr-only" for="room-chat-draft">聊天消息</label>
       <textarea id="room-chat-draft" v-model="draft" maxlength="500" rows="3" :disabled="!app.connected || sending" placeholder="分享此刻的心情…" @keydown="keydown" />
-      <div class="room-chat-actions"><span>{{ draft.length }}/500 · Shift+Enter 换行</span><button class="primary" :disabled="!canSend"><LoaderCircle v-if="sending" :size="14" class="spinning" /><Send v-else :size="14" />{{ sending ? '发送中' : '发送' }}</button></div>
+      <div class="room-chat-actions"><span>{{ draft.length }}/500 · Shift+Enter 换行</span><button class="primary" :aria-busy="sending" :disabled="!canSend"><LoaderCircle v-if="sending" :size="14" class="spinning" /><Send v-else :size="14" />{{ sending ? '发送中' : '发送' }}</button></div>
       <p v-if="error" class="chat-error" role="alert">{{ error }}</p>
     </form>
     <p class="room-chat-note">仅当前房间可见 · 最近 100 条 · 服务重启后清空</p>

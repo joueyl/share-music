@@ -6,6 +6,11 @@ import { saveLogin, loadSavedLogin, clearSavedLogin } from './saved-login';
 import { getServerUrl } from './server-config';
 import { systemMediaAction, systemMediaState, type SystemMediaEvent } from './system-media';
 const messages: Record<string, string> = {
+  PLAYBACK_AUDIO_BUSY:'音频读取繁忙，请稍后切歌重试',
+  PLAYBACK_WEB_SERVER_OUTDATED:'Web 播放需要新版音频读取接口，请先更新并重启服务端',
+  UPLOADED_MUSIC_METADATA_MISSING:'该历史上传文件缺少音频参数，请重新添加原歌曲后再试',
+  UPLOADED_MUSIC_NOT_FOUND:'OSS 中的音乐文件已不存在，无法加入播放列表',
+  TRACK_NOT_FOUND:'音乐不存在，请刷新列表',PLAYLIST_FULL:'播放列表已满，最多 200 首',
   PLAYBACK_AUDIO_METADATA_INVALID: '音频缓存信息无效',
   PLAYBACK_AUDIO_INTEGRITY_FAILED: '音乐文件校验失败，请重新添加该歌曲',
   PLAYBACK_AUDIO_CACHE_READ_FAILED: '读取音乐缓存失败，请重试',
@@ -63,7 +68,7 @@ export const useApp = defineStore('app', () => {
   async function initialize() {
     if (initialized) return; initialized = true;
     const cap = await bridge.capabilities(); native.value = cap.native; nativeReason.value = cap.reason;
-    await bridge.subscribe('connection', e => { if (!acceptEvents) return; connected.value = e.connected; if (e.connected) requestClock(); else stun.value = { checking: false, servers: [] }; });
+    await bridge.subscribe('connection', e => { if (!acceptEvents) return; connected.value = e.connected; if (e.connected) requestClock(); else {clearActionFeedback();stun.value = { checking: false, servers: [] };} });
     await bridge.subscribe('stun-status', e => { if (!acceptEvents) return; stun.value = e; });
     await bridge.subscribe('playback-cache-warning', e => { if (acceptEvents) error(e.error); });
     await bridge.subscribe('media-status', e => { if (!acceptEvents) return; media.value = e; });
@@ -79,6 +84,7 @@ export const useApp = defineStore('app', () => {
     await bridge.subscribe('clock-offset', e => { if (!acceptEvents) return; offset.value = e.offsetMs; });
     await bridge.subscribe('server-message', message => {
       if (!acceptEvents) return;
+      if(message.type==='result')finishAction(message.commandId);
       if (message.type === 'snapshot') {
         if (room.value?.id !== message.data.id) chatMessages.value = [];
         if (room.value?.id !== message.data.id) webrtc.value = {};
@@ -137,7 +143,7 @@ export const useApp = defineStore('app', () => {
   }
   async function logout() {
     if (busy.value) return;
-    busy.value = true; acceptEvents = false;
+    busy.value = true; acceptEvents = false;clearActionFeedback();
     try {
       await clearSavedLogin();
       await bridge.logout();
@@ -151,15 +157,22 @@ export const useApp = defineStore('app', () => {
   }
   async function act(action: Action) {
     if (!room.value || !connected.value) return error('控制连接未就绪');
-    try { await bridge.command({ commandId: crypto.randomUUID(), roomId: room.value.id, expectedStateVersion: room.value.stateVersion, action }); } catch (e) { error(e); }
+    const commandId=crypto.randomUUID();
+    actionTimers.set(commandId,setTimeout(()=>finishAction(commandId),15000));
+    pendingActions.value++;
+    try { await bridge.command({ commandId, roomId: room.value.id, expectedStateVersion: room.value.stateVersion, action }); } catch (e) { finishAction(commandId);error(e); }
   }
+  const pendingActions=ref(0);
+  const actionTimers=new Map<string,ReturnType<typeof setTimeout>>();
+  function finishAction(id:string){const timer=actionTimers.get(id);if(timer===undefined)return;clearTimeout(timer);actionTimers.delete(id);pendingActions.value=actionTimers.size;}
+  function clearActionFeedback(){for(const timer of actionTimers.values())clearTimeout(timer);actionTimers.clear();pendingActions.value=0;}
   async function addFile(instant = false) { try { const track = await bridge.importFile(); await act({ type: instant ? 'instant' : 'enqueue', payload: track }); } catch (e) { if (String(e) !== 'Error: CANCELLED') error(e); } }
   async function exitRoom() {
     try {
-      await bridge.leave(); room.value = null; chatMessages.value = [];
+      await bridge.leave(); clearActionFeedback();room.value = null; chatMessages.value = [];
       webrtc.value = {};
       media.value = { status: 'idle', detail: '', bufferedMs: 0, driftMs: 0, receiveBps: 0 };
     } catch (e) { error(e); }
   }
-  return { user, room, chatMessages, connected, notice, native, nativeReason, media, stun, webrtcWarnings, busy, host, permission, progress, offset, initialize, login, restoreLogin, logout, act, addFile, exitRoom, error };
+  return { user, room, chatMessages, connected, notice, native, nativeReason, media, stun, webrtcWarnings, busy, pendingActions, host, permission, progress, offset, initialize, login, restoreLogin, logout, act, addFile, exitRoom, error };
 });

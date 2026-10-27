@@ -13,3 +13,6 @@ vcpkg_installed/
 native/build-auto/
 
 native/build-com/
+release-artifacts/
+downloaded-artifacts/
+*.key

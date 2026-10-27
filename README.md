@@ -231,3 +231,10 @@ docs/                 协议、验证和发布验收
 第三方媒体库使用各自许可证；分发需要附带相应许可及 LGPL 相关材料。原生依赖保持动态链接，FFmpeg manifest 未启用 GPL/nonfree 功能。发布前按实际构建的库核对授权文件。
 
 > 架构更新：系统音频推流功能已删除，旧版推流章节仅为历史说明。当前使用 OSS 音乐上传与 WebSocket 进度同步，详见 [OSS 架构](docs/OSS-SYNC.md)。
+## 版本管理与更新日志
+
+Web 页面提供手机底部导航、触控播放控制和窄屏弹窗；手机适配范围及浏览器仿真验证说明见 [手机网页适配](docs/MOBILE.md)。
+
+侧栏的“版本与更新日志”可查看当前版本和内置更新记录。使用 `npm run version:check` 检查版本一致性，`npm run release:version -- patch` 准备下一个修订版本，`npm run release:notes -- 版本号` 导出 GitHub Release 说明。详细流程见 [版本发布说明](docs/RELEASING.md)，变更记录见 [更新日志](CHANGELOG.md)。版本命令不自动发布 GitHub；已接入 joueyl/share-music 的桌面更新，首次配置签名后由 Actions 自动生成更新文件，详见 [GitHub 更新配置](docs/UPDATER.md)。
+
+仓库附带 **Desktop installers** GitHub Actions 工作流：支持手动打包 Windows x64、Linux x64、macOS Intel / Apple Silicon 安装包；推送匹配的 `v版本号` 标签后，四种目标全部成功并通过校验才会创建统一 Release 草稿。配置方式、产物下载、macOS 签名限制与首次运行说明见 [GitHub Actions 自动打包](docs/GITHUB-ACTIONS.md)。

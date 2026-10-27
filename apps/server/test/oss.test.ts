@@ -14,6 +14,14 @@ const env = {
 };
 const user = '11111111-1111-4111-8111-111111111111';
 const key = `music/${user}/22222222-2222-4222-8222-222222222222`;
+it('stores a stable encoded OSS object URL without persisting an expiring signature',()=>{
+ const oss=new OssStorage(env),file=`music/files/${'a'.repeat(64)}/歌曲 - 歌手.mp3`;
+ const url=oss.staticUrl(file);expect(new URL(url).hostname).toBe(env.OSS_ACCESS_POINT_ENDPOINT);
+ expect(decodeURIComponent(new URL(url).pathname)).toBe('/'+file);expect(new URL(url).search).toBe('');
+ const normal=new OssStorage({...env,OSS_ACCESS_POINT_ENDPOINT:undefined,OSS_ACCESS_POINT_ALIAS:undefined});
+ expect(new URL(normal.staticUrl(file)).hostname).toBe('jouei-music-share.oss-cn-hangzhou.aliyuncs.com');
+ expect(()=>oss.staticUrl('../private')).toThrow('OSS_INVALID_KEY');
+});
 afterEach(() => vi.useRealTimers());
 
 it('routes to the complete access-point host and signs with the alias, not the associated bucket', async () => {

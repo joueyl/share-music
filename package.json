@@ -21,7 +21,14 @@
     "package:mac:check": "node scripts/package-unix.mjs mac --check",
     "package:linux": "node scripts/package-unix.mjs linux",
     "package:linux:check": "node scripts/package-unix.mjs linux --check",
-    "test:packaging": "node --test scripts/package-unix.test.mjs"
+    "test:packaging": "node --test scripts/package-unix.test.mjs",
+    "version:check": "node scripts/version.mjs --check",
+    "version:sync": "node scripts/version.mjs --sync",
+    "release:version": "node scripts/version.mjs",
+    "release:notes": "node scripts/version.mjs --notes",
+    "test:version": "node --test scripts/version.test.mjs",
+    "test:ci-release": "node --test scripts/ci-release.test.mjs",
+    "test:updater": "node --test scripts/updater-config.test.mjs"
   },
   "devDependencies": {
     "vitest": "^5.0.3",

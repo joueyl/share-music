@@ -37,7 +37,7 @@ function restart() {
   if (!disposed && !document.hidden && props.playing) { lastFrame = 0; frame = requestAnimationFrame(tick); }
   else state.value = 'idle';
 }
-function wake() { void reader?.resume().then(() => { if (!disposed) restart(); }); }
+function wake() { restart();void reader?.resume().then(() => { if (!disposed) restart(); }); }
 watch(() => [props.playing, props.sourceId], () => { if (props.playing) wake(); else restart(); });
 onMounted(() => {
   reader = createPlaybackWaveform(); reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -62,5 +62,5 @@ onUnmounted(() => {
 <template>
   <div class="room-waveform" aria-hidden="true"><canvas ref="canvas" /></div>
   <p v-if="playing && state === 'gesture'" class="waveform-note">点击页面启用实时波形</p>
-  <p v-else-if="playing && state === 'unavailable'" class="waveform-note">当前音源无法读取波形，请重启客户端以更新本地音频模块</p>
+  <p v-else-if="playing && state === 'unavailable'" class="waveform-note">当前浏览器无法分析此音源，请检查音频权限并刷新页面；Web 端需使用支持音频读取接口的新服务端</p>
 </template>

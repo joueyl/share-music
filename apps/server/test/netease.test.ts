@@ -17,6 +17,16 @@ function fixture() {
  const service=new NeteaseService(db,api,()=>now);
  return { db,api,service,advance:()=>now+=2500,status:(n:number)=>code=n,cookie:(v:string)=>cookie=v };
 }
+it('supports bounded playlist pages and word lyrics without accepting credential or URL overrides',async()=>{
+ const f=fixture();try{
+  await f.service.call('playlist_track_all',{id:'2991837660',limit:'50',offset:'50',proxy:'http://evil.test'});
+  expect(f.api.mock.calls.at(-1)).toEqual(['playlist_track_all',expect.objectContaining({id:'2991837660',limit:50,offset:50})]);
+  expect(f.api.mock.calls.at(-1)?.[1]).not.toHaveProperty('proxy');
+  await f.service.call('lyric_new',{id:'123'});expect(f.api.mock.calls.at(-1)?.[0]).toBe('lyric_new');
+  await f.service.call('user_playlist',{uid:'288364640'});expect(f.api.mock.calls.at(-1)?.[1]).toMatchObject({uid:'288364640',limit:30,offset:0});
+  for(const params of [{id:'x'},{id:'123',limit:101},{id:'123',offset:-1}])await expect(f.service.call('playlist_track_all',params)).rejects.toThrow('INVALID_REQUEST');
+ }finally{f.db.close();}
+});
 it('polls QR states, persists the successful cookie, automatically injects it and never returns it', async()=>{
  const f=fixture(); try {
   const qr=await f.service.begin(); expect(qr.image).toMatch(/^data:image/);

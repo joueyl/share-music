@@ -3,6 +3,8 @@ import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { selectNativeLibrary, tauriCli } from './desktop.mjs';
+import { checkVersions } from './version.mjs';
+import { withUpdater } from './updater-config.mjs';
 
 export function windowsResources(library, shareDirectory) {
   if (!library || !existsSync(library)) throw new Error('缺少媒体库，请先构建 native（Release），或设置 MUSIC_NATIVE_LIBRARY。');
@@ -39,6 +41,7 @@ export function findLicenseDirectory(root, library, override, platform = process
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
+    checkVersions(root);
     if (process.platform !== 'win32' || process.arch !== 'x64') throw new Error('此命令需要 Windows x64；请在 Windows x64 构建机器上运行。');
     const library = selectNativeLibrary(root, 'win32', process.env.MUSIC_NATIVE_LIBRARY);
     if (!library) throw new Error('缺少媒体库，请先构建 native（Release）。');
@@ -48,11 +51,11 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const configDirectory = join(root, 'native/build/packaging');
     mkdirSync(configDirectory, { recursive: true });
     const config = join(configDirectory, 'tauri.windows.generated.json');
-    writeFileSync(config, JSON.stringify({ bundle: {
+    writeFileSync(config, JSON.stringify(withUpdater({ bundle: {
       active: true, targets: ['nsis'], useLocalToolsDir: true, icon: ['icons/icon.ico'], resources,
       windows: { bundleVCRuntime: true, webviewInstallMode: { type: 'downloadBootstrapper', silent: true },
         nsis: { installMode: 'currentUser', languages: ['SimpChinese', 'English'], installerIcon: 'icons/icon.ico' } }
-    } }, null, 2));
+    } },root), null, 2));
     console.log(`打包媒体库：${library}\n随包资源：${Object.keys(resources).length} 个（DLL 与许可证）`);
     if (!process.argv.includes('--check')) {
       const child = spawn(process.execPath, [tauriCli(root), 'build', '--bundles', 'nsis', '--config', config], {

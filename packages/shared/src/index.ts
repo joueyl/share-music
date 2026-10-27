@@ -13,6 +13,9 @@ export type Quality = 'lossless' | 'source' | 'opus';
 export const audioSpecSchema = z.object({ sampleRate: z.number().int().positive().max(192000), bits: z.number().int().positive().max(32), channels: z.number().int().min(1).max(8) }).strict();
 export type AudioSpec = z.infer<typeof audioSpecSchema>;
 export const trackSchema = z.object({
+  neteaseId: z.string().regex(/^\d{1,20}$/).optional(),
+  artists: z.string().max(1000).optional(), album: z.string().max(500).optional(),
+  ossUrl: z.string().max(2048).url().startsWith('https://').optional(),
   coverUrl: z.string().max(2048).url().startsWith('https://').nullable().optional(),
   ossKey: z.string().max(500).optional(), id: z.string().uuid(), name: z.string().trim().min(1).max(200), durationMs: z.number().int().min(1).max(86_400_000),
   sizeBytes: z.number().int().positive().max(10_000_000_000), spec: audioSpecSchema,

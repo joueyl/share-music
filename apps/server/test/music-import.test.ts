@@ -102,6 +102,19 @@ it('preserves album artwork in uploaded metadata, persisted assets and room snap
   expect(f.engine.snapshot(f.room.id).playlist[0].coverUrl).toBe(track.coverUrl);
   expect(db.getMusicSource('default','netease:standard:123')?.coverUrl).toBe(track.coverUrl);
   expect(trackSchema.parse(track).coverUrl).toBe(track.coverUrl);
+  expect(track.neteaseId).toBe('123');expect(track.artists).toBe('歌手');
+  expect(db.getMusicDetail('default','netease:standard:123')).toMatchObject({id:123,name:'歌曲'});
+  expect(service.metadata(f.room.id,f.user,track.id)).toMatchObject({neteaseId:'123',coverUrl:track.coverUrl});
+  expect(()=>service.metadata(f.room.id,randomUUID(),track.id)).toThrow('NOT_IN_ROOM');
+ }finally{db.close();}
+});
+it('restores a song ID for a legacy room track by its persisted source association',async()=>{
+ const f=setup(),db=new Database(':memory:');
+ try{
+  const importer=new MusicImport(f.engine,{call:f.call},{upload:f.upload},f.request as typeof fetch,db);
+  const track=await importer.add(f.room.id,f.user,'123',randomUUID());
+  const {neteaseId,...old}=track;db.saveMusicSource('default','netease:standard:123',old);
+  expect(importer.metadata(f.room.id,f.user,track.id).neteaseId).toBe('123');
  }finally{db.close();}
 });
 it('backfills older cached artwork without re-uploading audio and tolerates unavailable metadata',async()=>{
