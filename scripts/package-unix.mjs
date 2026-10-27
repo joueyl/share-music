@@ -67,7 +67,7 @@ export function stageUnix(root, platform, library, shareDirectory, dependenciesD
   });
   for (const path of libraries) {
     if (platform === 'darwin') {
-      execute('lipo', ['-verify_arch', process.arch === 'arm64' ? 'arm64' : 'x86_64', path]);
+      execute('lipo', [path, '-verify_arch', process.arch === 'arm64' ? 'arm64' : 'x86_64']);
       const dependencies = macDependencies(execute('otool', ['-L', path]));
       execute('install_name_tool', ['-id', `@rpath/${basename(path)}`, path]);
       for (const dependency of dependencies) {

@@ -46,6 +46,23 @@ test('macOS staging includes signed Frameworks and rewrites non-system dependenc
   assert(config.bundle.macOS.frameworks.includes(join(staging, 'libmusic_native.dylib')));
   assert(f.calls.some(([command, args]) => command === 'install_name_tool' && args[0] === '-change' && args[2] === '@loader_path/libavcodec.dylib'));
   assert.equal(f.calls.filter(([command]) => command === 'codesign').length, 9);
+  const checks=f.calls.filter(([command])=>command==='lipo');
+  assert.equal(checks.length,9);
+  for(const [,args] of checks){
+    assert.equal(args.length,3);
+    assert(args[0].startsWith(staging));
+    assert.equal(args[1],'-verify_arch');
+    assert.equal(args[2],process.arch==='arm64'?'arm64':'x86_64');
+  }
+});
+
+test('macOS packaging stops on architecture verification failure before patching or signing',()=>{
+ const f=fixture('darwin');
+ assert.throws(()=>stageUnix(f.root,'darwin',f.library,f.share,f.dependencies,(command,args)=>{
+  if(command==='lipo')throw new Error('lipo architecture mismatch');
+  return f.execute(command,args);
+ }),/lipo architecture mismatch/);
+ assert(!f.calls.some(([command])=>['codesign','install_name_tool'].includes(command)));
 });
 test('packaging rejects static media linkage and missing dependencies', () => {
   const f = fixture('linux');
