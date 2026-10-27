@@ -102,6 +102,14 @@ test('refuses corrupted installers before writing a merged release',async t=>{
  writeFileSync(join(directory,`music-share-${f.version}-${target}.deb`),'corrupted');
  await assert.rejects(mergeRelease(f.root,{}),/SHA-256/);assert.equal(existsSync(join(f.root,'release-artifacts')),false);
 });
+
+test('merges Windows CRLF notes with Unix LF notes without accepting changed content',async t=>{
+ const f=await allArtifacts(t),path=join(f.downloaded,`music-share-windows-x64-${f.version}`,'RELEASE-NOTES.md');
+ writeFileSync(path,readFileSync(path,'utf8').replace(/\r?\n/g,'\r\n'));
+ const result=await mergeRelease(f.root,{});
+ assert.equal(result.files.length,5);
+ assert(!read(result.output,'RELEASE-NOTES.md').includes('\r'));
+});
 test('refuses mismatched notes, incomplete platform sets and unsupported targets',async t=>{
  const f=await allArtifacts(t),directory=join(f.downloaded,`music-share-macos-arm64-${f.version}`);
  writeFileSync(join(directory,'RELEASE-NOTES.md'),'wrong version');

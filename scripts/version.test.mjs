@@ -49,6 +49,6 @@ test('does not partially update when an input lockfile is malformed',t=>{
 });
 test('uses Shanghai calendar dates and extracts CRLF changelogs',()=>{
  assert.equal(shanghaiDate(new Date('2026-10-26T17:00:00Z')),'2026-10-27');
- assert.equal(releaseNotes('## [0.1.2] - 2026-10-27\r\n\r\n### 新增\r\n- 测试\r\n\r\n## [0.1.1]\r\n- 旧版','0.1.2'),'### 新增\r\n- 测试\n');
+ assert.equal(releaseNotes('## [0.1.2] - 2026-10-27\r\n\r\n### 新增\r\n- 测试\r\n\r\n## [0.1.1]\r\n- 旧版','0.1.2'),'### 新增\n- 测试\n');
  assert.throws(()=>releaseNotes('## [0.1.1]\n- 旧版','0.1.2'));
 });

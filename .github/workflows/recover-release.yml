@@ -1,0 +1,73 @@
+name: Recover verified release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: Completed tag build run ID (all four platforms successful)
+        required: true
+        type: string
+      publish:
+        description: Publish the release after all signatures and checksums pass
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: recover-verified-release
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test release tools
+        run: |
+          set -euo pipefail
+          node scripts/version.test.mjs
+          node scripts/ci-release.test.mjs
+          node scripts/updater-config.test.mjs
+          node scripts/recover-release.test.mjs
+      - name: Verify source run against the unchanged release tag
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: node scripts/recover-release.mjs
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.source_run_id }}
+          pattern: music-share-*-${{ steps.source.outputs.version }}
+          path: downloaded-artifacts
+      - name: Recheck all four platforms and generate the update manifest
+        env:
+          UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
+        run: node scripts/ci-release.mjs merge
+      - name: Create verified release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.source.outputs.tag }}
+          PUBLISH: ${{ inputs.publish }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          assets=(release-artifacts/*)
+          test "${#assets[@]}" -ge 7
+          args=(--draft)
+          if [[ "$PUBLISH" == 'true' ]]; then args=(); fi
+          gh release create "$RELEASE_TAG" "${assets[@]}" "${args[@]}" --verify-tag --title "共鸣 Music Share $RELEASE_TAG" --notes-file release-artifacts/RELEASE-NOTES.md

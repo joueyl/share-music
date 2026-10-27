@@ -93,7 +93,7 @@ export async function mergeRelease(root,env=process.env){
   const expectedFiles=[...names,`SHA256SUMS-${target}.txt`,'RELEASE-NOTES.md'].sort();
   const entries=readdirSync(directory,{withFileTypes:true});
   if(entries.some(entry=>!entry.isFile())||JSON.stringify(entries.map(entry=>entry.name).sort())!==JSON.stringify(expectedFiles))throw new Error(`${target} 附件不完整或含多余文件`);
-  if(readFileSync(join(directory,'RELEASE-NOTES.md'),'utf8')!==notes)throw new Error(`${target} 版本说明不匹配`);
+  if(readFileSync(join(directory,'RELEASE-NOTES.md'),'utf8').replace(/\r\n/g,'\n')!==notes)throw new Error(`${target} 版本说明不匹配`);
   for(const name of names){const source=join(directory,name);targetFiles.push({source,name,hash:await sha256(source)});}
   const checksum=targetFiles.map(file=>`${file.hash}  ${file.name}\n`).join('');
   if(readFileSync(join(directory,`SHA256SUMS-${target}.txt`),'utf8')!==checksum)throw new Error(`${target} SHA-256 校验失败`);

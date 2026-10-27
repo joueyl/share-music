@@ -56,6 +56,10 @@ npm run tauri -w @music-share/client -- signer generate -w "$env:USERPROFILE\.ta
 
 ## 平台行为
 
+### 构建成功但汇总失败时
+
+若四个平台都已生成产物，仅 Release 汇总失败，可运行 **Actions → Recover verified release → Run workflow**，填写原标签构建的 run ID。默认只创建草稿；勾选 `publish` 才直接公开发布。恢复任务要求源构建的提交与当前版本标签一致、四个平台全部成功，并重新验证各安装包签名、SHA-256、版本和说明；不会移动标签或重新编译。源产物必须尚未过期，已有同名 Release 时不会覆盖。
+
 - Windows x64：下载带签名的 NSIS `.exe`。用户确认安装后，Windows 更新安装流程会退出程序，播放会中断。
 - Linux x64：应用内更新仅对 AppImage 开启；DEB 用户手动下载新版安装。
 - macOS Intel / Apple Silicon：更新下载各自的 `.app.tar.gz`，不是 DMG。安装成功后点击重启；当前 ad-hoc 签名不替代 Apple 公证，仍需实机验收。

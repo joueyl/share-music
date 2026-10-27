@@ -15,6 +15,7 @@ export function nextVersion(current,target){
  return target;
 }
 export function releaseNotes(changelog,version){
+ changelog=changelog.replace(/\r\n/g,'\n');
  const sections=[...changelog.matchAll(/^## \[([^\]]+)\][^\r\n]*\r?\n([\s\S]*?)(?=^## \[|(?![\s\S]))/gm)];
  const section=sections.find(s=>s[1]===version);if(!section||!/^\s*-\s+\S/m.test(section[2]))throw new Error(`找不到 ${version} 的有效更新日志`);
  return section[2].trim()+'\n';
