@@ -4,6 +4,10 @@
 
 # 共鸣 · Music Share
 
+## AI 协作与设计规范
+
+修改项目前请先阅读根目录 [AGENTS.md](AGENTS.md) 和 [AI 设计规范](docs/AI-DESIGN.md)。规范按当前同频 TONE 实现整理，包含视觉、自适应布局、逐页交互、接口边界与验收清单；来源和映射见 [Brilliant 对照](docs/BRILLIANT-WEBVIEW2.md)。这些文件应随源码保留。若 AI 工具不自动读取 AGENTS，请手动将两份规范加入其项目上下文。
+
 Tauri 2 + Vue 3 + TypeScript + Pinia + Vue Router 客户端，HTML Audio 播放，NestJS 控制服务。Windows 使用 WebView2 内置音频解码；Rust 仅承担缓存、系统媒体控制、凭据与更新等桌面能力。
 
 当前客户端实现多人房间、音乐搜索与音乐库、统一播放时间轴、歌词、聊天和独立权限。歌曲通过服务端授权直链接入，不支持本地文件上传、系统采集或 P2P 推流；不转码、不混音。

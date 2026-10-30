@@ -1,6 +1,6 @@
 {
   "name": "@music-share/server",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "scripts": {
     "dev": "node --env-file-if-exists=.env --import tsx --watch src/main.ts",
@@ -11,7 +11,7 @@
     "db:cleanup-room-songs": "npm run build && node --env-file-if-exists=.env dist/apps/server/src/cleanup-room-songs.js"
   },
   "dependencies": {
-    "@music-share/shared": "1.0.0",
+    "@music-share/shared": "1.0.1",
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
