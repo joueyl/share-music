@@ -14,12 +14,12 @@
 在 **Actions → Desktop installers → Run workflow** 选择分支并运行，一次触发全部四种构建目标。流水线将：
 
 - 校验版本、更新日志和生产服务地址，执行 `npm ci` 与 JavaScript 测试。
-- 安装固定 Rust 1.90.0；按 `native/vcpkg.json` 的 builtin-baseline 检出 vcpkg。
-- 缓存 vcpkg 编译产物，构建原生媒体库并执行 CTest。
-- 调用对应平台的 `package:win` / `package:linux` / `package:mac` 及检查命令。Linux 安装 WebKitGTK 4.1、GTK3、PipeWire、D-Bus 等依赖，使用 x64-linux-dynamic triplet；macOS 使用 x64-osx-dynamic 或 arm64-osx-dynamic，并设置最低系统版本 13.0。
+- 安装固定 Rust 1.90.0，使用对应平台的系统 WebView / HTML Audio；不构建 FFmpeg / vcpkg 媒体运行时。
+- 缓存 Cargo 下载与 Rust 依赖，构建 Tauri 桌面壳及客户端。
+- 调用对应平台的 `package:win` / `package:linux` / `package:mac` 及检查命令。Linux 安装 WebKitGTK 4.1、GTK3、PipeWire、D-Bus 等依赖；macOS 分别使用 Intel / Apple Silicon runner，并设置最低系统版本 13.0。
 - 每个目标独立上传名为 `music-share-目标-版本号` 的 Actions Artifact，保留 30 天；包含对应安装包、`SHA256SUMS-目标.txt`、`RELEASE-NOTES.md`。文件名统一包含版本、平台及架构，避免冲突。
 
-手动运行不创建或公开 Release。产物可从本次 Actions 运行页面下载。首次构建 FFmpeg 等原生依赖较慢，工作流超时为 180 分钟；实际耗时受 GitHub runner 和网络影响，私有仓库还需留意 Actions 配额。
+手动运行不创建或公开 Release。产物可从本次 Actions 运行页面下载。首次构建 Rust 与系统桌面依赖可能较慢，工作流超时为 180 分钟；实际耗时受 GitHub runner 和网络影响，私有仓库还需留意 Actions 配额。
 
 ## 版本标签与 Release 草稿
 

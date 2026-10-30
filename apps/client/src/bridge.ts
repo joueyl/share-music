@@ -4,7 +4,7 @@ import { CloudPlayer } from './cloud-player';
 import { AudioWaveform, releaseWaveformAudio } from './audio-waveform';
 import { loadPlaybackSource } from './playback-source';
 import { rememberTrackArtwork, trackArtwork } from './track-artwork';
-import { normalizeAlbumCover } from '@music-share/shared';
+import { normalizeAlbumCover, parsePlaylistLink, isPlaylistShortLink, playlistReference } from '@music-share/shared';
 import type { SystemMediaState } from './system-media';
 import { listen } from '@tauri-apps/api/event';
 import type { ChatMessage, Command, RoomSnapshot, TrackMetadata } from '@music-share/shared';
@@ -16,14 +16,14 @@ const pendingChats = new Set<(error: Error) => void>();
 function cancelChats(code: string) { for (const reject of pendingChats) reject(new Error(code)); }
 const listeners = new Map<string, Set<Listener>>();
 function emit(name: string, value: unknown) { listeners.get(name)?.forEach(fn => fn(value)); }
-async function browserRequest(path: string, body?: unknown, signal?: AbortSignal) {
-  const res = await fetch(base + '/api' + path, { ...(signal ? { signal } : {}), method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(token && path !== '/login' ? { Authorization: `Bearer ${token}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+async function browserRequest(path: string, body?: unknown, signal?: AbortSignal, method?: 'POST' | 'PUT') {
+  const res = await fetch(base + '/api' + path, { ...(signal ? { signal } : {}), method: method ?? (body ? 'POST' : 'GET'), headers: { 'Content-Type': 'application/json', ...(token && path !== '/login' ? { Authorization: `Bearer ${token}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   return apiResponse(res);
 }
 export async function subscribe(name: string, handler: Listener) {
   const receive = handler;
   handler = event => {
-    if (roomLeft && (name === 'webrtc-status' || name === 'media-status' && event.status !== 'idle' || name === 'server-message' && ['snapshot', 'signal', 'admission', 'chat', 'chat-result', 'chat-history'].includes(event.type))) return;
+    if (roomLeft && (name === 'media-status' && event.status !== 'idle' || name === 'server-message' && ['snapshot', 'signal', 'admission', 'chat', 'chat-result', 'chat-history'].includes(event.type))) return;
     receive(event);
   };
   if (isTauri() && !['connection','server-message','media-status'].includes(name)) return listen(name, e => handler(e.payload));
@@ -77,8 +77,20 @@ export async function logout(): Promise<void> {
   audio?.pause(); emit('connection', { connected: false });
 }
 
-export async function listRooms(): Promise<{ id: string; name: string; members: number; maxMembers: number; qualityMode: string }[]> { return browserRequest('/rooms'); }
-export async function createRoom(name: string): Promise<RoomSnapshot> { return browserRequest('/rooms', { name }); }
+export type RoomSettings = NonNullable<RoomSnapshot['settings']>;
+export type RoomSummary = { id: string; name: string; hostId: string; settings: RoomSettings; members: number; maxMembers: number; qualityMode: string };
+export async function listRooms(keywords = '', category = ''): Promise<RoomSummary[]> {
+  return browserRequest('/rooms?' + new URLSearchParams({ keywords: keywords.trim(), category }));
+}
+export async function createRoom(name: string, settings?: Partial<RoomSettings>, defaults?: RoomSnapshot['defaults']): Promise<RoomSnapshot> {
+  return browserRequest('/rooms', { name: name.trim(), ...(settings ? { settings } : {}), ...(defaults ? { defaults } : {}) });
+}
+export async function resolveRoom(code: string): Promise<{ id: string; name: string }> {
+  return browserRequest('/rooms/resolve/' + encodeURIComponent(code.trim()));
+}
+export async function updateRoomSettings(room: RoomSnapshot, name: string, settings: RoomSettings): Promise<RoomSnapshot> {
+  return browserRequest(`/rooms/${room.id}/settings`, { expectedStateVersion: room.stateVersion, name: name.trim(), settings }, undefined, 'PUT');
+}
 export async function send(message: unknown): Promise<void> {
 
   if (socket?.readyState !== WebSocket.OPEN) throw new Error('控制连接未就绪');
@@ -139,18 +151,10 @@ export async function sendChat(roomId: string, text: string, requestId: string):
   } finally { clearTimeout(timer); unsubscribe?.(); if (cancel) pendingChats.delete(cancel); }
 }
 export async function importFile(): Promise<TrackMetadata> {
- const file = await new Promise<File>((resolve,reject)=>{ const i=document.createElement('input'); i.type='file'; i.accept='audio/*'; i.onchange=()=>i.files?.[0]?resolve(i.files[0]):reject(new Error('CANCELLED')); i.oncancel=()=>reject(new Error('CANCELLED')); i.click(); });
- if(file.size>100*1024*1024) throw new Error('音乐不能超过100MB');
- const data=await file.arrayBuffer(), ctx=new AudioContext();
- let decoded: AudioBuffer; try { decoded=await ctx.decodeAudioData(data.slice(0)); } finally { await ctx.close(); }
- const durationMs=Math.round(decoded.duration*1000);
- const contentHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)), b=>b.toString(16).padStart(2,'0')).join('');
- const res=await fetch(base+'/api/music/upload',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/octet-stream','X-Music-Filename':encodeURIComponent(file.name)},body:data});
- const result=await apiResponse(res);
- return {id:crypto.randomUUID(),name:file.name,durationMs,sizeBytes:file.size,spec:{sampleRate:decoded.sampleRate,bits:16,channels:decoded.numberOfChannels},lossless:false,bitrateBps:Math.min(20000000,Math.ceil(file.size*8000/durationMs)),contentHash,ossKey:result.ossKey};
+ throw new Error('本地文件云上传已停用，请从音乐搜索或音乐库添加歌曲');
 }
 export async function setVolume(volume: number) { if (audio) audio.volume=volume; }
-export async function capabilities(): Promise<{ native: boolean; reason: string; capture: boolean }> { return desktop ? invoke('media_capabilities') : { native: false, capture: false, reason: 'OSS 音乐播放与 WebSocket 同步' }; }
+export async function capabilities(): Promise<{ native: boolean; reason: string; capture: boolean }> { return desktop ? invoke('media_capabilities') : { native: false, capture: false, reason: '音乐直链播放与 WebSocket 同步' }; }
 
 let audio = typeof Audio === 'undefined' ? null : new Audio();
 export function createPlaybackWaveform() { return audio ? new AudioWaveform(() => audio) : null; }
@@ -160,7 +164,7 @@ function replacePlaybackAudio(previous: HTMLAudioElement) {
   audio = next; return next;
 }
 const cloudPlayer = audio ? new CloudPlayer(audio,
-  async (roomId, trackId, track) => loadPlaybackSource(async () => (await browserRequest(`/rooms/${roomId}/music/${trackId}`)).url, desktop, track,
+  async (roomId, trackId, track) => loadPlaybackSource(async (refresh=false) => (await browserRequest(`/rooms/${roomId}/music/${trackId}`+(refresh?'?refresh=1':''))).url, desktop, track,
     ()=>browserAudio(roomId,trackId,track)),
   send, emit, Date.now, replacePlaybackAudio) : null;
 export async function browserAudio(roomId:string,trackId:string,track:TrackMetadata):Promise<ArrayBuffer>{
@@ -193,7 +197,7 @@ export type MusicSearchItem = { id: string; name: string; artists: string; album
 export type UploadedMusicItem = Omit<MusicSearchItem,'durationMs'> & {durationMs:number|null;sizeBytes:number|null;canAdd?:boolean};
 export async function addUploadedMusic(roomId:string,hash:string,requestId:string):Promise<TrackMetadata> {
  const result=await browserRequest(`/rooms/${roomId}/music/uploaded`,{hash,requestId});
- if(!result.ok||!result.track?.ossKey)throw new Error('MUSIC_IMPORT_FAILED');
+ if(!result.ok||!result.track?.sourceUrl)throw new Error('MUSIC_IMPORT_FAILED');
  rememberTrackArtwork(base,result.track.contentHash,albumCover(result.track.coverUrl));
  return result.track;
 }
@@ -212,7 +216,7 @@ export async function searchMusic(keywords: string, offset = 0): Promise<{ songs
 }
 export async function addSearchedMusic(roomId:string,songId:string,requestId:string,coverUrl?:string) {
  const result = await browserRequest(`/rooms/${roomId}/music/netease`,{songId,requestId});
- if(!result.ok || !result.track?.ossKey)throw new Error('MUSIC_IMPORT_FAILED');
+ if(!result.ok || !result.track?.sourceUrl)throw new Error('MUSIC_IMPORT_FAILED');
  rememberTrackArtwork(base,result.track.contentHash,albumCover(result.track.coverUrl)||coverUrl);
  return result.track as TrackMetadata;
 }
@@ -238,8 +242,27 @@ function checkMusicResult(data:any) { if(data.code!==200)throw new Error(data.co
 function musicItem(song:any):MusicSearchItem {
   return {id:String(song.id),name:String(song.name??''),artists:(song.ar??song.artists??[]).map((a:any)=>a.name).join(' / '),album:String(song.al?.name??song.album?.name??''),coverUrl:albumCover(song.al?.picUrl??song.album?.picUrl),durationMs:Number(song.dt??song.duration??0)};
 }
+export async function similarMusic(id:string,signal?:AbortSignal):Promise<MusicSearchItem[]> {
+  if(!/^\d{1,20}$/.test(id))throw new Error('INVALID_REQUEST');
+  const data=checkMusicResult(await browserRequest('/netease/simi_song?'+new URLSearchParams({id,limit:'12',offset:'0'}),undefined,signal));
+  const seen=new Set([id]);
+  return (Array.isArray(data.songs)?data.songs:[]).map(musicItem).filter((song:MusicSearchItem)=>{
+    if(!/^\d{1,20}$/.test(song.id)||!song.name.trim()||seen.has(song.id))return false;
+    seen.add(song.id);return true;
+  });
+}
 export type MusicPlaylist={id:string;name:string;coverUrl:string;trackCount:number;creatorId:string};
 function playlistItem(p:any):MusicPlaylist { return {id:String(p.id),name:String(p.name??''),coverUrl:albumCover(p.coverImgUrl),trackCount:Number(p.trackCount??0),creatorId:String(p.creator?.userId??'')}; }
+export async function resolvePlaylistLink(input:string):Promise<{id:string}> {
+  try{return {id:parsePlaylistLink(input).id};}catch(error){
+    if(!isPlaylistShortLink(input))throw error;
+  }
+  let result:any;
+  try{result=await browserRequest('/music/playlist/resolve',{input:playlistReference(input)});}
+  catch(error){const code=error instanceof Error?error.message:String(error);if(code==='HTTP 404'||code==='服务器返回非 JSON 响应（HTTP 404）')throw new Error('PLAYLIST_LINK_ENDPOINT_UNAVAILABLE');throw error;}
+  if(typeof result?.id!=='string'||!/^\d{1,20}$/.test(result.id))throw new Error('PLAYLIST_LINK_RESOLVE_FAILED');
+  return {id:result.id};
+}
 export async function playlistDetail(id:string):Promise<MusicPlaylist> {
   const data=checkMusicResult(await browserRequest('/netease/playlist_detail?'+new URLSearchParams({id})));return playlistItem(data.playlist);
 }

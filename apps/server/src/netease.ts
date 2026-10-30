@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
-import { Database } from './database';
+import type { DatabaseStore } from './database';
 import { DomainError } from './engine';
 
 type Result = { body: Record<string, any>; cookie?: string[] };
@@ -18,7 +18,7 @@ const invoke: MusicInvoker = (name, params) => new Promise((resolve, reject) => 
   worker.once('error', () => { finish(); reject(new DomainError('NETEASE_UNAVAILABLE')); });
   worker.once('exit', () => { clearTimeout(timer); reject(new DomainError('NETEASE_UNAVAILABLE')); });
 });
-export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'song_detail', 'song_url', 'song_url_v1', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_account', 'user_cloud', 'login_status']);
+export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'simi_song', 'song_detail', 'song_url', 'song_url_v1', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_account', 'user_cloud', 'login_status']);
 function publicBody(value: any): any {
   if (Array.isArray(value)) return value.map(publicBody);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([k]) => !/^(cookie|token|accessToken|refreshToken|__csrf|MUSIC_U)$/i.test(k)).map(([k, v]) => [k, publicBody(v)]));
@@ -27,12 +27,12 @@ function publicBody(value: any): any {
 export class NeteaseService {
   private attempt?: { id: string; key: string; expiresAt: number; lastCheck: number; code: number; pending?: Promise<{ code: number }> };
   private generation = 0;
-  constructor(private db: Database, private api: MusicInvoker = invoke, private now = Date.now) {}
+  constructor(private db: DatabaseStore, private api: MusicInvoker = invoke, private now = Date.now) {}
   private async request(name: string, params: Record<string, unknown> = {}) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
-        this.api(name, { ...params, cookie: this.db.getSetting('netease.cookie') ?? '', timestamp: this.now() }),
+        this.api(name, { ...params, cookie: await this.db.getSetting('netease.cookie') ?? '', timestamp: this.now() }),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new DomainError('NETEASE_UNAVAILABLE')), 20000); }),
       ]);
     } catch { throw new DomainError('NETEASE_UNAVAILABLE'); }
@@ -43,10 +43,10 @@ export class NeteaseService {
     // Do not allow browser callers to inject credentials, proxies or network addresses.
     const allowed = new Set(['keywords', 'limit', 'offset', 'type', 'id', 'ids', 'uid', 'level', 'br']);
     const clean = Object.fromEntries(Object.entries(params).filter(([key]) => allowed.has(key)));
-    if(['lyric_new','playlist_track_all','playlist_detail','user_playlist'].includes(name)){
+    if(['simi_song','lyric_new','playlist_track_all','playlist_detail','user_playlist'].includes(name)){
       const key=name==='user_playlist'?'uid':'id';
       if(!/^\d{1,20}$/.test(String(clean[key]??'')))throw new DomainError('INVALID_REQUEST');
-      if(name==='playlist_track_all'||name==='user_playlist'){
+      if(name==='simi_song'||name==='playlist_track_all'||name==='user_playlist'){
         const limit=Number(clean.limit??(name==='user_playlist'?30:50)),offset=Number(clean.offset??0);
         if(!Number.isInteger(limit)||limit<1||limit>100||!Number.isInteger(offset)||offset<0||offset>100000)throw new DomainError('INVALID_REQUEST');
         clean.limit=limit;clean.offset=offset;
@@ -82,7 +82,7 @@ export class NeteaseService {
       if (code === 803) {
         const cookie = Array.isArray(result.cookie) && result.cookie.length ? result.cookie.map(c => c.split(';')[0]).join('; ') : result.body.cookie;
         if (typeof cookie !== 'string' || cookie.length > 64000 || !/(?:^|;\s*)MUSIC_U=[^;\s]+/.test(cookie)) throw new DomainError('NETEASE_INVALID_RESPONSE');
-        this.db.setSetting('netease.cookie', cookie);
+        await this.db.setSetting('netease.cookie', cookie);
       }
       attempt.code = code; return { code };
     })();

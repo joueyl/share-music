@@ -15,7 +15,7 @@ class Client {
 async function api(path: string, body?: unknown, token?: string) { const res = await fetch(base + '/api' + path, { method: body ? 'POST' : 'GET', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) }); return { status: res.status, data: await res.json() }; }
 beforeAll(async () => {
  const temporary = createServer(); await new Promise<void>(r => temporary.listen(0, '127.0.0.1', r)); port = (temporary.address() as { port: number }).port; await new Promise<void>(r => temporary.close(() => r())); base = `http://127.0.0.1:${port}`;
- child = spawn(process.execPath, [resolve('apps/server/dist/apps/server/src/main.js')], { env: { ...process.env, PORT: String(port), DATABASE_PATH: ':memory:', TOKEN_SECRET: 'integration-secret-'.repeat(3), TURN_SECRET: 'integration-turn-'.repeat(3), TURN_PUBLIC_HOST: 'turn.example.com', TURN_PROVIDER: 'static', TURN_URLS: 'turn:relay.example.com:80?transport=udp,turns:relay.example.com:443?transport=tcp', TURN_USERNAME: 'integration-user', TURN_PASSWORD: 'integration-password' }, stdio: ['ignore', 'pipe', 'pipe'] });
+ child = spawn(process.execPath, [resolve('apps/server/dist/apps/server/src/main.js')], { env: { ...process.env, PORT: String(port), NETEASE_ADMIN_TOKEN:'', NETEASE_LOGIN_ORIGIN:'', DATABASE_DRIVER:'sqlite', DATABASE_PATH: ':memory:', TOKEN_SECRET: 'integration-secret-'.repeat(3), TURN_SECRET: 'integration-turn-'.repeat(3), TURN_PUBLIC_HOST: 'turn.example.com', TURN_PROVIDER: 'static', TURN_URLS: 'turn:relay.example.com:80?transport=udp,turns:relay.example.com:443?transport=tcp', TURN_USERNAME: 'integration-user', TURN_PASSWORD: 'integration-password' }, stdio: ['ignore', 'pipe', 'pipe'] });
  child.stdout?.on('data', data => log += data.toString()); child.stderr?.on('data', data => log += data.toString());
  for (let i = 0; i < 100; i++) { try { if ((await api('/health')).status === 200) return; } catch {} if (child.exitCode !== null) throw new Error(log); await new Promise(r => setTimeout(r, 50)); } throw new Error(log);
 }, 10000);
@@ -105,6 +105,17 @@ it('isolates room chat, validates messages, confirms retries and restores histor
  for(const text of ['   ','x'.repeat(501)]){const id=randomUUID();member.send({type:'chat',roomId:room.id,requestId:id,text});expect((await member.wait(m=>m.type==='chat-error'&&m.requestId===id)).error).toBe('INVALID_REQUEST');}
  const forged=randomUUID();member.send({type:'chat',roomId:room.id,requestId:forged,text:'test',userName:'fake'});expect((await member.wait(m=>m.type==='chat-error'&&m.requestId===forged)).error).toBe('INVALID_REQUEST');
  member.send({type:'leave'});member.send({type:'join',roomId:room.id});const history=await member.wait(m=>m.type==='chat-history');expect(history.messages).toEqual([own]);
+ const latest=(await api(`/rooms/${room.id}`,undefined,a.token)).data;
+ // A real queue command produces one shared activity and survives rejoin.
+ const activityTrack={id:randomUUID(),name:'晚风',durationMs:120000,sizeBytes:1024,spec:{sampleRate:48000,bits:24,channels:2},lossless:true,bitrateBps:900000,contentHash:'c'.repeat(64)};
+ const operation={commandId:randomUUID(),roomId:room.id,expectedStateVersion:latest.stateVersion,action:{type:'enqueue',payload:activityTrack}};
+ host.send({type:'command',data:operation});expect((await host.wait(m=>m.type==='result'&&m.commandId===operation.commandId)).ok).toBe(true);
+ const activity=(await host.wait(m=>m.type==='chat'&&m.data.kind==='activity')).data;
+ expect(activity).toMatchObject({userId:a.user.id,userName:'chat-alice',text:'将《晚风》加入了播放列表',requestId:operation.commandId});
+ expect((await member.wait(m=>m.type==='chat'&&m.data.kind==='activity')).data).toEqual(activity);
+ host.send({type:'command',data:operation});await host.wait(m=>m.type==='result'&&m.commandId===operation.commandId);
+ member.send({type:'leave'});member.send({type:'join',roomId:room.id});
+ expect((await member.wait(m=>m.type==='chat-history')).messages).toEqual([own,activity]);
  // A subsequent clock reply is an ordering barrier on the outsider's socket.
  const clock=randomUUID();outsider.send({type:'clock',requestId:clock,clientSentAt:Date.now()});await outsider.wait(m=>m.type==='clock'&&m.requestId===clock);
  expect(outsider.queue.some(m=>m.type==='chat')).toBe(false);

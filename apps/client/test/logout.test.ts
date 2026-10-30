@@ -179,7 +179,7 @@ it('loads playlist metadata, user pages, paginated songs and word lyrics through
 
 it('adds uploaded music using its hash and a stable request ID without uploading audio',async()=>{
  const bridge=await import('../src/bridge');await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
- const hash='f'.repeat(64),track={id:crypto.randomUUID(),name:'已上传歌曲',contentHash:hash,ossKey:`music/files/${hash}/song.mp3`};
+ const hash='f'.repeat(64),track={id:crypto.randomUUID(),name:'已上传歌曲',contentHash:hash,sourceUrl:'https://m801.music.126.net/song.mp3'};
  const fetcher=vi.fn(async()=>({ok:true,json:async()=>({ok:true,track})}));vi.stubGlobal('fetch',fetcher);
  const requestId=crypto.randomUUID();expect(await bridge.addUploadedMusic('room-id',hash,requestId)).toEqual(track);
  const [url,options]=fetcher.mock.calls[0] as unknown as [string,RequestInit];

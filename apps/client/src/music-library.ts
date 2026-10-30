@@ -1,14 +1,4 @@
-export function parsePlaylistLink(input:string):{id:string;creatorId?:string} {
-  const value=input.trim();
-  if(/^\d{1,20}$/.test(value))return {id:value};
-  let url:URL;try{url=new URL(value);}catch{throw new Error('请输入有效的网易云歌单链接或歌单 ID');}
-  if(!['https:','http:'].includes(url.protocol)||url.hostname!=='music.163.com'||url.username||url.password||url.port)throw new Error('仅支持 music.163.com 的歌单链接');
-  // Desktop share URLs use /#/playlist?id=..., mobile uses /m/playlist?id=... .
-  const path=url.hash.startsWith('#/')?new URL(url.hash.slice(1),url.origin):url;
-  const id=path.searchParams.get('id'),creatorId=path.searchParams.get('creatorId')??url.searchParams.get('creatorId');
-  if(!/^\/(?:m\/)?playlist\/?$/.test(path.pathname)||!id||!/^\d{1,20}$/.test(id))throw new Error('链接中缺少有效的歌单 ID');
-  return {id,...(creatorId&&/^\d{1,20}$/.test(creatorId)?{creatorId}:{})};
-}
+export { parsePlaylistLink } from '@music-share/shared';
 
 export type LyricWord={start:number;duration:number;text:string};
 export type LyricLine={start:number;end:number;text:string;words:LyricWord[]};

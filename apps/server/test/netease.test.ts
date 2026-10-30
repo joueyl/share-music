@@ -17,6 +17,16 @@ function fixture() {
  const service=new NeteaseService(db,api,()=>now);
  return { db,api,service,advance:()=>now+=2500,status:(n:number)=>code=n,cookie:(v:string)=>cookie=v };
 }
+it('allows bounded similar-song requests while rejecting invalid IDs and stripping network overrides',async()=>{
+ const f=fixture();try{
+  await f.service.call('simi_song',{id:'123',limit:'12',offset:'0',proxy:'http://evil.test',cookie:'wrong'});
+  expect(f.api.mock.calls.at(-1)).toEqual(['simi_song',expect.objectContaining({id:'123',limit:12,offset:0,cookie:''})]);
+  expect(f.api.mock.calls.at(-1)?.[1]).not.toHaveProperty('proxy');
+  const calls=f.api.mock.calls.length;
+  for(const params of [{id:'abc'},{id:'123',limit:101},{id:'123',offset:-1}])await expect(f.service.call('simi_song',params)).rejects.toThrow('INVALID_REQUEST');
+  expect(f.api).toHaveBeenCalledTimes(calls);
+ }finally{f.db.close();}
+});
 it('supports bounded playlist pages and word lyrics without accepting credential or URL overrides',async()=>{
  const f=fixture();try{
   await f.service.call('playlist_track_all',{id:'2991837660',limit:'50',offset:'50',proxy:'http://evil.test'});

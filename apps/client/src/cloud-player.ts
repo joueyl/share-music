@@ -1,4 +1,4 @@
-import { positionAt, type RoomSnapshot, type TrackMetadata } from '@music-share/shared';
+import { positionAt, hasRemoteAudio, type RoomSnapshot, type TrackMetadata } from '@music-share/shared';
 import type { PlaybackSource } from './playback-source';
 
 /** A transition is ready only after the media has actually sought and buffered at its target. */
@@ -6,6 +6,7 @@ export class CloudPlayer {
   private room: RoomSnapshot | null = null;
   private offset = 0;
   private epoch = -1;
+  private identity = '';
   private source = '';
   private generation = 0;
   private loading = false;
@@ -27,7 +28,7 @@ export class CloudPlayer {
     const audio = this.audio;
     audio.onloadedmetadata = audio.oncanplay = audio.onseeked = () => this.prepare();
     audio.onerror = () => {
-      // CORS enables waveform access. Older buckets can still play without analysis.
+      // CORS enables waveform access. Some music providers can still play without analysis.
       if (audio.crossOrigin === 'anonymous' && audio.src && !audio.src.startsWith('blob:')) {
         this.ready = false;
         if (this.replaceAudio) {
@@ -40,12 +41,14 @@ export class CloudPlayer {
         } else { audio.removeAttribute('crossorigin'); audio.load(); }
         return;
       }
-      this.emit('server-message', { type: 'error', error: '音乐加载失败，请检查 OSS 或格式' });
+      this.ready = false; this.loading = false; this.source = '';
+      this.emit('media-status', { status: 'error', detail: '当前音频无法播放，请重新选择歌曲', bufferedMs: 0, driftMs: 0, receiveBps: 0 });
+      this.emit('server-message', { type: 'error', error: '音乐加载失败，请重试获取音乐链接' });
     };
   }
 
   clear() {
-    this.room = null; this.epoch = -1; this.source = ''; ++this.generation;
+    this.room = null; this.epoch = -1; this.identity = ''; this.source = ''; ++this.generation;
     this.ready = false; this.loading = false;
     this.audio.pause(); this.audio.removeAttribute('src'); this.audio.load();
     this.releaseSource?.(); this.releaseSource = undefined;
@@ -55,12 +58,13 @@ export class CloudPlayer {
     this.room = room; this.offset = offset;
     const p = room.pending?.playback ?? room.playback;
     const track = room.playlist.find(t => t.id === p.sourceId);
-    if (!track?.ossKey) { this.clear(); return; }
-    if (this.epoch === p.sourceEpoch) return;
-    this.epoch = p.sourceEpoch; this.ready = false; this.reported = this.now();
+    if (!track || !hasRemoteAudio(track)) { this.clear(); return; }
+    const identity = `${room.id}/${track.id}`;
+    if (this.epoch === p.sourceEpoch && this.identity === identity) return;
+    this.identity = identity; this.epoch = p.sourceEpoch; this.ready = false; this.reported = this.now();
     this.audio.pause();
     // Seeking/pausing the same file must not discard its metadata and buffered data.
-    const source = `${room.id}/${track.ossKey}`;
+    const source = `${room.id}/${track.id}/${track.ossKey??track.contentHash}`;
     if (this.source === source) { this.prepare(); return; }
     this.source = source; this.loading = true;
     if (this.audio.src) { this.audio.removeAttribute('src'); this.audio.load(); }
@@ -75,7 +79,11 @@ export class CloudPlayer {
       this.audio.src = url; this.audio.load(); this.loading = false;
       this.prepare();
     } catch (error) {
-      if (generation === this.generation) this.emit('server-message', { type: 'error', error: String(error) });
+      if (generation === this.generation) {
+        this.loading = false; this.source = '';
+        this.emit('media-status', { status: 'error', detail: '音乐加载失败，请重新选择歌曲', bufferedMs: 0, driftMs: 0, receiveBps: 0 });
+        this.emit('server-message', { type: 'error', error: error instanceof Error ? error.message : String(error) });
+      }
     }
   }
 
@@ -91,6 +99,16 @@ export class CloudPlayer {
     if (this.audio.readyState < 3) return;
     this.ready = true;
     if (pending && !pending.committed) void this.send({ type: 'ready', roomId: this.room.id, transitionId: pending.id, sourceEpoch: this.epoch }).catch(() => {});
+  }
+
+  private bufferedMs() {
+    const ranges = this.audio.buffered;
+    if (!ranges) return 0;
+    for (let i = 0; i < ranges.length; i++) {
+      if (ranges.start(i) <= this.audio.currentTime && ranges.end(i) >= this.audio.currentTime)
+        return Math.max(0, (ranges.end(i) - this.audio.currentTime) * 1000);
+    }
+    return 0;
   }
 
   tick() {
@@ -111,7 +129,7 @@ export class CloudPlayer {
     if (p.playState !== 'playing') { this.audio.pause(); return; }
     if (this.audio.readyState < 3) return;
     if (this.audio.paused) void this.audio.play().catch(() => this.emit('server-message', { type: 'error', error: '请点击页面以允许播放' }));
-    this.emit('media-status', { status: this.audio.paused ? 'buffering' : 'playing', detail: 'OSS · WebSocket 同步', bufferedMs: 0, driftMs: drift, receiveBps: 0 });
+    this.emit('media-status', { status: this.audio.paused ? 'buffering' : 'playing', detail: '音乐直链 · WebSocket 同步', bufferedMs: this.bufferedMs(), driftMs: drift, receiveBps: 0 });
     if (!this.room.pending && this.now() - this.reported > 1000 && !this.audio.paused) {
       this.reported = this.now();
       void this.send({ type: 'progress', roomId: this.room.id, sourceEpoch: this.epoch, positionMs: this.audio.currentTime * 1000, sampledAtServerMs: now }).catch(() => {});

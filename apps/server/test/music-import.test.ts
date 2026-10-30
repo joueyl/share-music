@@ -1,155 +1,88 @@
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
-import { OssStorage } from '../src/oss';
 import { Database } from '../src/database';
 import { RoomEngine } from '../src/engine';
 import { MusicImport, downloadMusic, musicDownloadUrl, mp3Spec, songFilename, songCover } from '../src/music-import';
-import { trackSchema } from '../../../packages/shared/src';
 const bytes=Buffer.concat([Buffer.from([255,251,144,0]),Buffer.alloc(1000)]);
-function setup(){
- const engine=new RoomEngine(),user=randomUUID(),room=engine.create('test',user);engine.join(room.id,{id:user,name:'host'});
- const call=vi.fn(async(method:string)=>method==='song_detail'?{songs:[{id:123,name:'测试歌曲',ar:[{name:'测试歌手'}],dt:120000}]}:{data:[{id:123,url:'https://m801.music.126.net/audio.mp3',code:200,type:'mp3',br:128000}]});
- const upload=vi.fn(async(id:string,data:Buffer,_filename?:string)=>({ossKey:`music/${id}/${randomUUID()}`}));
- const request=vi.fn(async()=>new Response(bytes,{headers:{'content-type':'audio/mpeg'}}));
- const importer=new MusicImport(engine,{call},{upload},request as typeof fetch);
- return {engine,user,room,call,upload,request,importer};
+const databases:Database[]=[];afterEach(()=>{for(const db of databases.splice(0))db.close();});
+function fixture(){
+ const db=new Database(':memory:');databases.push(db);let now=100000,version=1;
+ const ref:{value?:MusicImport}={};const engine=new RoomEngine(undefined,undefined,()=>now,(url,hash)=>ref.value?.registered(url,hash)??false);
+ const user=randomUUID(),room=engine.create('test',user);engine.join(room.id,{id:user,name:'host'});
+ const call=vi.fn(async(method:string)=>method==='song_detail'?{songs:[{id:123,name:'测试歌曲',ar:[{name:'测试歌手'}],dt:120000,al:{name:'专辑',picUrl:'http://p1.music.126.net/cover.jpg'}}]}:{data:[{id:123,url:`https://m801.music.126.net/song.mp3?version=${version}`,code:200,type:'mp3',br:128000,expi:60}]} as any);
+ const request=vi.fn(async(_url:unknown)=>new Response(bytes));
+ const service=new MusicImport(engine,{call},request as typeof fetch,db,()=>now);ref.value=service;
+ return {db,engine,user,room,call,request,service,ref,time:(value:number)=>now=value,version:(value:number)=>version=value};
 }
-it('downloads on the server, uploads original bytes, enqueues and only then returns success',async()=>{
- const f=setup(),id=randomUUID();const track=await f.importer.add(f.room.id,f.user,'123',id);
- expect(f.call).toHaveBeenCalledWith('song_url_v1',{id:'123',level:'standard'});
- expect(f.upload).toHaveBeenCalledWith(f.user,bytes,'测试歌曲 - 测试歌手.mp3');expect(track.ossKey).toMatch(/^music\//);
- expect(track.spec).toEqual({sampleRate:44100,bits:16,channels:2});expect(track.contentHash).toMatch(/^[a-f0-9]{64}$/);
- expect(f.engine.snapshot(f.room.id).playlist[0].id).toBe(track.id);
- expect((await f.importer.add(f.room.id,f.user,'123',id)).id).toBe(track.id);expect(f.upload).toHaveBeenCalledOnce();
+it('persists the original music link and expiry, never an OSS object, while validating audio metadata',async()=>{
+ const f=fixture(),id=randomUUID(),track=await f.service.add(f.room.id,f.user,'123',id);
+ expect(track).toMatchObject({sourceUrl:'https://m801.music.126.net/song.mp3?version=1',sourceExpiresAt:160000,neteaseId:'123',artists:'测试歌手',album:'专辑',spec:{sampleRate:44100,bits:16,channels:2}});
+ expect(track.ossKey).toBeUndefined();expect(track.ossUrl).toBeUndefined();expect(track.contentHash).toMatch(/^[a-f0-9]{64}$/);
+ expect(String(f.request.mock.calls[0][0])).toBe(track.sourceUrl);
+ expect(f.db.getMusicSource('netease','netease:standard:123')).toMatchObject({...track,id:expect.any(String)});
+ expect(f.db.db.prepare('SELECT COUNT(*) AS total FROM music_assets').get()?.total).toBe(0);
+ expect((await f.service.add(f.room.id,f.user,'123',id)).id).toBe(track.id);expect(f.request).toHaveBeenCalledOnce();
 });
-it('deduplicates simultaneous retries and rejects request ID reuse for another song',async()=>{
- const f=setup(),id=randomUUID();const [a,b]=await Promise.all([f.importer.add(f.room.id,f.user,'123',id),f.importer.add(f.room.id,f.user,'123',id)]);expect(a.id).toBe(b.id);expect(f.upload).toHaveBeenCalledOnce();
- expect(()=>f.importer.add(f.room.id,f.user,'124',id)).toThrow('COMMAND_ID_REUSED');
+it('coalesces parallel imports, rejects request reuse and reuses saved links after service recreation',async()=>{
+ const f=fixture(),id=randomUUID();const [a,b]=await Promise.all([f.service.add(f.room.id,f.user,'123',id),f.service.add(f.room.id,f.user,'123',id)]);
+ expect(a).toEqual(b);expect(()=>f.service.add(f.room.id,f.user,'124',id)).toThrow('COMMAND_ID_REUSED');
+ const restarted=new MusicImport(f.engine,{call:f.call},f.request as typeof fetch,f.db,()=>100000);f.ref.value=restarted;
+ const other=await restarted.add(f.room.id,f.user,'123',randomUUID());expect(other.id).not.toBe(a.id);expect(other.sourceUrl).toBe(a.sourceUrl);expect(f.request).toHaveBeenCalledOnce();
 });
-it('does not enqueue or report success when OSS rejects the upload; failed requests can retry',async()=>{
- const f=setup(),id=randomUUID();f.upload.mockRejectedValueOnce(new Error('OSS_UPLOAD_FAILED'));
- await expect(f.importer.add(f.room.id,f.user,'123',id)).rejects.toThrow('OSS_UPLOAD_FAILED');expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(0);
- await expect(f.importer.add(f.room.id,f.user,'123',id)).resolves.toHaveProperty('ossKey');
+it('refreshes expired links by stable song id and persists the new URL without uploading',async()=>{
+ const f=fixture(),track=await f.service.add(f.room.id,f.user,'123',randomUUID());f.time(140000);f.version(2);
+ expect(await f.service.url(f.room.id,f.user,track.id)).toContain('version=2');
+ expect(f.db.getMusicSource('netease','netease:standard:123')).toMatchObject({sourceExpiresAt:200000,sourceUrl:expect.stringContaining('version=2')});
+ expect(f.call).toHaveBeenCalledTimes(4);expect(f.request).toHaveBeenCalledTimes(2);
 });
-it('rejects trial-only and unavailable sources before download or upload',async()=>{
- for(const audio of [{id:123,url:null},{id:123,url:'https://m801.music.126.net/a',freeTrialInfo:{start:0,end:30}}]){
- const f=setup();f.call.mockImplementation(async(method:string)=>method==='song_detail'?{songs:[{id:123,name:'test',dt:120000}]}:{data:[audio]} as any);
- await expect(f.importer.add(f.room.id,f.user,'123',randomUUID())).rejects.toThrow(/MUSIC_NOT_AVAILABLE|MUSIC_TRIAL_ONLY/);expect(f.request).not.toHaveBeenCalled();expect(f.upload).not.toHaveBeenCalled();}
+it('forces exactly one refresh after an early 403 and verifies the replacement bytes',async()=>{
+ const f=fixture(),track=await f.service.add(f.room.id,f.user,'123',randomUUID());f.version(2);
+ f.request.mockImplementation(async(url)=>String(url).includes('version=1')?new Response(null,{status:403}):new Response(bytes));
+ expect(await f.service.readAudio(f.room.id,f.user,track.id)).toEqual(bytes);
+ expect(f.call).toHaveBeenCalledTimes(4);expect(f.request).toHaveBeenCalledTimes(4);
 });
-it('checks membership before work and again after upload',async()=>{
- const f=setup();expect(()=>f.importer.add(f.room.id,randomUUID(),'123',randomUUID())).toThrow('NOT_IN_ROOM');
- f.upload.mockImplementationOnce(async(id:string)=>{f.engine.leave(f.room.id,f.user);return {ossKey:`music/${id}/${randomUUID()}`};});
- await expect(f.importer.add(f.room.id,f.user,'123',randomUUID())).rejects.toThrow('NOT_IN_ROOM');expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(0);
+it('does not loop when refreshed links are also invalid and sanitizes transport errors',async()=>{
+ const f=fixture(),track=await f.service.add(f.room.id,f.user,'123',randomUUID());
+ f.request.mockResolvedValue(new Response(null,{status:403}));
+ await expect(f.service.readAudio(f.room.id,f.user,track.id)).rejects.toThrow('MUSIC_LINK_EXPIRED');expect(f.call).toHaveBeenCalledTimes(4);
+ const secret=vi.fn(async()=>{throw Error('https://secret-provider-url/token');});
+ await expect(downloadMusic('https://m801.music.126.net/a',secret)).rejects.toThrow(/^MUSIC_DOWNLOAD_FAILED$/);
 });
-it('blocks local/private destinations, credentials, ports and untrusted redirects',async()=>{
- for(const url of ['http://127.0.0.1/a','https://m801.music.126.net.evil.test/a','https://user:pass@m801.music.126.net/a','file:///etc/passwd','https://m801.music.126.net:8080/a'])expect(()=>musicDownloadUrl(url)).toThrow('MUSIC_SOURCE_INVALID');
+it('rejects changed content rather than weakening the verified client cache',async()=>{
+ const f=fixture(),track=await f.service.add(f.room.id,f.user,'123',randomUUID());f.time(140000);
+ f.request.mockResolvedValue(new Response(Buffer.concat([bytes,Buffer.from('changed')])));
+ await expect(f.service.url(f.room.id,f.user,track.id)).rejects.toThrow('MUSIC_CONTENT_CHANGED');
+});
+it('rechecks membership after awaiting remote work and retains a reusable database record',async()=>{
+ const f=fixture();f.request.mockImplementationOnce(async()=>{f.engine.leave(f.room.id,f.user);return new Response(bytes);});
+ await expect(f.service.add(f.room.id,f.user,'123',randomUUID())).rejects.toThrow('NOT_IN_ROOM');
+ expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(0);expect(f.db.getMusicSource('netease','netease:standard:123')?.sourceUrl).toBeDefined();
+ f.engine.join(f.room.id,{id:f.user,name:'host'});await f.service.add(f.room.id,f.user,'123',randomUUID());expect(f.request).toHaveBeenCalledOnce();
+});
+it('makes legacy database songs refreshable by song id without contacting OSS',async()=>{
+ const f=fixture(),track=await f.service.add(f.room.id,f.user,'123',randomUUID());
+ const old={...track,sourceUrl:undefined,sourceExpiresAt:undefined,neteaseId:undefined,ossKey:'music/old/key'};
+ f.db.saveMusicSource('old-bucket','netease:standard:123',old);
+ expect(f.db.musicLibrary('',0,20).total).toBe(1);
+ const added=await f.service.addUploaded(f.room.id,f.user,track.contentHash,randomUUID());expect(added.sourceUrl).toBeDefined();expect(added.ossKey).toBeUndefined();
+ await expect(f.service.addUploaded(f.room.id,f.user,'f'.repeat(64),randomUUID())).rejects.toThrow('TRACK_NOT_FOUND');
+});
+it('rejects forged remote references in the engine unless registered by the server',async()=>{
+ const f=fixture(),track=await f.service.add(f.room.id,f.user,'123',randomUUID());
+ expect(()=>f.engine.command(f.user,{roomId:f.room.id,commandId:randomUUID(),expectedStateVersion:f.engine.snapshot(f.room.id).stateVersion,action:{type:'enqueue',payload:{...track,id:randomUUID(),contentHash:'f'.repeat(64)}}})).toThrow('FORBIDDEN');
+});
+it('blocks credentials, private hosts, ports, fragments and untrusted redirects',async()=>{
+ for(const url of ['http://127.0.0.1/a','https://m801.music.126.net.evil.test/a','https://u:p@m801.music.126.net/a','file:///secret','https://m801.music.126.net:8443/a','https://m801.music.126.net/a#fragment'])expect(()=>musicDownloadUrl(url)).toThrow('MUSIC_SOURCE_INVALID');
  expect(musicDownloadUrl('http://m801.music.126.net/a').protocol).toBe('https:');
- const request=vi.fn(async()=>new Response(null,{status:302,headers:{location:'http://127.0.0.1/secret'}}));
- await expect(downloadMusic('https://m801.music.126.net/a',request as typeof fetch)).rejects.toThrow('MUSIC_SOURCE_INVALID');expect(request).toHaveBeenCalledOnce();
+ await expect(downloadMusic('https://m801.music.126.net/a',async()=>new Response(null,{status:302,headers:{location:'http://127.0.0.1/private'}}))).rejects.toThrow('MUSIC_SOURCE_INVALID');
 });
-it('rejects huge, empty or invalid audio instead of uploading an error page',async()=>{
- await expect(downloadMusic('https://m801.music.126.net/a',async()=>new Response('too big',{headers:{'content-length':String(101*1024*1024)}}))).rejects.toThrow('MUSIC_TOO_LARGE');
- await expect(downloadMusic('https://m801.music.126.net/a',async()=>new Response(''))).rejects.toThrow('MUSIC_DOWNLOAD_FAILED');
- expect(()=>mp3Spec(Buffer.from('<html>error</html>'))).toThrow('MUSIC_AUDIO_UNSUPPORTED');
+it('rejects trial-only or unavailable audio before downloading',async()=>{
+ for(const audio of [{id:123,url:null},{id:123,url:'https://m801.music.126.net/a',freeTrialInfo:{}}]){
+ const f=fixture();f.call.mockImplementation(async method=>method==='song_detail'?{songs:[{id:123,name:'test',dt:120000}]}:{data:[audio]});
+ await expect(f.service.add(f.room.id,f.user,'123',randomUUID())).rejects.toThrow(/MUSIC_NOT_AVAILABLE|MUSIC_TRIAL_ONLY/);expect(f.request).not.toHaveBeenCalled();}
 });
-
-it('reuses a persisted song index across service recreation, request IDs and rooms without downloading or uploading again',async()=>{
- const f=setup(),db=new Database(':memory:');const exists=vi.fn(async()=>true),oss={upload:f.upload,exists,scope:()=> 'bucket-a'};
- try{
- const first=new MusicImport(f.engine,{call:f.call},oss,f.request as typeof fetch,db);
- const a=await first.add(f.room.id,f.user,'123',randomUUID());
- const secondRoom=f.engine.create('other room',f.user);f.engine.join(secondRoom.id,{id:f.user,name:'host'});
- const restarted=new MusicImport(f.engine,{call:f.call},oss,f.request as typeof fetch,db);
- const b=await restarted.add(secondRoom.id,f.user,'123',randomUUID());
- expect(b.ossKey).toBe(a.ossKey);expect(b.id).not.toBe(a.id);expect(f.request).toHaveBeenCalledOnce();expect(f.upload).toHaveBeenCalledOnce();expect(f.call).toHaveBeenCalledTimes(2);
- }finally{db.close();}
-});
-it('coalesces simultaneous requests for the same song even with different request IDs',async()=>{
- const f=setup();const [a,b]=await Promise.all([f.importer.add(f.room.id,f.user,'123',randomUUID()),f.importer.add(f.room.id,f.user,'123',randomUUID())]);expect(a.ossKey).toBe(b.ossKey);expect(a.id).not.toBe(b.id);expect(f.upload).toHaveBeenCalledOnce();expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(2);
-});
-it('persists successful uploads even when enqueue subsequently fails, so retry does not upload again',async()=>{
- const f=setup(),db=new Database(':memory:');let lost=false;f.upload.mockImplementationOnce(async(id:string)=>{lost=true;f.engine.leave(f.room.id,f.user);return {ossKey:`music/${id}/${randomUUID()}`};});
- const importer=new MusicImport(f.engine,{call:f.call},{upload:f.upload,exists:async()=>true,scope:()=> 'bucket-a'},f.request as typeof fetch,db);
- try{await expect(importer.add(f.room.id,f.user,'123',randomUUID())).rejects.toThrow('NOT_IN_ROOM');expect(lost).toBe(true);f.engine.join(f.room.id,{id:f.user,name:'host'});await importer.add(f.room.id,f.user,'123',randomUUID());expect(f.upload).toHaveBeenCalledOnce();}finally{db.close();}
-});
-
-it('accepts registered shared assets across users but rejects forged asset references',async()=>{
- const f=setup(),db=new Database(':memory:');const objects=new Set<string>();let puts=0;
- const network=vi.fn(async(url:unknown,options?:RequestInit)=>{const key=new URL(String(url)).pathname;if(options?.method==='HEAD')return new Response(null,{status:objects.has(key)?200:404});objects.add(key);puts++;return new Response(null,{status:200});});
- const oss=new OssStorage({OSS_BUCKET:'test-bucket',OSS_REGION:'cn-hangzhou',OSS_ACCESS_KEY_ID:'test',OSS_ACCESS_KEY_SECRET:'test'},network as typeof fetch,db);
- const engine=new RoomEngine(undefined,undefined,Date.now,(key,hash)=>oss.registered(key,hash));const room=engine.create('registered',f.user);engine.join(room.id,{id:f.user,name:'owner'});const other=randomUUID();engine.join(room.id,{id:other,name:'member'});
- try{
- const service=new MusicImport(engine,{call:f.call},oss,f.request as typeof fetch,db);
- const a=await service.add(room.id,f.user,'123',randomUUID());const b=await service.add(room.id,other,'123',randomUUID());expect(a.ossKey).toBe(b.ossKey);expect(a.ossKey).toMatch(/测试歌曲 - 测试歌手\.mp3$/);expect(puts).toBe(1);expect(engine.snapshot(room.id).playlist).toHaveLength(2);
- expect(()=>engine.command(other,{roomId:room.id,commandId:randomUUID(),expectedStateVersion:engine.snapshot(room.id).stateVersion,action:{type:'enqueue',payload:{...a,id:randomUUID(),contentHash:'f'.repeat(64)}}})).toThrow('FORBIDDEN');
- }finally{db.close();}
-});
-
-it('includes real artist names, supports both artist schemas and deduplicates featured artists',()=>{
- expect(songFilename({name:'晴天',ar:[{name:'周杰伦'}]})).toBe('晴天 - 周杰伦.mp3');
- expect(songFilename({name:'合唱歌曲',ar:[{name:'歌手甲'},{name:'歌手乙'},{name:'歌手甲'}]})).toBe('合唱歌曲 - 歌手甲、歌手乙.mp3');
- expect(songFilename({name:'Love Story',artists:[{name:'Taylor Swift'}]})).toBe('Love Story - Taylor Swift.mp3');
- expect(()=>songFilename({name:'缺少歌手'})).toThrow('MUSIC_SOURCE_INVALID');
-});
-
-it('preserves album artwork in uploaded metadata, persisted assets and room snapshots',async()=>{
- const f=setup(),db=new Database(':memory:');
- f.call.mockImplementation(async(method:string)=>method==='song_detail'?{songs:[{id:123,name:'歌曲',ar:[{name:'歌手'}],dt:120000,al:{picUrl:'http://p1.music.126.net/cover.jpg'}}]}:{data:[{id:123,url:'https://m801.music.126.net/audio.mp3',code:200,type:'mp3'}]} as any);
- try{
-  const service=new MusicImport(f.engine,{call:f.call},{upload:f.upload},f.request as typeof fetch,db);
-  const track=await service.add(f.room.id,f.user,'123',randomUUID());
-  expect(track.coverUrl).toBe('https://p1.music.126.net/cover.jpg');
-  expect(f.engine.snapshot(f.room.id).playlist[0].coverUrl).toBe(track.coverUrl);
-  expect(db.getMusicSource('default','netease:standard:123')?.coverUrl).toBe(track.coverUrl);
-  expect(trackSchema.parse(track).coverUrl).toBe(track.coverUrl);
-  expect(track.neteaseId).toBe('123');expect(track.artists).toBe('歌手');
-  expect(db.getMusicDetail('default','netease:standard:123')).toMatchObject({id:123,name:'歌曲'});
-  expect(service.metadata(f.room.id,f.user,track.id)).toMatchObject({neteaseId:'123',coverUrl:track.coverUrl});
-  expect(()=>service.metadata(f.room.id,randomUUID(),track.id)).toThrow('NOT_IN_ROOM');
- }finally{db.close();}
-});
-it('restores a song ID for a legacy room track by its persisted source association',async()=>{
- const f=setup(),db=new Database(':memory:');
- try{
-  const importer=new MusicImport(f.engine,{call:f.call},{upload:f.upload},f.request as typeof fetch,db);
-  const track=await importer.add(f.room.id,f.user,'123',randomUUID());
-  const {neteaseId,...old}=track;db.saveMusicSource('default','netease:standard:123',old);
-  expect(importer.metadata(f.room.id,f.user,track.id).neteaseId).toBe('123');
- }finally{db.close();}
-});
-it('backfills older cached artwork without re-uploading audio and tolerates unavailable metadata',async()=>{
- const f=setup(),db=new Database(':memory:');
- try{
-  const service=new MusicImport(f.engine,{call:f.call},{upload:f.upload,exists:async()=>true},f.request as typeof fetch,db);
-  const original=await service.add(f.room.id,f.user,'123',randomUUID());
-  expect(original.coverUrl).toBeNull();
-  const {coverUrl,...legacy}=original;db.saveMusicSource('default','netease:standard:123',legacy);
-  f.call.mockRejectedValueOnce(new Error('offline'));
-  const fallback=await service.add(f.room.id,f.user,'123',randomUUID());
-  expect(fallback.coverUrl).toBeUndefined();expect(fallback.ossKey).toBe(original.ossKey);
-  f.call.mockResolvedValueOnce({songs:[{id:123,album:{picUrl:'https://p2.music.126.net/legacy.jpg'}}]} as any);
-  const updated=await service.add(f.room.id,f.user,'123',randomUUID());
-  expect(updated.coverUrl).toBe('https://p2.music.126.net/legacy.jpg');
-  expect(f.upload).toHaveBeenCalledOnce();expect(f.request).toHaveBeenCalledOnce();
- }finally{db.close();}
-});
-it('treats missing, malformed and untrusted artwork as absent',()=>{
- for(const song of [{},{al:{picUrl:123}},{al:{picUrl:'javascript:alert(1)'}},{al:{picUrl:'https://evil.test/art.jpg'}}])expect(songCover(song)).toBeNull();
- expect(songCover({album:{picUrl:'http://p1.music.126.net/art.jpg'}})).toBe('https://p1.music.126.net/art.jpg');
-});
-
-it('recovers missing artwork for an existing playlist track using its exact source hash without re-importing audio',async()=>{
- const f=setup(),db=new Database(':memory:');
- try{
-  const service=new MusicImport(f.engine,{call:f.call},{upload:f.upload},f.request as typeof fetch,db);
-  const original=await service.add(f.room.id,f.user,'123',randomUUID());expect(original.coverUrl).toBeNull();
-  f.call.mockResolvedValueOnce({songs:[{id:123,al:{picUrl:'http://p1.music.163.com/cover.jpg'}}]} as any);
-  expect(await service.cover(f.room.id,f.user,original.id)).toBe('https://p1.music.163.com/cover.jpg');
-  expect(db.getMusicSource('default','netease:standard:123')?.coverUrl).toBe('https://p1.music.163.com/cover.jpg');
-  const requests=f.call.mock.calls.length;
-  expect(await service.cover(f.room.id,f.user,original.id)).toBe('https://p1.music.163.com/cover.jpg');
-  expect(f.call.mock.calls.length).toBe(requests);expect(f.upload).toHaveBeenCalledOnce();expect(f.request).toHaveBeenCalledOnce();
-  await expect(service.cover(f.room.id,randomUUID(),original.id)).rejects.toThrow('NOT_IN_ROOM');
-  await expect(service.cover(f.room.id,f.user,randomUUID())).rejects.toThrow('TRACK_NOT_FOUND');
- }finally{db.close();}
+it('bounds downloads and rejects empty or non-audio responses',async()=>{
+ await expect(downloadMusic('https://m801.music.126.net/a',async()=>new Response('big',{headers:{'content-length':String(101*1024*1024)}}))).rejects.toThrow('MUSIC_TOO_LARGE');
+ await expect(downloadMusic('https://m801.music.126.net/a',async()=>new Response(''))).rejects.toThrow('MUSIC_DOWNLOAD_FAILED');expect(()=>mp3Spec(Buffer.from('<html>'))).toThrow('MUSIC_AUDIO_UNSUPPORTED');
+ expect(songCover({al:{picUrl:'http://p1.music.126.net/cover.jpg'}})).toBe('https://p1.music.126.net/cover.jpg');expect(songFilename({name:'曲名',ar:[{name:'歌手'}]})).toBe('曲名 - 歌手.mp3');
 });

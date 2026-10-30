@@ -1,0 +1,9 @@
+/* Shared TONE foundation. Page geometry lives in brilliant.css and AuthPage.vue. */
+.chat-activity{display:flex;align-items:flex-start;gap:7px;margin:14px 0;padding:9px 11px;border-radius:12px;background:#e8eff680;color:#758398;font-size:11px;line-height:1.7}
+.chat-activity>svg{flex-shrink:0;margin-top:3px;color:#7897be}.chat-activity p{margin:0;min-width:0;overflow-wrap:anywhere;flex:1}.chat-activity strong{font-weight:500;color:#526b8c}.chat-activity time{flex-shrink:0;font-size:9px;opacity:.8;margin-top:2px;font-variant-numeric:tabular-nums}
+:root{--accent:#4f80db;--muted:#798394;--border:#dfe6ee;--surface:#ffffffb3;color:#283448;background:#edf2f5}
+body{background:linear-gradient(125deg,#ddeeff,#f2f1ed 60%,#fff2df);background-attachment:fixed}
+button{color:inherit}label{color:#65748a}textarea{font:inherit;width:100%;resize:vertical;min-height:90px;padding:12px;border:1px solid var(--border);border-radius:12px;color:#283448;background:#ffffffb3}
+.primary,.secondary{border-radius:24px}.primary{color:white}.primary:hover:not(:disabled){background:#4272c9}.secondary{background:#ffffffb3;border-color:#dfe6ee;color:#283448}.dot.online{background:#65a88b;box-shadow:none}
+.toast{background:#fffbf3;color:#7b6437}.modal{background:#fbfcfc;color:#283448;border:1px solid white;border-radius:24px;max-height:90dvh;overflow:auto}.modal-backdrop{background:#34445c40}.room-chat-header h3{color:#283448}.room-chat-empty,.chat-message-meta,.chat-message-meta time{color:#798394}
+.auth-shell>.main{padding:0;margin:0;width:100%}.auth-shell{background:linear-gradient(125deg,#ddeeff,#f2f1ed 60%,#fff2df);min-height:100dvh}

@@ -1,3 +1,15 @@
+# 当前安装包依赖（2026-10-29）
+
+当前安装包不携带 FFmpeg、FLAC、Opus、SDL2、libdatachannel 或 vcpkg 动态媒体依赖。HTML Audio 由系统 WebView 提供，Rust HTTP 下载与缓存只校验字节，不解码音频。Tauri、Vue 等依赖按各自许可证分发。
+
+系统媒体控制使用 souvlaki（MIT），许可证随包提供于 licenses/souvlaki/LICENSE。Windows 使用 WebView2 与系统 Win32 API，并由 Tauri 按 Microsoft 条款提供必要运行库。
+
+---
+
+## 历史原生媒体包通知（不适用于当前 WebView 安装包）
+
+以下保留旧发布包对应的依赖和许可信息，供历史版本合规与排查使用。
+
 # 媒体依赖与源码
 
 系统媒体控制使用 [souvlaki 0.8.3](https://github.com/Sinono3/souvlaki)（MIT License），通过 Windows SMTC / Linux MPRIS 与操作系统交互；许可证原文随安装包置于 `licenses/souvlaki/LICENSE`。Windows 任务栏缩略图按钮另外使用 Microsoft Win32 Taskbar API。

@@ -7,7 +7,8 @@ services:
     environment:
       NODE_ENV: production
       BIND_ADDRESS: 0.0.0.0
-      DATABASE_PATH: /data/music-share.sqlite
+      DATABASE_DRIVER: mysql
+      # DATABASE_URL 从 env_file 读取；MySQL 位于宿主机时主机名使用 host.docker.internal。
     ports:
       - "127.0.0.1:3000:3000"
     volumes:

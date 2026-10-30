@@ -45,3 +45,11 @@ input[type=checkbox]:not(:disabled):active{transform:scale(.9)}
  .page-enter-from,.page-leave-to,.toast-enter-from,.toast-leave-to,.list-enter-from,.list-leave-to{transform:none}
  .modal-enter-from>.modal,.modal-leave-to>.modal{transform:none}
 }
+/* Queue enters from the right; keep it mounted and scroll-locked through its exit. */
+.drawer-enter-active,.drawer-leave-active{transition:opacity var(--motion-normal) var(--motion-ease)}
+.drawer-enter-active>.queue-drawer,.drawer-leave-active>.queue-drawer{transition:transform var(--motion-normal) var(--motion-ease);will-change:transform}
+.drawer-enter-from,.drawer-leave-to{opacity:0}
+.drawer-enter-from>.queue-drawer,.drawer-leave-to>.queue-drawer{transform:translateX(100%)}
+.drawer-leave-active{pointer-events:none}
+@media(max-width:600px){.drawer-enter-from>.queue-drawer,.drawer-leave-to>.queue-drawer{transform:translateY(24px)}}
+@media(prefers-reduced-motion:reduce){.drawer-enter-from>.queue-drawer,.drawer-leave-to>.queue-drawer{transform:none}}

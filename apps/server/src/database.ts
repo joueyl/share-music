@@ -4,8 +4,8 @@ import { dirname } from 'node:path';
 import type { TrackMetadata } from '../../../packages/shared/src';
 import { normalizeAlbumCover, trackSchema } from '../../../packages/shared/src';
 import type { RoomRecord } from './engine';
-export type UserRecord = { id: string; name: string; passwordHash: string; salt: string };
-function songInfo(track:Partial<TrackMetadata>,detail:any) {
+export type UserRecord = { id: string; name: string; passwordHash: string; salt: string; email?: string|null; displayName?: string; avatarUrl?: string|null };
+export function songInfo(track:Partial<TrackMetadata>,detail:any) {
   const text=(value:unknown)=>typeof value==='string'?value.trim():'';
   const names=(value:unknown)=>Array.isArray(value)?[...new Set(value.map(a=>text(a?.name)).filter(Boolean))].join(' / '):'';
   return {artists:text(track.artists)||names(detail?.ar)||names(detail?.artists),
@@ -70,6 +70,21 @@ export class Database {
   saveMusicSource(scope:string,source:string,track:TrackMetadata) { this.db.prepare('INSERT INTO music_sources(scope,source,track) VALUES(?,?,?) ON CONFLICT(scope,source) DO UPDATE SET track=excluded.track').run(scope,source,JSON.stringify(track)); }
   saveMusicDetail(scope:string,source:string,song:unknown) { this.db.prepare('INSERT INTO music_details(scope,source,song) VALUES(?,?,?) ON CONFLICT(scope,source) DO UPDATE SET song=excluded.song').run(scope,source,JSON.stringify(song)); }
   getMusicDetail(scope:string,source:string):unknown { const row=this.db.prepare('SELECT song FROM music_details WHERE scope=? AND source=?').get(scope,source) as {song:string}|undefined; return row?JSON.parse(row.song):undefined; }
+  findMusicByHash(hash:string): {source:string;track:TrackMetadata}|undefined {
+    const row=this.db.prepare("SELECT source,track FROM music_sources WHERE json_extract(track,'$.contentHash')=? AND source LIKE 'netease:standard:%' ORDER BY (scope='netease') DESC,rowid DESC LIMIT 1").get(hash) as {source:string;track:string}|undefined;
+    return row?{source:row.source,track:JSON.parse(row.track)}:undefined;
+  }
+  musicLibrary(query:string,offset:number,limit:number) {
+    const rows=this.db.prepare("SELECT source,track FROM music_sources WHERE source LIKE 'netease:standard:%' ORDER BY (scope='netease') DESC,rowid DESC").all();
+    const seen=new Set<string>();const songs=[];
+    for(const row of rows){
+      const track=JSON.parse(String(row.track)),key=String(track.contentHash||row.source);if(seen.has(key))continue;seen.add(key);
+      const neteaseId=/^netease:standard:(\d{1,20})$/.exec(String(row.source))?.[1];
+      if(!(String(track.name??'')+' '+String(track.artists??'')+' '+String(track.album??'')).toLowerCase().includes(query.toLowerCase()))continue;
+      songs.push({id:String(track.contentHash??''),name:String(track.name??'未知音乐'),artists:String(track.artists??''),album:String(track.album??''),coverUrl:track.coverUrl??'',durationMs:track.durationMs??null,sizeBytes:track.sizeBytes??null,canAdd:!!neteaseId,neteaseId});
+    }
+    return {total:songs.length,songs:songs.slice(offset,offset+limit)};
+  }
   getSetting(key: string): string | undefined { return (this.db.prepare('SELECT value FROM settings WHERE key=?').get(key) as { value: string } | undefined)?.value; }
   setSetting(key: string, value: string) { this.db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value); }
   findUser(name: string): UserRecord | undefined {
@@ -82,3 +97,7 @@ export class Database {
   rooms(): RoomRecord[] { return this.db.prepare('SELECT record FROM rooms').all().map(r => JSON.parse(r.record as string)); }
   close() { this.db.close(); }
 }
+
+type Awaitable<T> = T | Promise<T>;
+/** SQLite is retained for offline migration and isolated tests. */
+export type DatabaseStore = { [K in Exclude<keyof Database, 'db'>]: Database[K] extends (...args: infer A) => infer R ? (...args: A) => Awaitable<R> : never };

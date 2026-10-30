@@ -61,7 +61,7 @@ function setup() {
   const audio = new FakeAudio(), url = vi.fn(async () => 'https://oss.test/song.mp3');
   const send = vi.fn(async (_message: unknown) => {}), emit = vi.fn();
   const player = new CloudPlayer(audio as unknown as HTMLAudioElement, url, send, emit, () => time);
-  return { audio, url, send, player, setTime: (value: number) => { time = value; } };
+  return { audio, url, send, emit, player, setTime: (value: number) => { time = value; } };
 }
 
 it('waits for the requested seek position to buffer before reporting ready; ticks do not restart a pending seek', async () => {
@@ -122,4 +122,30 @@ it('ignores a previous song URL resolving after switching songs or leaving', asy
   const second = player.sync(next, 0);
   resolves[0]('stale'); await first; expect(audio.src).toBe('');
   player.clear(); resolves[1]('also-stale'); await second; expect(audio.src).toBe('');
+});
+it('reports download failure as an audio error and permits a later explicit transition to reload', async () => {
+ const audio = new FakeAudio(), emit = vi.fn(), load = vi.fn().mockRejectedValueOnce(new Error('MUSIC_CONTENT_CHANGED')).mockResolvedValue('blob:next');
+ const player = new CloudPlayer(audio as unknown as HTMLAudioElement, load, vi.fn(), emit);
+ await player.sync(room(),0);
+ expect(emit).toHaveBeenCalledWith('media-status',expect.objectContaining({status:'error'}));
+ expect(emit).toHaveBeenCalledWith('server-message',{type:'error',error:'MUSIC_CONTENT_CHANGED'});
+ await player.sync(room(2),0);expect(load).toHaveBeenCalledTimes(2);expect(audio.src).toBe('blob:next');
+});
+it('reports real buffered time instead of a fixed zero', async () => {
+ const {player,audio,emit,setTime} = setup(); const active=room();active.pending=null;active.playback.effectiveAtServerMs=100000;
+ await player.sync(active,0);audio.buffered();
+ Object.defineProperty(audio,'buffered',{value:{length:1,start:()=>0,end:()=>12}});
+ setTime(100000);player.tick();
+ expect(emit).toHaveBeenCalledWith('media-status',expect.objectContaining({bufferedMs:12000}));
+});
+it('loads a different room even when its source epoch equals the previous room', async () => {
+ const {player,url} = setup();await player.sync(room(),0);
+ const next=room();next.id='another-room';await player.sync(next,0);
+ expect(url).toHaveBeenCalledTimes(2);
+});
+it('does not retry a failed download on every same-epoch room snapshot', async () => {
+ const load=vi.fn().mockRejectedValue(new Error('MUSIC_DOWNLOAD_FAILED'));
+ const player=new CloudPlayer(new FakeAudio() as unknown as HTMLAudioElement,load,vi.fn(),vi.fn());
+ await player.sync(room(),0);await player.sync(room(),0);player.tick();
+ expect(load).toHaveBeenCalledOnce();
 });

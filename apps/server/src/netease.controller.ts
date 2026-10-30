@@ -57,7 +57,7 @@ export class NeteaseController {
   private async call(method: string, params: unknown, header?: string) {
     try {
       if (!header?.startsWith('Bearer ')) throw new DomainError('UNAUTHORIZED');
-      const user = this.app.auth.verify(header.slice(7)); this.app.limit(`netease:${method === 'search_suggest' ? 'suggest:' : ''}${user.id}`, method === 'search_suggest' ? 120 : 60, 60000);
+      const user = await this.app.auth.verify(header.slice(7)); this.app.limit(`netease:${method === 'search_suggest' ? 'suggest:' : ''}${user.id}`, method === 'search_suggest' ? 120 : 60, 60000);
       const input = z.record(z.union([z.string().max(4000), z.number().finite(), z.boolean()])).parse(params);
       return await this.app.netease.call(method, input);
     } catch (e) { httpError(e); }

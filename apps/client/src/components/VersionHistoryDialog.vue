@@ -1,11 +1,13 @@
 <script setup lang="ts">
+import { lockModalBackground } from '../useDialogFocus';
+let unlockBackground = () => {};
 import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { History, X, RefreshCw, Download, LoaderCircle } from 'lucide-vue-next';
 import { APP_VERSION, RELEASE_HISTORY } from '../version-info';
 import { appUpdates } from '../app-updates';
 const updates=appUpdates.state,updateBusy=appUpdates.busy,updateLocked=appUpdates.locked,updatePercent=appUpdates.percent,confirmed=ref(false);
 const emit=defineEmits<{close:[]}>(),visible=ref(true),dialog=ref<HTMLElement|null>(null),closeButton=ref<HTMLButtonElement|null>(null);
-let previous:HTMLElement|null=null,background:HTMLElement|null=null,wasInert=false,overflow='',alive=true;
+let previous:HTMLElement|null=null,alive=true;
 function close(){if(!updateLocked.value)visible.value=false;}
 function trap(event:KeyboardEvent){
  if(event.isComposing)return;
@@ -17,12 +19,10 @@ function trap(event:KeyboardEvent){
  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
 }
 onMounted(async()=>{
- previous=document.activeElement as HTMLElement;background=document.querySelector<HTMLElement>('.shell');
- if(background){wasInert=background.inert;background.inert=true;}
- overflow=document.body.style.overflow;document.body.style.overflow='hidden';document.addEventListener('keydown',trap);
+ previous=document.activeElement as HTMLElement;unlockBackground=lockModalBackground();document.addEventListener('keydown',trap);
  await nextTick();if(alive)closeButton.value?.focus();
 });
-onUnmounted(()=>{alive=false;document.removeEventListener('keydown',trap);if(background)background.inert=wasInert;document.body.style.overflow=overflow;previous?.focus();});
+onUnmounted(()=>{alive=false;document.removeEventListener('keydown',trap);unlockBackground();previous?.focus();});
 </script>
 <template>
  <Teleport to="body"><Transition name="modal" appear @after-leave="emit('close')"><div v-if="visible" class="modal-backdrop" @click.self="close">

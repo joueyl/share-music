@@ -1,3 +1,5 @@
+> **历史文档：2026-10-29 起 OSS 上传/播放已停用。当前实现保存网易云直链并按需续期，请使用 [API.md](API.md) 与 [MUSIC-SEARCH.md](MUSIC-SEARCH.md)。以下仅记录旧架构，不要按此配置 OSS。**
+
 # OSS 文件音乐架构
 
 文件通过认证 HTTP 上传接口上传到 OSS（单文件 100MB）；WebSocket 负责房间状态、就绪和播放进度。音乐不经 WebSocket 传输。

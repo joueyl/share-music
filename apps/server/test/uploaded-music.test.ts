@@ -28,16 +28,16 @@ it('lists only registered uploads in the active OSS scope, deduplicates files an
  }finally{db.close();}
 });
 
-it('authenticates and validates uploaded music queries before reading storage',()=>{
+it('authenticates and validates uploaded music queries before reading storage',async()=>{
  const db=new Database(':memory:');
- const controller=new ApiController({database:db,oss:{scope:()=> 'scope'},limit:()=>{},auth:{verify:(token:string)=>{
+ const controller=new ApiController({flush:async()=>{},database:db,oss:{scope:()=> 'scope'},limit:()=>{},auth:{verify:(token:string)=>{
   if(token!=='valid')throw new DomainError('UNAUTHORIZED');return {id:'user'};
  }}} as unknown as AppService);
  try{
-  expect(()=>controller.uploadedMusic({})).toThrow();
-  expect(()=>controller.uploadedMusic({},'Bearer invalid')).toThrow();
-  expect(controller.uploadedMusic({},'Bearer valid')).toEqual({songs:[],total:0});
-  for(const query of [{offset:-1},{offset:'bad'},{limit:101},{limit:0},{keywords:'x'.repeat(101)},{scope:'other'},{offset:1.5}])expect(()=>controller.uploadedMusic(query,'Bearer valid')).toThrow();
+  await expect(controller.uploadedMusic({})).rejects.toThrow();
+  await expect(controller.uploadedMusic({},'Bearer invalid')).rejects.toThrow();
+  expect(await controller.uploadedMusic({},'Bearer valid')).toEqual({songs:[],total:0});
+  for(const query of [{offset:-1},{offset:'bad'},{limit:101},{limit:0},{keywords:'x'.repeat(101)},{scope:'other'},{offset:1.5}])await expect(controller.uploadedMusic(query,'Bearer valid')).rejects.toThrow();
  }finally{db.close();}
 });
 

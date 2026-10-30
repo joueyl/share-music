@@ -2,7 +2,7 @@
 
 ## 单一版本源
 
-根目录 `package.json` 的 `version` 为统一版本源。当前沿用已有 `0.1.1`，不自动声称已发布到 GitHub。同步范围包括各 workspace 的 package.json、共享包引用、Tauri 配置、Cargo.toml、Cargo.lock、package-lock.json 和 pnpm-lock.yaml。
+根目录 `package.json` 的 `version` 为统一版本源。1.0.0 为本次统一发布版本；源码版本与实际 GitHub 发布状态分别核对。同步范围包括各 workspace 的 package.json、共享包引用、Tauri 配置、Cargo.toml、Cargo.lock、package-lock.json 和 pnpm-lock.yaml。
 
 客户端侧栏“版本与更新日志”在登录前后均可打开，显示同一个版本号及随包内置的 CHANGELOG.md。内置日志不依赖网络；桌面端可手动检查 GitHub 更新，需先配置签名，见 [更新配置](UPDATER.md)。
 

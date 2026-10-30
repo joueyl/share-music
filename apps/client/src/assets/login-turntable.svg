@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="554" height="517" viewBox="0 0 554 517">
+<defs>
+
+
+<filter id="filter_0" x="-100%" y="-100%" width="300%" height="300%">
+  <feGaussianBlur in="SourceAlpha" stdDeviation="20.00" result="blur_0"/>
+  <feOffset in="blur_0" dx="0.0" dy="20.0" result="offset_0"/>
+  <feFlood flood-color="#526c81" flood-opacity="0.130"/>
+  <feComposite in2="offset_0" operator="in" result="shadow_0"/>
+  <feMerge>
+    <feMergeNode in="shadow_0"/>
+    <feMergeNode in="SourceGraphic"/>
+  </feMerge>
+</filter>
+
+<linearGradient id="grad_1" gradientUnits="objectBoundingBox" x1="0.0000" y1="0.0000" x2="1.0000" y2="0.0000">
+<stop offset="0.0%" stop-color="#ffffff"/>
+<stop offset="100.0%" stop-color="#e8ece7"/>
+</linearGradient>
+<linearGradient id="grad_2" gradientUnits="objectBoundingBox" x1="0.0000" y1="0.0000" x2="1.0000" y2="1.0000">
+<stop offset="0.0%" stop-color="#ced6d1"/>
+<stop offset="20.0%" stop-color="#8c9996"/>
+<stop offset="43.0%" stop-color="#e5e9e3"/>
+<stop offset="65.0%" stop-color="#95a19a"/>
+<stop offset="84.0%" stop-color="#d7dfd7"/>
+<stop offset="100.0%" stop-color="#879a92"/>
+</linearGradient>
+<linearGradient id="grad_3" gradientUnits="objectBoundingBox" x1="0.0000" y1="0.0000" x2="1.0000" y2="1.0000">
+<stop offset="0.0%" stop-color="#9faf9a"/>
+<stop offset="100.0%" stop-color="#eadac1"/>
+</linearGradient>
+<clipPath id="clip_4"><path d="M0.5,0 L0.5,0 C0.776,0 1,0.224 1,0.5 L1,0.5 C1,0.776 0.776,1 0.5,1 L0.5,1 C0.224,1 0,0.776 0,0.5 L0,0.5 C0,0.224 0.224,0 0.5,0 Z"/></clipPath>
+</defs>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.220">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(422.0,0.0,0.0,422.0,134.0,342.0)" fill="#ffffff" stroke="none"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.300">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(480.0,0.0,0.0,480.0,105.0,313.0)" fill="none" stroke="#ffffff" stroke-width="1.0" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g filter="url(#filter_0)">
+<path d="M0.086,0 L0.914,0 C0.962,0 1,0.043 1,0.097 L1,0.903 C1,0.957 0.962,1 0.914,1 L0.086,1 C0.038,1 0,0.957 0,0.903 L0,0.097 C0,0.043 0.038,0 0.086,0 Z" transform="matrix(374.0,0.0,0.0,330.0,165.0,382.0)" fill="url(#grad_1)" stroke="none"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(292.0,0.0,0.0,292.0,189.0,388.0)" fill="url(#grad_2)" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(280.0,0.0,0.0,280.0,195.0,394.0)" fill="none" stroke="#40564b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(273.6,0.0,0.0,273.59999999999997,198.2,397.2)" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(267.20000000000005,0.0,0.0,267.19999999999993,201.4,400.4)" fill="none" stroke="#40564b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(260.79999999999995,0.0,0.0,260.80000000000007,204.6,403.6)" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(254.40000000000003,0.0,0.0,254.40000000000003,207.8,406.8)" fill="none" stroke="#40564b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(248.0,0.0,0.0,248.0,211.0,410.0)" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(241.59999999999997,0.0,0.0,241.59999999999997,214.2,413.2)" fill="none" stroke="#40564b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(235.20000000000002,0.0,0.0,235.19999999999993,217.4,416.4)" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(228.79999999999998,0.0,0.0,228.80000000000007,220.6,419.6)" fill="none" stroke="#40564b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(222.40000000000003,0.0,0.0,222.40000000000003,223.8,422.8)" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(216.0,0.0,0.0,216.0,227.0,426.0)" fill="none" stroke="#40564b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(209.59999999999997,0.0,0.0,209.59999999999997,230.2,429.2)" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(203.20000000000002,0.0,0.0,203.19999999999993,233.4,432.4)" fill="none" stroke="#40564b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(196.79999999999998,0.0,0.0,196.80000000000007,236.6,435.6)" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(190.40000000000003,0.0,0.0,190.40000000000003,239.8,438.8)" fill="none" stroke="#40564b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(184.0,0.0,0.0,184.0,243.0,442.0)" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(177.59999999999997,0.0,0.0,177.59999999999997,246.2,445.2)" fill="none" stroke="#40564b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(171.20000000000002,0.0,0.0,171.19999999999993,249.4,448.4)" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(164.79999999999998,0.0,0.0,164.80000000000007,252.6,451.6)" fill="none" stroke="#40564b" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g opacity="0.130">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(158.40000000000003,0.0,0.0,158.40000000000003,255.8,454.8)" fill="none" stroke="#ffffff" stroke-width="0.8" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(156.0,0.0,0.0,156.0,257.0,456.0)" fill="#4d6153" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(134.0,0.0,0.0,134.0,268.0,467.0)" fill="url(#grad_3)" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<g transform="matrix(134.0,0.0,0.0,134.0,268.0,467.0)">
+  <g clip-path="url(#clip_4)">
+    <g transform="scale(0.007462686567164179,0.007462686567164179)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(34.0,0.0,0.0,34.0,73.0,27.0)" fill="#fff0c9" stroke="none"/>
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(152.0,0.0,0.0,152.0,-39.0,50.0)" fill="#829987" stroke="none"/>
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(160.0,0.0,0.0,160.0,38.0,63.0)" fill="#456c60" stroke="none"/>
+    </g>
+  </g>
+</g>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(9.0,0.0,0.0,9.0,330.5,529.5)" fill="#f2f2e6" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<path d="M505,396 L505,558 C505,586 493,610 472,633" fill="none" stroke="#b5bfba" stroke-width="10.0" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<path d="M504,396 L504,558 C504,586 492,610 471,633" fill="none" stroke="#ffffff" stroke-width="3.0" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(34.0,0.0,0.0,34.0,488.0,403.0)" fill="#e4eae4" stroke="none"/>
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(34.0,0.0,0.0,34.0,488.0,403.0)" fill="none" stroke="#bbc6bd" stroke-width="1.0" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(18.0,0.0,0.0,18.0,496.0,411.0)" fill="#ffffff" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(8.0,0.0,0.0,8.0,502.0,682.0)" fill="#6fa78d" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<text transform="translate(294.43,685.6)" font-family="Microsoft YaHei" font-size="8" font-weight="400" font-style="normal" text-anchor="start" xml:space="preserve" fill="#86958c"><tspan x="0" y="8.686">T O N E  /  3 3  R P M</tspan></text>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<path d="M0.136,0 L0.864,0 C0.939,0 1,0.224 1,0.5 L1,0.5 C1,0.776 0.939,1 0.864,1 L0.136,1 C0.061,1 0,0.776 0,0.5 L0,0.5 C0,0.224 0.061,0 0.136,0 Z" transform="matrix(154.0,0.0,0.0,42.0,90.0,484.0)" fill="#ffffff" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<path d="M113.06,497 C115.17,497.01 117.19,497.86 118.68,499.36 C120.17,500.86 121.01,502.89 121,505 L121,509.31 C121,510.33 120.17,511.16 119.15,511.16 L117.92,511.16 C116.9,511.16 116.08,510.33 116.08,509.31 L116.08,506.23 C116.08,505.21 116.9,504.39 117.92,504.39 L119.74,504.39 C119.43,500.92 116.54,498.24 113.05,498.23 L113,498.23 C109.5,498.23 106.58,500.9 106.26,504.39 L108.08,504.39 C109.1,504.39 109.92,505.21 109.92,506.23 L109.92,509.31 C109.92,510.33 109.1,511.16 108.08,511.16 L106.85,511.16 C105.83,511.16 105,510.33 105,509.31 L105,505 C105,500.58 108.58,497 113,497 L113.06,497 Z M108.08,505.62 C108.42,505.62 108.69,505.89 108.69,506.23 L108.69,509.31 C108.69,509.65 108.42,509.93 108.08,509.93 L106.85,509.93 C106.51,509.93 106.23,509.65 106.23,509.31 L106.23,505.62 L108.08,505.62 Z M119.77,509.31 C119.77,509.65 119.49,509.93 119.15,509.93 L117.92,509.93 C117.58,509.93 117.31,509.65 117.31,509.31 L117.31,506.23 C117.31,505.89 117.58,505.62 117.92,505.62 L119.77,505.62 L119.77,509.31 Z" fill="#508b73" stroke="none" fill-rule="evenodd"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<text transform="translate(131,497)" font-family="Microsoft YaHei" font-size="12" font-weight="400" font-style="normal" text-anchor="start" xml:space="preserve" fill="#508b73"><tspan x="0" y="12.778">每一秒，都同频</tspan></text>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<path d="M0.117,0 L0.883,0 C0.948,0 1,0.224 1,0.5 L1,0.5 C1,0.776 0.948,1 0.883,1 L0.117,1 C0.052,1 0,0.776 0,0.5 L0,0.5 C0,0.224 0.052,0 0.117,0 Z" transform="matrix(205.0,0.0,0.0,48.0,434.0,646.0)" fill="#ffffff" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(26.0,0.0,0.0,26.0,445.0,657.0)" fill="#e1d5cc" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(10.0,0.0,0.0,10.0,453.0,662.0)" fill="#fff0d9" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<text transform="translate(481,662)" font-family="Microsoft YaHei" font-size="12" font-weight="400" font-style="normal" text-anchor="start" xml:space="preserve" fill="#283448"><tspan x="0" y="12.778">邀请朋友一起听</tspan></text>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<text transform="translate(241.5,752.6)" font-family="Microsoft YaHei" font-size="13" font-weight="400" font-style="normal" text-anchor="start" xml:space="preserve" fill="#798394"><tspan x="0" y="13.677">同一首歌，此刻也有人和你一样喜欢。</tspan></text>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(32.0,0.0,0.0,32.0,242.5,786.0)" fill="#d9e7ec" stroke="none"/>
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(32.0,0.0,0.0,32.0,242.5,786.0)" fill="none" stroke="#f0f3f1" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(10.0,0.0,0.0,10.0,253.5,793.0)" fill="#fff0da" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(32.0,0.0,0.0,32.0,269.5,786.0)" fill="#edd8d0" stroke="none"/>
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(32.0,0.0,0.0,32.0,269.5,786.0)" fill="none" stroke="#f0f3f1" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(10.0,0.0,0.0,10.0,280.5,793.0)" fill="#fff0da" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(32.0,0.0,0.0,32.0,296.5,786.0)" fill="#d8dcf1" stroke="none"/>
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(32.0,0.0,0.0,32.0,296.5,786.0)" fill="none" stroke="#f0f3f1" stroke-width="2.0" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<ellipse cx="0.5" cy="0.5" rx="0.5" ry="0.5" transform="matrix(10.0,0.0,0.0,10.0,307.5,793.0)" fill="#fff0da" stroke="none"/>
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+</g>
+<g transform="matrix(1,0,0,1,-85,-302)">
+<text transform="translate(340.5,794.5)" font-family="Microsoft YaHei" font-size="11" font-weight="400" font-style="normal" text-anchor="start" xml:space="preserve" fill="#798394"><tspan x="0" y="11.88">从一首歌，开始一场相遇</tspan></text>
+</g>
+</svg>

@@ -7,6 +7,20 @@ import { mp3WithPictures, png } from './fixtures/embedded-audio';
 const metadata = { contentHash:'a'.repeat(64), sizeBytes:4, name:'song.mp3', ossKey:'music/files/song.mp3' };
 const key = {contentHash:metadata.contentHash,sizeBytes:metadata.sizeBytes};
 afterEach(() => { vi.restoreAllMocks(); vi.mocked(invoke).mockReset(); });
+it('refreshes an expired direct link once on a native download failure',async()=>{
+  vi.mocked(invoke).mockResolvedValueOnce(new ArrayBuffer(0)).mockRejectedValueOnce('PLAYBACK_AUDIO_DOWNLOAD_FAILED').mockResolvedValueOnce(new Uint8Array([255,251,144,0]).buffer);
+  vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:refreshed');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+  const source=vi.fn(async(force=false)=>`https://m801.music.126.net/${force?'fresh':'expired'}.mp3`);
+  const result=await loadPlaybackSource(source,true,metadata);
+  expect(source.mock.calls).toEqual([[false],[true]]);expect(invoke).toHaveBeenCalledTimes(3);
+  if(typeof result!=='string')result.release();
+});
+it('does not keep refreshing when the replacement direct link also fails',async()=>{
+  vi.mocked(invoke).mockResolvedValueOnce(new ArrayBuffer(0)).mockRejectedValue('PLAYBACK_AUDIO_DOWNLOAD_FAILED');
+  const source=vi.fn(async()=> 'https://m801.music.126.net/song.mp3');
+  await expect(loadPlaybackSource(source,true,metadata)).rejects.toBe('PLAYBACK_AUDIO_DOWNLOAD_FAILED');
+  expect(source).toHaveBeenCalledTimes(2);expect(invoke).toHaveBeenCalledTimes(3);
+});
 it('downloads and caches a miss and plays the same native bytes as a local Blob', async () => {
   const bytes = new Uint8Array([255,251,144,0]).buffer;
   vi.mocked(invoke).mockResolvedValueOnce(new ArrayBuffer(0)).mockResolvedValueOnce(bytes);

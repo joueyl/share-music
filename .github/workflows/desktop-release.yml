@@ -57,37 +57,12 @@ jobs:
         with:
           prefix-key: desktop-rust-v1
           workspaces: apps/client/src-tauri -> target
-          key: ${{ runner.os }}-${{ runner.arch }}-desktop-${{ hashFiles('native/vcpkg.json', 'native/triplets/**') }}
-          env-vars: CARGO CC CFLAGS CXX CMAKE RUST MACOSX_DEPLOYMENT_TARGET
+          key: ${{ runner.os }}-${{ runner.arch }}-desktop-${{ hashFiles('apps/client/src-tauri/Cargo.lock') }}
+          env-vars: CARGO CC CFLAGS CXX RUST MACOSX_DEPLOYMENT_TARGET
           cache-targets: 'true'
           cache-workspace-crates: 'false'
           cache-bin: 'false'
           cache-on-failure: 'true'
-      - name: Prepare vcpkg binary cache
-        run: |
-          $cache = Join-Path $env:RUNNER_TEMP 'music-share-vcpkg-cache'
-          New-Item -ItemType Directory -Force -Path $cache | Out-Null
-          "VCPKG_BINARY_SOURCES=clear;files,$cache,readwrite" >> $env:GITHUB_ENV
-      - uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/music-share-vcpkg-cache
-          key: vcpkg-windows-2022-x64-${{ hashFiles('native/vcpkg.json', 'native/triplets/**') }}
-      - name: Install pinned vcpkg
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          $vcpkg = Join-Path $env:RUNNER_TEMP 'music-share-vcpkg'
-          $baseline = (Get-Content -Raw native/vcpkg.json | ConvertFrom-Json).'builtin-baseline'
-          if ($baseline -notmatch '^[a-f0-9]{40}$') { throw 'Invalid vcpkg baseline' }
-          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$vcpkg"
-          git -C "$vcpkg" checkout --detach "$baseline"
-          & "$vcpkg/bootstrap-vcpkg.bat" -disableMetrics
-          "VCPKG_ROOT=$vcpkg" >> $env:GITHUB_ENV
-      - name: Build and test native media library
-        run: |
-          $PSNativeCommandUseErrorActionPreference = $true
-          cmake -S native -B native/build -G 'Visual Studio 17 2022' -A x64 "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows
-          cmake --build native/build --config Release --parallel 2
-          ctest --test-dir native/build -C Release --output-on-failure
       - name: Package Windows installer
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -111,17 +86,14 @@ jobs:
         include:
           - runner: ubuntu-22.04
             target: linux-x64
-            triplet: x64-linux-dynamic
             arch: x64
             package: linux
           - runner: macos-15-intel
             target: macos-x64
-            triplet: x64-osx-dynamic
             arch: x64
             package: mac
           - runner: macos-15
             target: macos-arm64
-            triplet: arm64-osx-dynamic
             arch: arm64
             package: mac
     runs-on: ${{ matrix.runner }}
@@ -155,7 +127,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake ninja-build nasm pkg-config curl zip unzip tar git file autoconf autoconf-archive automake libtool \
+          sudo apt-get install -y build-essential pkg-config curl zip unzip tar git file \
             patchelf binutils libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev \
             libssl-dev libpipewire-0.3-dev libdbus-1-dev libfuse2 libudev-dev libasound2-dev \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxinerama-dev libwayland-dev libxkbcommon-dev
@@ -164,8 +136,7 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild -version
-          brew install cmake ninja nasm pkg-config autoconf automake libtool
-          nasm -v
+          brew install pkg-config
           echo 'MACOSX_DEPLOYMENT_TARGET=13.0' >> "$GITHUB_ENV"
           echo 'APPLE_SIGNING_IDENTITY=-' >> "$GITHUB_ENV"
       - name: Install dependencies and run JavaScript tests
@@ -187,42 +158,12 @@ jobs:
         with:
           prefix-key: desktop-rust-v1
           workspaces: apps/client/src-tauri -> target
-          key: ${{ runner.os }}-${{ runner.arch }}-desktop-${{ hashFiles('native/vcpkg.json', 'native/triplets/**') }}
-          env-vars: CARGO CC CFLAGS CXX CMAKE RUST MACOSX_DEPLOYMENT_TARGET
+          key: ${{ runner.os }}-${{ runner.arch }}-desktop-${{ hashFiles('apps/client/src-tauri/Cargo.lock') }}
+          env-vars: CARGO CC CFLAGS CXX RUST MACOSX_DEPLOYMENT_TARGET
           cache-targets: 'true'
           cache-workspace-crates: 'false'
           cache-bin: 'false'
           cache-on-failure: 'true'
-      - name: Prepare vcpkg binary cache
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/music-share-vcpkg-cache"
-          echo "VCPKG_BINARY_SOURCES=clear;files,$RUNNER_TEMP/music-share-vcpkg-cache,readwrite" >> "$GITHUB_ENV"
-      - uses: actions/cache@v4
-        with:
-          path: ${{ runner.temp }}/music-share-vcpkg-cache
-          key: vcpkg-${{ matrix.runner }}-${{ matrix.triplet }}-${{ hashFiles('native/vcpkg.json', 'native/triplets/**') }}
-      - name: Install pinned vcpkg
-        run: |
-          set -euo pipefail
-          baseline=$(node -p "require('./native/vcpkg.json')['builtin-baseline']")
-          [[ "$baseline" =~ ^[a-f0-9]{40}$ ]]
-          git clone --filter=blob:none https://github.com/microsoft/vcpkg.git "$RUNNER_TEMP/music-share-vcpkg"
-          git -C "$RUNNER_TEMP/music-share-vcpkg" checkout --detach "$baseline"
-          "$RUNNER_TEMP/music-share-vcpkg/bootstrap-vcpkg.sh" -disableMetrics
-          echo "VCPKG_ROOT=$RUNNER_TEMP/music-share-vcpkg" >> "$GITHUB_ENV"
-      - name: Build and test native media library
-        env:
-          VCPKG_TRIPLET: ${{ matrix.triplet }}
-        run: |
-          set -euo pipefail
-          extra=()
-          if [[ "$RUNNER_OS" == 'macOS' ]]; then extra+=('-DCMAKE_OSX_DEPLOYMENT_TARGET=13.0'); fi
-          cmake -S native -B native/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            "-DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-            "-DVCPKG_OVERLAY_TRIPLETS=$PWD/native/triplets" "-DVCPKG_TARGET_TRIPLET=$VCPKG_TRIPLET" "${extra[@]}"
-          cmake --build native/build --parallel 2
-          ctest --test-dir native/build --output-on-failure
       - name: Package desktop installer
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

@@ -1,22 +1,24 @@
 {
   "name": "@music-share/server",
-  "version": "0.2.2",
+  "version": "1.0.0",
   "private": true,
   "scripts": {
     "dev": "node --env-file-if-exists=.env --import tsx --watch src/main.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file-if-exists=.env dist/apps/server/src/main.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:migrate": "npm run build && node --env-file-if-exists=.env dist/apps/server/src/migrate.js",
+    "db:cleanup-room-songs": "npm run build && node --env-file-if-exists=.env dist/apps/server/src/cleanup-room-songs.js"
   },
   "dependencies": {
-    "@music-share/shared": "0.2.2",
+    "@music-share/shared": "1.0.0",
     "@nestjs/common": "^11.1.0",
     "@nestjs/core": "^11.1.0",
     "@nestjs/platform-express": "^11.1.0",
     "@nestjs/platform-ws": "^11.1.0",
     "@nestjs/websockets": "^11.1.0",
-    "ali-oss": "^6.23.0",
     "express": "^5.2.1",
+    "mysql2": "^3.24.6",
     "NeteaseCloudMusicApi": "^4.32.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.2",
@@ -24,7 +26,6 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
-    "@types/ali-oss": "^6.23.3",
     "@types/express": "^5.0.3",
     "@types/ws": "^8.18.1",
     "tsx": "^4.20.0"

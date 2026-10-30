@@ -1,77 +1,37 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import { Play, Pause, SkipForward, SkipBack, Square, Plus, Radio, Users, Settings2, Volume2, LogOut, Disc3, Trash2, ArrowUp, ArrowDown, ShieldCheck } from 'lucide-vue-next';
-import MusicSearchDialog from '../components/MusicSearchDialog.vue';
-import UploadedMusicDialog from '../components/UploadedMusicDialog.vue';
+import { Headphones, Users, Link, X, Settings2 } from 'lucide-vue-next';
+import { useApp } from '../store';
+import { ui, openSearch } from '../ui';
+import * as bridge from '../bridge';
 import RoomChat from '../components/RoomChat.vue';
+import SimilarRecommendations from '../components/SimilarRecommendations.vue';
 import RoomWaveform from '../components/RoomWaveform.vue';
 import TrackLyrics from '../components/TrackLyrics.vue';
-import { useApp } from '../store';
-import * as bridge from '../bridge';
-import type { Permissions, PermissionKey } from '@music-share/shared';
-const app = useApp(), route = useRoute(), router = useRouter();
-const searchOpen = ref(false), uploadedOpen = ref(false);
-const leaving=ref(false);
-const panel = ref<'members' | 'settings'>('members'), volume = ref(1);
-const track = computed(() => app.room?.playlist.find(t => t.id === app.room?.playback.sourceId));
-const failedCover = ref<string | null>(null);
-const resolvedCover = ref('');
-const coverUrl = computed(() => bridge.playingTrackCover(track.value) || resolvedCover.value);
-watch(() => [app.room?.id, track.value?.id, track.value?.coverUrl, track.value?.contentHash], async (_value,_old,onCleanup) => {
-  let active = true; onCleanup(() => { active = false; });
-  resolvedCover.value = ''; failedCover.value = null;
-  const current = track.value, roomId = app.room?.id;
-  if (!current || !roomId || bridge.playingTrackCover(current)) return;
-  const cover = await bridge.loadTrackCover(roomId,current);
-  if (active) resolvedCover.value = cover;
-}, { immediate:true });
-watch(coverUrl, () => { failedCover.value = null; });
-watch(() => app.connected, connected => { if (connected) failedCover.value = null; });
-function coverError(event:Event) {
-  const image=event.target as HTMLImageElement;
-  const failed=image.currentSrc||image.src;
-  if(failed===coverUrl.value)failedCover.value=failed;
-}
-const labels: Record<PermissionKey, string> = { skip: '切歌 / 播放控制', stream: '旧版兼容字段', seek: '进度切换', enqueue: '加入播放列表' };
-const keys: PermissionKey[] = ['skip', 'seek', 'enqueue'];
-const format = (ms: number) => `${Math.floor(ms / 60000).toString().padStart(2, '0')}:${Math.floor(ms / 1000 % 60).toString().padStart(2, '0')}`;
-const mediaLoading=computed(()=>!!app.room?.pending||['loading','buffering','preparing','downloading'].includes(app.media.status));
-const disabled = computed(() => !app.connected || !!app.room?.pending);
-// Keep the user's chosen position independent of the continuously ticking room clock.
-const seekPreview = ref<number | null>(null);
-const seekMaximum = computed(() => Math.max(0, (track.value?.durationMs ?? 1) - 1));
-const displayedProgress = computed(() => seekPreview.value ?? Math.min(app.room?.pending?.playback.positionMs ?? app.progress, seekMaximum.value));
-watch(() => app.room?.playback.sourceEpoch, () => { seekPreview.value = null; });
-function previewSeek(event: Event) { seekPreview.value = Number((event.target as HTMLInputElement).value); }
-async function commitSeek(event: Event) {
-  const positionMs = Math.min(seekMaximum.value, Math.max(0, Math.round(seekPreview.value ?? Number((event.target as HTMLInputElement).value))));
-  if (!disabled.value && app.permission.seek && track.value) {
-    await app.act({ type: 'seek', payload: { positionMs } });
-  }
-  seekPreview.value = null;
-}
-
-onMounted(async () => { try { if (app.room?.id !== route.params.id) await bridge.join(String(route.params.id)); } catch (e) { app.error(e); } });
-async function exit() { if(leaving.value)return;leaving.value=true;try{await app.exitRoom(); await router.push('/');}finally{leaving.value=false;} }
-function setDefault(key: PermissionKey, value: boolean) { if (app.room) void app.act({ type: 'defaults', payload: { ...app.room.defaults, [key]: value } }); }
-function setOverride(memberId: string, key: PermissionKey, value: string) { const member = app.room?.members.find(m => m.id === memberId); if (!member) return; const overrides: Partial<Permissions> = { ...member.overrides }; if (value === 'default') delete overrides[key]; else overrides[key] = value === 'allow'; void app.act({ type: 'permission', payload: { memberId, overrides } }); }
-function move(index: number, delta: number) { const ids = app.room!.playlist.map(t => t.id); [ids[index], ids[index + delta]] = [ids[index + delta]!, ids[index]!]; void app.act({ type: 'reorder', payload: { trackIds: ids } }); }
+import AlbumArt from '../components/AlbumArt.vue';
+import turntable from '../assets/room-turntable.png';
+const app=useApp(),route=useRoute(),router=useRouter(),leaving=ref(false),resolvedCover=ref('');
+const track=computed(()=>app.room?.playlist.find(t=>t.id===app.room?.playback.sourceId));
+const coverUrl=computed(()=>bridge.playingTrackCover(track.value)||resolvedCover.value);
+const online=computed(()=>app.room?.members.filter(m=>m.online)??[]);
+watch(()=>[app.room?.id,track.value?.id,track.value?.contentHash],async(_,__,onCleanup)=>{let active=true;onCleanup(()=>{active=false;});resolvedCover.value='';const roomId=app.room?.id,song=track.value;if(roomId&&song&&!bridge.playingTrackCover(song)){const cover=await bridge.loadTrackCover(roomId,song);if(active)resolvedCover.value=cover;}},{immediate:true});
+onMounted(async()=>{try{if(app.room?.id!==route.params.id)await bridge.join(String(route.params.id));}catch(e){app.error(e);}});
+async function exit(){if(leaving.value)return;leaving.value=true;try{await app.exitRoom();await router.push('/');}finally{leaving.value=false;}}
+async function invite(){const code=app.room?.inviteCode;if(!code)return;try{await navigator.clipboard.writeText(code);app.notice='房间码已复制，请私下分享给朋友';}catch{app.notice=`房间码：${code}，请手动复制并私下分享`;}}
 </script>
 <template>
-  <UploadedMusicDialog v-if="uploadedOpen && app.room" :key="app.room.id" :room-id="app.room.id" @close="uploadedOpen = false" />
-  <MusicSearchDialog v-if="searchOpen && app.room" :room-id="app.room.id" @close="searchOpen = false" />
-  <header class="topbar"><span>音乐房间 / {{ app.room?.name ?? '加入中…' }}</span><button class="text-button" :disabled="leaving" :aria-busy="leaving" @click="exit"><LogOut :size="15" />离开房间</button></header>
-  <section v-if="app.room" class="page room-page"><RoomWaveform :key="app.room.id" :source-id="app.room.playback.sourceId" :playing="!!track && app.connected && app.room.playback.playState === 'playing'" /><div class="page-heading"><div><span class="eyebrow">YOUR SHARED FREQUENCY</span><h1>{{ app.room.name }}</h1><p class="muted"><Users :size="14" /> {{ app.room.members.filter(m => m.online).length }} / 8 人 · {{ app.host ? '你是房主' : '共享同一段旋律' }}</p></div><span class="quality-pill" :class="{ lossy: app.room.playback.qualityMode !== 'lossless' }"><ShieldCheck :size="14" />{{ app.room.playback.qualityMode === 'opus' ? 'OPUS · 有损' : app.room.playback.qualityMode === 'source' ? '原始有损音源' : '无损优先' }}</span></div>
-  <div class="room-layout"><div class="room-main"><div class="player"><div class="player-cover"><img v-if="coverUrl && failedCover !== coverUrl" :key="coverUrl" class="player-cover-image" :src="coverUrl" :alt="`${track?.name ?? ''}专辑封面`" width="125" height="125" decoding="async" referrerpolicy="no-referrer" @error="coverError" /><template v-else><Disc3 :size="80" :class="{ spinning: app.media.status === 'playing' }" /><span>共 鸣</span></template></div><div class="player-info"><div class="hero-label">NOW PLAYING</div><h2>{{ track?.name ?? '等待第一首音乐' }}</h2><p class="muted">{{ app.room.members.find(m => m.id === app.room?.playback.providerId)?.name ?? '添加一首收藏，开始共享' }}<template v-if="app.room.playback.spec"> · {{ app.room.playback.spec.sampleRate / 1000 }}kHz / {{ app.room.playback.spec.bits }}bit</template></p><div class="player-status" :class="{'loading-state':mediaLoading}" :aria-busy="mediaLoading" role="status"><span class="dot" :class="{ online: app.media.status === 'playing' }" />{{ app.room.pending ? `正在准备播放 ${format(app.room.pending.playback.positionMs)}，等待最快成员加载就绪…` : app.media.detail || (app.room.playback.sourceId ? '等待媒体连接' : '尚未播放') }}</div></div>
-  <div class="progress-area"><input class="progress" type="range" min="0" :max="seekMaximum" :value="displayedProgress" step="1" :disabled="!track || !app.permission.seek || disabled" aria-label="歌曲进度" @pointerdown="seekPreview = displayedProgress" @pointercancel="seekPreview = null" @input="previewSeek" @change="commitSeek" /><div class="progress-times"><span>{{ format(displayedProgress) }}</span><span>{{ format(track?.durationMs ?? 0) }}</span></div></div>
-  <div class="player-controls"><button class="icon-button" aria-label="上一首" :disabled="!app.permission.skip || disabled" @click="app.act({ type: 'previous', payload: {} })"><SkipBack :size="21" /></button><button class="play-button" :disabled="!app.permission.skip || disabled || !track" :aria-label="app.room.playback.playState === 'playing' ? '暂停' : '继续'" @click="app.act({ type: app.room.playback.playState === 'playing' ? 'pause' : 'resume', payload: {} })"><Pause v-if="app.room.playback.playState === 'playing'" :size="23" /><Play v-else :size="23" /></button><button class="icon-button" aria-label="下一首" :disabled="!app.permission.skip || disabled" @click="app.act({ type: 'next', payload: {} })"><SkipForward :size="21" /></button><button class="icon-button" aria-label="停止" :disabled="!app.permission.skip || !app.connected" @click="app.act({ type: 'stop', payload: {} })"><Square :size="16" /></button><div class="volume"><Volume2 :size="16" /><input v-model.number="volume" type="range" min="0" max="1" step="0.01" aria-label="本地音量" @input="bridge.setVolume(volume).catch(app.error)" /></div></div></div>
-  <TrackLyrics /><div class="section-title playlist-heading"><h2>播放列表 <span>{{ app.room.playlist.length }}</span></h2><div class="inline-actions"><button v-if="app.host" class="text-button" :disabled="disabled || app.room.playback.sourceType === 'file'" @click="app.act({ type: 'clear', payload: {} })">清空</button><button class="secondary" :disabled="!app.permission.enqueue || !app.connected" @click="searchOpen = true"><Plus :size="16" />添加音乐</button><button class="secondary" :disabled="!app.connected" @click="uploadedOpen = true"><Disc3 :size="16" />已上传音乐</button></div></div>
-  <div v-if="!app.room.playlist.length" class="empty-state compact"><Disc3 :size="30" /><h3>把你的收藏带进来</h3><p>音乐上传至 OSS，最先就绪的成员带领进度。</p></div>
-  <TransitionGroup v-else tag="div" name="list" class="track-list"><div v-for="(item, i) in app.room.playlist" :key="item.id" class="track-row" :class="{ current: item.id === app.room.playback.sourceId }"><span class="track-number">{{ (i + 1).toString().padStart(2, '0') }}</span><div class="track-title"><strong>{{ item.name }}</strong><small>{{ app.room.members.find(m => m.id === item.providerId)?.name ?? '离线成员' }} · {{ item.available ? (item.lossless ? '无损音源' : '有损音源') : '提供者离线' }}</small></div><span class="track-duration">{{ format(item.durationMs) }}</span><div class="track-actions"><button class="icon-button" aria-label="播放此曲" :disabled="!app.permission.skip || !item.available || disabled" @click="app.act({ type: 'play', payload: { trackId: item.id } })"><Play :size="16" /></button><template v-if="app.host"><button class="icon-button" aria-label="上移" :disabled="i === 0 || !app.connected" @click="move(i, -1)"><ArrowUp :size="14" /></button><button class="icon-button" aria-label="下移" :disabled="i === app.room.playlist.length - 1 || !app.connected" @click="move(i, 1)"><ArrowDown :size="14" /></button></template><button v-if="app.host || item.providerId === app.user?.id" class="icon-button" aria-label="移除音轨" :disabled="item.id === app.room.playback.sourceId || item.id === app.room.pending?.playback.sourceId || !app.connected" @click="app.act({ type: 'remove', payload: { trackId: item.id } })"><Trash2 :size="14" /></button></div></div></TransitionGroup>
-  <div class="network-strip"><span>缓冲 {{ (app.media.bufferedMs / 1000).toFixed(1) }}s</span><span class="network-drift">进度差 <span class="network-drift-value" :title="`${Math.round(app.media.driftMs)}ms`">{{ Math.round(app.media.driftMs) }}ms</span></span><span>{{ (app.media.receiveBps / 1e6).toFixed(2) }} Mbps</span><span>OSS · WebSocket 同步</span></div></div>
-  <div class="room-side-column"><aside class="room-aside"><div class="tabs"><button :class="{ active: panel === 'members' }" aria-label="成员" @click="panel = 'members'"><Users :size="17" />成员</button><button :class="{ active: panel === 'settings' }" aria-label="权限" @click="panel = 'settings'"><Settings2 :size="17" />权限</button></div>
-  <Transition name="fade" mode="out-in"><div :key="panel" class="panel-content"><template v-if="panel === 'members'"><h3>房间成员</h3><div v-for="member in app.room.members" :key="member.id" class="member-row"><span class="avatar">{{ member.name.slice(0, 1) }}</span><span>{{ member.name }}<small>{{ member.id === app.room.hostId ? '房主' : member.online ? '在线收听' : '暂时离线' }}</small></span><span class="dot" :class="{ online: member.online }" /></div><div class="aside-note">本地音量只影响自己。<br>切歌与进度由房间统一同步。</div></template>
-  <template v-else><h3>房间默认权限</h3><div v-for="key in keys" :key="key" class="permission-row"><span>{{ labels[key] }}</span><input type="checkbox" :checked="app.room.defaults[key]" :disabled="!app.host || !app.connected" @change="setDefault(key, ($event.target as HTMLInputElement).checked)" /></div><template v-if="app.host"><h3 class="spaced">成员单独设置</h3><div v-for="member in app.room.members.filter(m => m.id !== app.room?.hostId)" :key="member.id" class="override-card"><strong>{{ member.name }}</strong><label v-for="key in keys" :key="key" class="override-row"><span>{{ labels[key] }}</span><select :value="member.overrides[key] === undefined ? 'default' : member.overrides[key] ? 'allow' : 'deny'" :disabled="!app.connected" @change="setOverride(member.id, key, ($event.target as HTMLSelectElement).value)"><option value="default">跟随房间</option><option value="allow">允许</option><option value="deny">禁止</option></select></label></div></template><p class="aside-note">成员设置优先于默认值。房主始终具有全部权限。</p></template>
-  </div></Transition></aside><RoomChat :key="app.room.id" /></div></div></section><div v-else class="empty-state"><h3 class="loading-state" role="status">正在加入房间…</h3><button class="secondary" @click="router.push('/')">返回房间列表</button></div>
+ <section v-if="app.room" class="tone-room page">
+  <header class="room-titlebar"><div><h1>{{ app.room.name }}</h1></div><div class="room-title-actions"><span class="visibility-pill">{{ app.room.settings?.visibility==='invite'?'邀请房间':'公开房间' }}</span><button class="primary" @click="invite"><Link :size="16" />邀请好友</button><button v-if="app.host" class="icon-button" aria-label="房间设置" @click="ui.settings=true"><Settings2 :size="19" /></button><button class="icon-button" aria-label="离开房间" :disabled="leaving" @click="exit"><X :size="22" /></button></div></header>
+  <div class="listening-layout"><div class="listening-main">
+   <section class="listening-stage" aria-label="一起听主舞台"><RoomWaveform :key="app.room.id" :source-id="app.room.playback.sourceId" :playing="!!track&&app.connected&&app.room.playback.playState==='playing'" />
+    <div class="stage-presence"><button class="presence-pill" @click="ui.members=true"><Headphones :size="16" />{{ online.length }} 人正在同频</button><span>此刻同一首歌，就是我们的距离。</span><button class="stage-avatars" aria-label="查看房间成员与权限" @click="ui.members=true"><span v-for="member in online.slice(0,4)" :key="member.id" class="portrait">{{ member.name.slice(0,1) }}</span><small v-if="online.length>4">+{{ online.length-4 }}</small></button></div>
+    <div class="stage-turntable"><img :src="turntable" alt="同频黑胶唱机" width="449" height="403" /><AlbumArt v-if="coverUrl" class="turntable-label" :src="coverUrl" :alt="`${track?.name??''}专辑封面`" /></div>
+    <div class="stage-song"><div class="stage-song-title"><h2>{{ track?.name??'等待第一首音乐' }}</h2><span v-if="track" class="source-badge">{{ track.lossless?'HQ':'原音' }}</span></div><p>{{ track?.artists??'添加一首收藏，开始共享' }}<template v-if="track?.album"> / {{ track.album }}</template></p><TrackLyrics class="stage-lyrics" /><p v-if="!track" class="stage-empty-lyric">让音乐，替我们说声你好。<button class="text-button" :disabled="!app.connected||!app.permission.enqueue" @click="openSearch">搜索想一起听的歌</button></p></div>
+    <button class="stage-controller" @click="ui.members=true"><Users :size="16" />{{ app.room.members.find(m=>m.id===app.room?.hostId)?.name??'房主' }}正在控制播放</button><span v-if="app.room.pending || app.media.status !== 'playing'" class="stage-audio-status" role="status">{{ app.room.pending?'正在准备同步…':app.media.detail||'等待音乐开始' }}</span>
+   </section>
+   <SimilarRecommendations :key="app.room.id" />
+  </div><RoomChat :key="app.room.id" /></div>
+ </section>
+ <div v-else class="empty-state"><h3 class="loading-state" role="status">正在加入房间…</h3><button class="secondary" @click="router.push('/')">返回房间列表</button></div>
 </template>

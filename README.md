@@ -1,12 +1,16 @@
+> **界面与播放重构（2026-10-29）：设计源为 Brilliant `witty-jaguar/share-music`，01–07 画板与新增「08 API与播放实现」。界面采用同频 TONE 浅色风格，房间搜索、分类、12 位房间码、创建与房主设置对齐当前 API。Windows 使用 WebView2 的 HTML Audio 播放；启动、安装包与 CI 均不构建或携带 FFmpeg / vcpkg 媒体库。详见 [设计与播放说明](docs/BRILLIANT-WEBVIEW2.md) 与 [当前打包说明](docs/PACKAGING.md)。本文剩余涉及原生 P2P、系统采集或旧构建命令的章节仅供历史排查，不能作为当前操作步骤。**
+
+> **当前音乐存储（2026-10-29）：只保存网易云直链、过期时间和元数据到 MySQL，不再上传 OSS。链接过期时按需重新获取；本地文件云上传已停用。使用 [API 文档](docs/API.md) / [MySQL 升级说明](docs/MYSQL.md)，旧 OSS 章节仅供历史排查。**
+
 # 共鸣 · Music Share
 
-Tauri 2 + Vue 3 + TypeScript + Pinia + Vue Router 客户端，Rust 原生媒体核心，NestJS 控制服务。
+Tauri 2 + Vue 3 + TypeScript + Pinia + Vue Router 客户端，HTML Audio 播放，NestJS 控制服务。Windows 使用 WebView2 内置音频解码；Rust 仅承担缓存、系统媒体控制、凭据与更新等桌面能力。
 
-本项目提供可运行的开发原型，实现多人房间、四项独立权限、本地文件及系统音频音源、统一播放时间轴、P2P 媒体传输、有限 TURN 中继和主动 Opus 降级。服务器不保存音乐文件、不转码、不混音。
+当前客户端实现多人房间、音乐搜索与音乐库、统一播放时间轴、歌词、聊天和独立权限。歌曲通过服务端授权直链接入，不支持本地文件上传、系统采集或 P2P 推流；不转码、不混音。
 
 ## 快速启动
 
-需要 Node.js 22.18+、Rust 1.90+。Windows 需要 Visual Studio C++ 桌面开发工具及 WebView2。原生媒体库另需 CMake 和 vcpkg，首次编译 FFmpeg 可能需要较长时间。
+需要 Node.js 22.18+、Rust 1.90+。Windows 需要 Visual Studio C++ 桌面开发工具及 WebView2。当前启动和打包不需要 CMake、FFmpeg、vcpkg 或 music_native 动态库。
 
 在项目根目录运行：
 
@@ -30,7 +34,7 @@ pnpm run dev:server
 npm run desktop
 ```
 
-开发启动器会自动选择工程内最新的媒体库，并打印加载路径；不再需要为工程内的旧 DLL 手动设置环境变量。外部自定义媒体库路径仍尊重 `MUSIC_NATIVE_LIBRARY`。
+开发启动器直接启动 Tauri，不查找或加载原生媒体库；旧 `MUSIC_NATIVE_LIBRARY` / `MUSIC_NATIVE_LICENSES` / `MUSIC_NATIVE_DEPENDENCIES` 环境变量会被忽略。
 
 服务器默认绑定 `127.0.0.1:3000`。客户端不再显示服务器地址输入框，按 Vite 环境变量自动连接，创建本地账号后即可创建房间。密码至少 10 个字符。开发环境未设置 TOKEN_SECRET 时，每次重启生成临时密钥；账号保存到 SQLite，旧会话失效。
 
@@ -240,3 +244,10 @@ Web 页面提供手机底部导航、触控播放控制和窄屏弹窗；手机�
 侧栏的“版本与更新日志”可查看当前版本和内置更新记录。使用 `npm run version:check` 检查版本一致性，`npm run release:version -- patch` 准备下一个修订版本，`npm run release:notes -- 版本号` 导出 GitHub Release 说明。详细流程见 [版本发布说明](docs/RELEASING.md)，变更记录见 [更新日志](CHANGELOG.md)。版本命令不自动发布 GitHub；已接入 joueyl/share-music 的桌面更新，首次配置签名后由 Actions 自动生成更新文件，详见 [GitHub 更新配置](docs/UPDATER.md)。
 
 仓库附带 **Desktop installers** GitHub Actions 工作流：支持手动打包 Windows x64、Linux x64、macOS Intel / Apple Silicon 安装包；推送匹配的 `v版本号` 标签后，四种目标全部成功并通过校验才会创建统一 Release 草稿。配置方式、产物下载、macOS 签名限制与首次运行说明见 [GitHub Actions 自动打包](docs/GITHUB-ACTIONS.md)。
+
+## MySQL 数据迁移与 API（2026-10-29）
+
+服务端默认使用 MySQL 8.0+，启动必须设置 `DATABASE_URL`（Docker 内不要使用 localhost 指向宿主机）。
+迁移前先停止旧服务，保留原 SQLite 文件和 WAL，不要删除旧数据卷。
+详细步骤、表结构和回滚限制见 [MySQL 迁移说明](docs/MYSQL.md)，接口见 [API 文档](docs/API.md)。
+SQLite 驱动只保留用于离线迁移和非生产测试，不会在 MySQL 连接失败时静默回退。

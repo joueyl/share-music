@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export { playlistReference, isPlaylistShortLink, parsePlaylistLink } from './playlist-link';
 
 export const MAX_MEMBERS = 8;
 export const DEFAULT_BUFFER_MS = 3000;
@@ -13,6 +14,10 @@ export type Quality = 'lossless' | 'source' | 'opus';
 export const audioSpecSchema = z.object({ sampleRate: z.number().int().positive().max(192000), bits: z.number().int().positive().max(32), channels: z.number().int().min(1).max(8) }).strict();
 export type AudioSpec = z.infer<typeof audioSpecSchema>;
 export const trackSchema = z.object({
+  sourceUrl: z.string().max(8192).url().startsWith('https://').refine(value => {
+    try {const url=new URL(value);return /^[a-z0-9-]+\.music\.126\.net$/i.test(url.hostname)&&!url.username&&!url.password&&!url.port&&!url.hash;}catch{return false;}
+  }).optional(),
+  sourceExpiresAt: z.number().int().nonnegative().optional(),
   neteaseId: z.string().regex(/^\d{1,20}$/).optional(),
   artists: z.string().max(1000).optional(), album: z.string().max(500).optional(),
   ossUrl: z.string().max(2048).url().startsWith('https://').optional(),
@@ -23,6 +28,8 @@ export const trackSchema = z.object({
 }).strict();
 export type TrackMetadata = z.infer<typeof trackSchema>;
 export type Track = TrackMetadata & { providerId: string; available: boolean };
+/** ossKey is read-only legacy metadata; new remote songs use sourceUrl. */
+export function hasRemoteAudio(track: Partial<TrackMetadata>|undefined): boolean {return !!(track?.sourceUrl||track?.ossKey);}
 export function normalizeAlbumCover(value: unknown): string | null {
   if (typeof value !== 'string' || value.length > 2048) return null;
   try {
@@ -34,7 +41,7 @@ export function normalizeAlbumCover(value: unknown): string | null {
   } catch { return null; }
 }
 export const chatRequestSchema = z.object({ type: z.literal('chat'), roomId: z.string().uuid(), requestId: z.string().uuid(), text: z.string().trim().min(1).max(500) }).strict();
-export type ChatMessage = { id: string; requestId: string; roomId: string; userId: string; userName: string; text: string; sentAt: number };
+export type ChatMessage = { id: string; requestId: string; roomId: string; userId: string; userName: string; text: string; sentAt: number; kind?: 'activity' };
 export type Member = { id: string; name: string; joinedAt: number; online: boolean; overrides: Partial<Permissions>; permissions: Permissions };
 export type Playback = {
   leaderId?: string | null; sourceId: string | null; sourceEpoch: number; sourceType: 'file' | 'live' | null;
@@ -42,7 +49,16 @@ export type Playback = {
   providerId: string | null; qualityMode: Quality; spec: AudioSpec | null; bitrateBps: number; instant: boolean;
 };
 export type PendingPlayback = { id: string; playback: Playback; previous: Playback; ready: string[]; preparedAt: number; deadlineAt: number; committed: boolean; followTimeline: boolean };
+export const roomSettingsSchema = z.object({
+  description: z.string().trim().max(500).default(''),
+  atmosphere: z.enum(['sunset', 'night', 'weekend', 'custom']).default('sunset'),
+  visibility: z.enum(['public', 'invite']).default('public'),
+  category: z.string().trim().max(40).default(''),
+  coverUrl: z.string().url().startsWith('https://').max(2048).nullable().default(null),
+}).strict();
+export type RoomSettings = z.infer<typeof roomSettingsSchema>;
 export type RoomSnapshot = {
+  settings?: RoomSettings; inviteCode?: string;
   id: string; name: string; hostId: string; stateVersion: number; defaults: Permissions;
   members: Member[]; playlist: Track[]; playback: Playback; pending: PendingPlayback | null;
   requests: { id: string; memberId: string; spec: AudioSpec; bitrateBps: number }[]; serverNow: number;

@@ -71,9 +71,8 @@ test('workflow waits for Windows and every Unix matrix build and gives build job
  for(const label of ['ubuntu-22.04','macos-15-intel','macos-15'])assert.ok(workflow.includes(`runner: ${label}`));
  for(const target of ['linux-x64','macos-x64','macos-arm64'])assert.ok(workflow.includes(`target: ${target}`));
  assert.match(workflow,/fail-fast: false/);assert.match(workflow,/node scripts\/ci-release.mjs merge/);
- assert.match(workflow,/sudo apt-get install -y[^\n]*\bnasm\b/);
- assert.match(workflow,/sudo apt-get install -y[^\n]*\bautoconf autoconf-archive automake libtool\b/);
- assert.match(workflow,/brew install[^\n]*\bnasm\b/);
+ assert.match(workflow,/libwebkit2gtk-4.1-dev/);
+ assert.doesNotMatch(workflow,/vcpkg|ffmpeg|cmake -S native|\bnasm\b/);
 });
 
 async function allArtifacts(t,signing){
@@ -98,7 +97,7 @@ test('every desktop build caches Cargo downloads and compiled dependencies after
  for(const job of [windows,unix]){
   assert.match(job,/uses: Swatinem\/rust-cache@[a-f0-9]{40} # v2/);
   assert.match(job,/workspaces: apps\/client\/src-tauri -> target/);
-  assert.match(job,/key: \$\{\{ runner.os \}\}-\$\{\{ runner.arch \}\}-desktop-\$\{\{ hashFiles\('native\/vcpkg.json', 'native\/triplets\/\*\*'\) \}\}/);
+  assert.match(job,/key: \$\{\{ runner.os \}\}-\$\{\{ runner.arch \}\}-desktop-\$\{\{ hashFiles\('apps\/client\/src-tauri\/Cargo.lock'\) \}\}/);
   for(const option of ["cache-targets: 'true'","cache-workspace-crates: 'false'","cache-bin: 'false'","cache-on-failure: 'true'"])assert(job.includes(option));
   assert(job.indexOf('rustup default 1.90.0')<job.indexOf('uses: Swatinem/rust-cache@'));
   assert(job.indexOf('uses: Swatinem/rust-cache@')<job.indexOf('node scripts/ci-release.mjs collect'));

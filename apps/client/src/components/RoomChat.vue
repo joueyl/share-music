@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
-import { MessageCircle, Send, LoaderCircle, ArrowDown } from 'lucide-vue-next';
+import { MessageCircle, Send, LoaderCircle, ArrowDown, MoreHorizontal, Heart, Music2 } from 'lucide-vue-next';
 import { useApp } from '../store';
+import { ui } from '../ui';
 import { sendChat } from '../bridge';
 
 const app = useApp();
@@ -60,21 +61,69 @@ async function submit() {
 
 <template>
   <section class="room-chat" aria-labelledby="room-chat-title">
-    <header class="room-chat-header"><h3 id="room-chat-title"><MessageCircle :size="17" />房间聊天</h3><span><i class="dot" :class="{ online: app.connected }" />{{ app.connected ? '实时交流' : '连接已断开' }}</span></header>
+    <header class="room-chat-header"><h3 id="room-chat-title">一起聊聊</h3><span class="chat-online">{{ app.room?.members.filter(m=>m.online).length??0 }} 在线</span><button class="icon-button" aria-label="房间成员与权限" @click="ui.members=true"><MoreHorizontal :size="18" /></button></header>
     <div ref="list" class="room-chat-messages" role="log" aria-label="房间聊天消息" aria-live="polite" aria-relevant="additions" tabindex="0" @scroll="scrollPosition">
       <div v-if="!app.chatMessages.length" class="room-chat-empty"><MessageCircle :size="28" /><p>边听边聊，让音乐连接彼此</p><small>发送第一条消息吧</small></div>
-      <article v-for="message in app.chatMessages" :key="message.id" class="chat-message" :class="{ own: message.userId === app.user?.id }">
-        <div class="chat-message-meta"><strong>{{ message.userName }}<span v-if="message.userId === app.user?.id">（我）</span></strong><time :datetime="new Date(message.sentAt).toISOString()">{{ time(message.sentAt) }}</time></div>
+      <template v-for="message in app.chatMessages" :key="message.id">
+      <article v-if="message.kind === 'activity'" class="chat-activity">
+        <Music2 :size="13" aria-hidden="true" /><p><strong>{{ message.userName }}</strong><span v-if="message.userId === app.user?.id">（我）</span> {{ message.text }}</p><time :datetime="new Date(message.sentAt).toISOString()">{{ time(message.sentAt) }}</time>
+      </article>
+      <article v-else class="chat-message" :class="{ own: message.userId === app.user?.id }">
+        <span v-if="message.userId!==app.user?.id" class="portrait chat-portrait" aria-hidden="true">{{ message.userName.slice(0,1) }}</span><div class="chat-message-meta"><strong>{{ message.userName }}<span v-if="message.userId === app.user?.id">（我）</span></strong><time :datetime="new Date(message.sentAt).toISOString()">{{ time(message.sentAt) }}</time></div>
         <p class="chat-message-bubble">{{ message.text }}</p>
       </article>
+      </template>
     </div>
     <button v-if="unread" class="chat-unread text-button" @click="scrollToBottom"><ArrowDown :size="13" />有新消息，点击查看</button>
+    <div class="chat-quick-replies"><button type="button" :disabled="!app.connected||sending" @click="draft='这首歌好听！'"><Heart :size="13" />好喜欢</button><button type="button" :disabled="!app.connected||sending" @click="draft='晚安'">晚安</button><button type="button" :disabled="!app.connected||sending" @click="draft='好听！'">好听！</button></div>
     <form class="room-chat-form" @submit.prevent="submit">
       <label class="sr-only" for="room-chat-draft">聊天消息</label>
-      <textarea id="room-chat-draft" v-model="draft" maxlength="500" rows="3" :disabled="!app.connected || sending" placeholder="分享此刻的心情…" @keydown="keydown" />
-      <div class="room-chat-actions"><span>{{ draft.length }}/500 · Shift+Enter 换行</span><button class="primary" :aria-busy="sending" :disabled="!canSend"><LoaderCircle v-if="sending" :size="14" class="spinning" /><Send v-else :size="14" />{{ sending ? '发送中' : '发送' }}</button></div>
+      <textarea id="room-chat-draft" v-model="draft" maxlength="500" rows="1" :disabled="!app.connected || sending" placeholder="说点什么，让此刻更近…" @keydown="keydown" />
+      <div class="room-chat-actions"><button class="primary" aria-label="发送聊天消息" :aria-busy="sending" :disabled="!canSend"><LoaderCircle v-if="sending" :size="14" class="spinning" /><Send v-else :size="14" /><span class="sr-only">{{ sending ? '发送中' : '发送' }}</span></button></div>
       <p v-if="error" class="chat-error" role="alert">{{ error }}</p>
     </form>
-    <p class="room-chat-note">仅当前房间可见 · 最近 100 条 · 服务重启后清空</p>
+    <p class="room-chat-note">仅当前房间可见 · Shift+Enter 换行</p>
   </section>
 </template>
+
+<style scoped>
+/* Compact messages without shrinking the text or its touch/keyboard controls. */
+.room-chat-messages{padding:14px 3px 10px}
+.chat-message{margin-bottom:12px}
+.chat-message-meta{margin-bottom:4px}
+.chat-message-bubble{width:fit-content;max-width:100%;padding:7px 10px;line-height:1.55;border-radius:10px}
+.chat-message.own{padding-left:0}
+.chat-message.own .chat-message-bubble{border-radius:10px}
+.chat-activity{margin:10px 0;padding:6px 9px}
+/* Keep the gutter stable while messages arrive; style only the chat log. */
+.room-chat-messages{
+  --chat-scroll-thumb:#b8c7d9;
+  scrollbar-width:thin;
+  scrollbar-color:var(--chat-scroll-thumb) transparent;
+  scrollbar-gutter:stable;
+}
+.room-chat-messages:hover,.room-chat-messages:focus-within{--chat-scroll-thumb:#91a9c7}
+/* WebView2 supports the native pseudo-elements. Reset the standard properties
+   here so Chromium does not override the rounded custom thumb with its own. */
+@supports selector(::-webkit-scrollbar){
+  .room-chat-messages{scrollbar-width:auto;scrollbar-color:auto}
+  .room-chat-messages::-webkit-scrollbar{width:8px;height:8px}
+  .room-chat-messages::-webkit-scrollbar-track{background:transparent;margin-block:8px}
+  .room-chat-messages::-webkit-scrollbar-thumb{
+    background:var(--chat-scroll-thumb);
+    border:2px solid transparent;
+    border-radius:999px;
+    background-clip:padding-box;
+    min-height:32px;
+  }
+  .room-chat-messages::-webkit-scrollbar-thumb:hover{background-color:#7899c3}
+  .room-chat-messages::-webkit-scrollbar-thumb:active{background-color:#4f80db}
+  .room-chat-messages::-webkit-scrollbar-button{display:none;width:0;height:0}
+  .room-chat-messages::-webkit-scrollbar-corner{background:transparent}
+}
+@media(forced-colors:active){
+  .room-chat-messages{scrollbar-color:auto;--chat-scroll-thumb:ButtonText}
+  .room-chat-messages::-webkit-scrollbar-thumb:hover{background-color:Highlight}
+  .room-chat-messages::-webkit-scrollbar-thumb:active{background-color:Highlight}
+}
+</style>

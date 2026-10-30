@@ -1,28 +1,38 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { Plus, ArrowUpRight, Users, Radio, RefreshCw } from 'lucide-vue-next';
+import { Plus, Users, Headphones, RefreshCw, Link, X, Search } from 'lucide-vue-next';
 import { useApp } from '../store';
+import { ui } from '../ui';
 import * as bridge from '../bridge';
-const app = useApp(), router = useRouter();
-const rooms = ref<Awaited<ReturnType<typeof bridge.listRooms>>>([]), name = ref(''), creating = ref(false), loading = ref(false);
-const submitting=ref(false),joining=ref<string|null>(null);
-let timer: ReturnType<typeof setInterval>;
-async function load() { if(loading.value)return;loading.value = true; try { rooms.value = await bridge.listRooms(); } catch (e) { app.error(e); } finally { loading.value = false; } }
-async function enter(id: string) { if(joining.value)return;joining.value=id;try { await bridge.join(id); await router.push(`/room/${id}`); } catch (e) { app.error(e); } finally{joining.value=null;} }
-async function create() { if(submitting.value)return;submitting.value=true;try { const room = await bridge.createRoom(name.value); creating.value = false; name.value = ''; await load(); await enter(room.id); } catch (e) { app.error(e); } finally{submitting.value=false;} }
-onMounted(() => { void load(); timer = setInterval(load, 10000); }); onUnmounted(() => clearInterval(timer));
+import type { RoomSnapshot } from '@music-share/shared';
+import RoomSettingsDialog from '../components/RoomSettingsDialog.vue';
+import discoveryRecord from '../assets/discovery-record.png';
+const app=useApp(),router=useRouter(),rooms=ref<bridge.RoomSummary[]>([]),creating=ref(false),codeOpen=ref(false),code=ref(''),keywords=ref(ui.roomKeywords),category=ref(''),loading=ref(false),joining=ref<string|null>(null),resolving=ref(false);
+const moods:Record<string,string>={sunset:'SLOW\nAFTERNOON',night:'AFTER\nHOURS',weekend:'SUNDAY\nSOMEWHERE',custom:'YOUR\nFREQUENCY'};
+let generation=0,timer:ReturnType<typeof setInterval>;
+async function load(){const gen=++generation;loading.value=true;try{const data=await bridge.listRooms(keywords.value,category.value);if(gen===generation)rooms.value=data;}catch(e){if(gen===generation)app.error(e);}finally{if(gen===generation)loading.value=false;}}
+async function enter(id:string){const target=rooms.value.find(r=>r.id===id);if(joining.value||!app.connected||target&&target.members>=target.maxMembers)return;joining.value=id;try{await bridge.join(id);await router.push(`/room/${id}`);}catch(e){app.error(e);}finally{joining.value=null;}}
+async function resolve(){if(resolving.value)return;resolving.value=true;try{await enter((await bridge.resolveRoom(code.value)).id);codeOpen.value=false;}catch(e){app.error(e);}finally{resolving.value=false;}}
+async function created(room:RoomSnapshot){creating.value=false;await load();await enter(room.id);}
+watch(()=>ui.roomKeywords,term=>{keywords.value=term;void load();});
+onMounted(()=>{void load();timer=setInterval(()=>{if(!loading.value&&!creating.value)void load();},10000);});onUnmounted(()=>{generation++;clearInterval(timer);});
 </script>
 <template>
-  <header class="topbar"><span>发现 / 音乐房间</span><span class="topbar-right"><span class="dot online" /> P2P 音乐空间</span></header>
-  <section class="page">
-    <div class="page-heading"><div><span class="eyebrow">A SPACE FOR EVERY SOUND</span><h1>一起听，好过一个人。</h1><p class="muted">找一个房间，把此刻的音乐分享出去。</p></div><button class="primary" :disabled="!app.connected" @click="creating = true"><Plus :size="18" />创建房间</button></div>
-    <div class="hero"><div><div class="hero-label"><Radio :size="16" /> 共鸣 · LISTENING ROOMS</div><h2>隔着距离，<br>共享同一段旋律。</h2><p>本地音乐 · 实时音源 · 无损优先</p></div><div class="record-art"><div class="vinyl"><div class="vinyl-label"><Radio :size="32" /><small>共 鸣</small></div></div><div class="art-orbit orbit-one" /><div class="art-orbit orbit-two" /><span class="art-caption">SAME SONG. SAME MOMENT.</span></div></div>
-    <div class="section-title"><h2>所有房间 <span>{{ rooms.length.toString().padStart(2, '0') }}</span></h2><button class="text-button" :disabled="loading" :aria-busy="loading" @click="load"><RefreshCw :size="14" :class="{ spinning: loading }" />刷新</button></div>
-    <TransitionGroup v-if="rooms.length" name="list" tag="div" class="room-grid"><button v-for="(room, i) in rooms" :key="room.id" class="room-card" :disabled="!!joining || !app.connected || room.members >= room.maxMembers" :aria-busy="joining===room.id" @click="enter(room.id)"><div class="room-art" :class="`art-${i % 3}`"><Radio :size="38" /><span class="badge">{{ room.qualityMode === 'opus' ? '有损模式' : '无损优先' }}</span></div><div class="room-card-body"><h3>{{ room.name }}<ArrowUpRight :size="19" /></h3><div class="muted room-meta"><span><Users :size="14" />{{ room.members }} / {{ room.maxMembers }} 人</span><span>{{ joining===room.id ? '正在加入…' : room.members >= room.maxMembers ? '房间已满' : '点击加入' }}</span></div></div></button></TransitionGroup>
-    <div v-else-if="loading" class="empty-state loading-state" role="status">正在发现房间…</div>
-    <div v-else class="empty-state"><Radio :size="32" /><h3>第一段旋律，等你开启</h3><p>还没有房间。创建一个，邀请朋友一起听。</p></div>
-    <div class="capacity-note">每房间最多 8 人。无损播放容量根据音源上行和连接质量动态确定。</div>
-  </section>
-  <Teleport to="body"><Transition name="modal" appear><div v-if="creating" class="modal-backdrop" @click.self="!submitting && (creating = false)"><form class="modal" @submit.prevent="create"><h2>创建音乐房间</h2><label>房间名称<input v-model="name" :disabled="submitting" autofocus required maxlength="80" placeholder="例如：今晚的爵士电台" /></label><p class="muted">默认仅房主控制播放，成员可以添加音乐。</p><div class="modal-actions"><button type="button" class="secondary" :disabled="submitting" @click="creating = false">取消</button><button class="primary" :disabled="submitting" :aria-busy="submitting" :class="{'loading-state':submitting}">{{ submitting ? '创建中…' : '创建房间' }}</button></div></form></div></Transition></Teleport>
+ <RoomSettingsDialog v-if="creating" create @close="creating=false" @created="created" />
+ <section class="page discovery-page">
+  <section class="discovery-hero"><div class="discovery-copy"><span>MUSIC SOUNDS BETTER TOGETHER</span><h1>此刻，和谁一起听？</h1><p>把喜欢的歌分享给喜欢的人。距离再远，也能听见同一秒。</p><div><button class="primary" :disabled="!app.connected" @click="creating=true"><Plus :size="18" />创建我的房间</button><button class="secondary" :disabled="!app.connected" @click="codeOpen=!codeOpen"><Link :size="18" />输入房间码加入</button></div></div><img :src="discoveryRecord" alt="唱片与同频朋友的插画" width="480" height="240" /></section>
+  <form v-if="codeOpen" class="invite-code-form" @submit.prevent="resolve"><Link :size="18" /><label class="sr-only" for="room-code">房间码</label><input id="room-code" v-model="code" placeholder="输入 12 位房间码" pattern="[a-fA-F0-9]{12}" maxlength="12" required /><button class="primary" :disabled="resolving||!app.connected">{{ resolving?'加入中…':'加入房间' }}</button><button type="button" class="icon-button" aria-label="关闭房间码输入" @click="codeOpen=false"><X :size="18" /></button></form>
+  <div class="discovery-filterbar"><h2>正在发生的好音乐</h2><div class="category-tabs"><button v-for="item in [{name:'为你推荐',value:''},{name:'华语',value:'华语'},{name:'独立 / 民谣',value:'民谣'},{name:'轻音乐',value:'轻音乐'},{name:'深夜陪伴',value:'深夜'}]" :key="item.name" :class="{selected:category===item.value}" :aria-pressed="category===item.value" :title="item.value?undefined:'按可见房间展示，当前服务端没有个性化推荐接口'" @click="category=item.value;load()">{{ item.name }}</button></div><button class="friends-filter" title="当前服务端没有好友关系接口" @click="app.notice='当前服务端暂无好友关系与好友筛选接口'"><Users :size="15" />只看好友</button><button class="icon-button" aria-label="刷新房间" :disabled="loading" @click="load"><RefreshCw :size="15" :class="{spinning:loading}" /></button></div>
+  <form v-if="keywords" class="room-filter-summary" @submit.prevent="load"><Search :size="16" /><input v-model="keywords" maxlength="100" aria-label="搜索房间" /><button class="text-button" @click.prevent="keywords='';ui.roomKeywords='';load()">清除搜索</button></form>
+  <div v-if="loading&&!rooms.length" class="empty-state loading-state" role="status">正在发现同频的人…</div>
+  <TransitionGroup v-else-if="rooms.length" tag="div" name="list" class="discovery-grid" tabindex="0" aria-label="房间列表">
+   <button v-for="room in rooms" :key="room.id" type="button" class="discovery-card" :disabled="!!joining||!app.connected||room.members>=room.maxMembers" :aria-busy="joining===room.id" :aria-label="`${room.name}，${room.members} 人在线，${joining===room.id?'正在加入':room.members>=room.maxMembers?'房间已满':'点击加入房间'}`" @click="enter(room.id)">
+    <span class="landscape-cover" :class="room.settings?.atmosphere??'sunset'" :style="room.settings?.coverUrl?{backgroundImage:`url(${JSON.stringify(room.settings.coverUrl)})`}:undefined"><template v-if="!room.settings?.coverUrl"><i class="landscape-sun" /><i class="landscape-hill hill-back" /><i class="landscape-hill hill-front" /><strong>{{ moods[room.settings?.atmosphere??'sunset'] }}</strong></template><span class="room-online"><Headphones :size="14" />{{ room.members }} 人在线</span></span>
+    <span class="discovery-card-body"><strong class="discovery-card-title">{{ room.name }}</strong><span class="discovery-card-description">{{ room.settings?.description||'留一点时间，给耳机里的小世界。' }}</span><small v-if="joining===room.id||room.members>=room.maxMembers" class="room-card-status" role="status">{{ joining===room.id?'正在加入…':'房间已满' }}</small></span>
+   </button>
+  </TransitionGroup>
+  <div v-else class="empty-state"><Headphones :size="32" /><h3>第一段旋律，等你开启</h3><p>{{ keywords||category?'没有匹配的房间，试试其他关键词或分类。':'还没有公开房间，创建一个，邀请朋友一起听。' }}</p></div>
+  <p class="discovery-footnote">音乐是入口，陪伴才是目的。<span>每房间最多 8 人 · {{ rooms.length }} 个可见房间</span></p>
+ </section>
 </template>

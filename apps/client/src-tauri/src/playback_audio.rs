@@ -4,12 +4,12 @@ pub fn validate_url(value: &str) -> Result<url::Url, String> {
     let url = url::Url::parse(value).map_err(|_| "PLAYBACK_AUDIO_URL_INVALID")?;
     let host = url.host_str().unwrap_or_default();
     if url.scheme() != "https"
-        || !host.ends_with(".aliyuncs.com")
-        || !host.contains(".oss-")
+        || !host.strip_suffix(".music.126.net").is_some_and(|label| {
+            !label.is_empty() && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
         || !url.username().is_empty()
         || url.password().is_some()
         || url.port().is_some_and(|port| port != 443)
-        || !url.path().starts_with("/music/")
         || url.fragment().is_some()
     {
         return Err("PLAYBACK_AUDIO_URL_INVALID".into());
@@ -17,19 +17,38 @@ pub fn validate_url(value: &str) -> Result<url::Url, String> {
     Ok(url)
 }
 
-/// Download the actual song, not waveform data. Signed URLs and provider errors
+/// Download the actual song, not waveform data. Provider URLs and errors
 /// must never be included in returned errors or logs.
 pub async fn download(http: &reqwest::Client, value: &str) -> Result<Vec<u8>, String> {
-    let url = validate_url(value)?;
-    let mut response = http
-        .get(url)
-        .timeout(std::time::Duration::from_secs(60))
-        .send()
-        .await
-        .map_err(|_| "PLAYBACK_AUDIO_DOWNLOAD_FAILED")?;
-    if !response.status().is_success() {
-        return Err("PLAYBACK_AUDIO_DOWNLOAD_FAILED".into());
+    let mut url = validate_url(value)?;
+    let mut received = None;
+    for _ in 0..4 {
+        let response = http
+            .get(url.clone())
+            .timeout(std::time::Duration::from_secs(60))
+            .send()
+            .await
+            .map_err(|_| "PLAYBACK_AUDIO_DOWNLOAD_FAILED")?;
+        if response.status().is_redirection() {
+            let location = response
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|h| h.to_str().ok())
+                .ok_or("PLAYBACK_AUDIO_DOWNLOAD_FAILED")?;
+            url = validate_url(
+                url.join(location)
+                    .map_err(|_| "PLAYBACK_AUDIO_URL_INVALID")?
+                    .as_str(),
+            )?;
+            continue;
+        }
+        if !response.status().is_success() {
+            return Err("PLAYBACK_AUDIO_DOWNLOAD_FAILED".into());
+        }
+        received = Some(response);
+        break;
     }
+    let mut response = received.ok_or("PLAYBACK_AUDIO_DOWNLOAD_FAILED")?;
     if response
         .content_length()
         .is_some_and(|size| size > MAX_AUDIO_BYTES as u64)
@@ -57,25 +76,20 @@ pub async fn download(http: &reqwest::Client, value: &str) -> Result<Vec<u8>, St
 mod tests {
     use super::*;
     #[test]
-    fn accepts_only_https_oss_music_objects() {
-        assert!(validate_url(
-            "https://bucket.oss-cn-hangzhou.aliyuncs.com/music/files/song.mp3?x-oss-signature=test"
-        )
-        .is_ok());
-        assert!(
-            validate_url("https://ap.oss-cn-hangzhou.oss-accesspoint.aliyuncs.com/music/song")
-                .is_ok()
-        );
+    fn accepts_only_https_netease_music_links() {
+        assert!(validate_url("https://m801.music.126.net/audio.mp3?token=test").is_ok());
         for value in [
-            "http://bucket.oss-cn-hangzhou.aliyuncs.com/music/a",
-            "https://127.0.0.1/music/a",
-            "https://bucket.oss-cn-hangzhou.aliyuncs.com.evil.test/music/a",
-            "https://u:p@bucket.oss-cn-hangzhou.aliyuncs.com/music/a",
-            "https://bucket.oss-cn-hangzhou.aliyuncs.com:8443/music/a",
-            "https://bucket.oss-cn-hangzhou.aliyuncs.com/private/a",
-            "https://bucket.oss-cn-hangzhou.aliyuncs.com/music/../private/a",
+            "http://m801.music.126.net/audio.mp3",
+            "https://127.0.0.1/audio.mp3",
+            "https://m801.music.126.net.evil.test/audio.mp3",
+            "https://u:p@m801.music.126.net/audio.mp3",
+            "https://m801.music.126.net:8443/audio.mp3",
+            "https://music.126.net/audio.mp3",
+            "https://a.b.music.126.net/audio.mp3",
+            "https://m801.music.126.net/audio.mp3#fragment",
+            "https://bucket.oss-cn-hangzhou.aliyuncs.com/music/song.mp3",
         ] {
-            assert!(validate_url(value).is_err());
+            assert!(validate_url(value).is_err(), "unexpectedly accepted URL");
         }
     }
 }

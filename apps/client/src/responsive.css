@@ -7,7 +7,7 @@
  .shell{display:block;min-height:100vh;min-height:100dvh}
  .main{width:100%;margin-left:0;padding-bottom:var(--mobile-nav-space)}
  .route-page,.page,.room-main,.room-side-column{min-width:0;max-width:100%}
- .sidebar{position:fixed;inset:auto 0 0;width:100%;height:auto;z-index:40;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:2px;padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));background:#11181df5;backdrop-filter:blur(12px);border:0;border-top:1px solid var(--border)}
+ .sidebar{position:fixed;inset:auto 0 0;width:100%;height:auto;z-index:40;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:2px;padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));background:#fffffff5;backdrop-filter:blur(12px);border:0;border-top:1px solid var(--border)}
  .sidebar>.brand,.sidebar>.nav-caption{display:none}
  .sidebar .sidebar-bottom{display:contents}
  .sidebar .sidebar-bottom>.status-line,.sidebar .sidebar-bottom>p,.sidebar .sidebar-bottom>.identity{display:none}
@@ -15,7 +15,7 @@
  .sidebar .version-button>span{display:block;font-size:10px}.sidebar .version-button small{display:none}
  .sidebar .nav-item svg,.sidebar .logout-button svg,.sidebar .version-button svg{width:20px;height:20px;flex-shrink:0}
  .sidebar .nav-item .tiny-dot{display:none}
- .topbar{position:sticky;top:0;z-index:12;min-height:calc(60px + env(safe-area-inset-top,0px));height:auto;padding:calc(8px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));gap:12px;background:#11181df5;backdrop-filter:blur(12px)}
+ .topbar{position:sticky;top:0;z-index:12;min-height:calc(60px + env(safe-area-inset-top,0px));height:auto;padding:calc(8px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));gap:12px;background:#fffffff5;backdrop-filter:blur(12px)}
  .topbar>span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
  .topbar>.text-button{flex-shrink:0}.topbar-right{display:none}
  .page{padding:24px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px))}.page-heading{flex-wrap:wrap;gap:14px;margin-bottom:24px}.page-heading>div{min-width:0;max-width:100%}.page-heading h1{font-size:25px;overflow-wrap:anywhere}.page-heading p{flex-wrap:wrap;line-height:1.7}

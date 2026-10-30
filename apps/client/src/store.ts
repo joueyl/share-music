@@ -9,7 +9,10 @@ const messages: Record<string, string> = {
   PLAYBACK_AUDIO_BUSY:'音频读取繁忙，请稍后切歌重试',
   PLAYBACK_WEB_SERVER_OUTDATED:'Web 播放需要新版音频读取接口，请先更新并重启服务端',
   UPLOADED_MUSIC_METADATA_MISSING:'该历史上传文件缺少音频参数，请重新添加原歌曲后再试',
-  UPLOADED_MUSIC_NOT_FOUND:'OSS 中的音乐文件已不存在，无法加入播放列表',
+  MUSIC_LINK_EXPIRED:'音乐链接已失效且刷新失败，请稍后重试',
+  MUSIC_CONTENT_CHANGED:'音源内容已变化，请重新添加该歌曲',
+  MUSIC_SOURCE_UNREFRESHABLE:'历史记录没有可续期的歌曲来源，请重新搜索添加',
+  LOCAL_UPLOAD_NOT_SUPPORTED:'本地文件云上传已停用，请从音乐搜索或音乐库添加',
   TRACK_NOT_FOUND:'音乐不存在，请刷新列表',PLAYLIST_FULL:'播放列表已满，最多 200 首',
   PLAYBACK_AUDIO_METADATA_INVALID: '音频缓存信息无效',
   PLAYBACK_AUDIO_INTEGRITY_FAILED: '音乐文件校验失败，请重新添加该歌曲',
@@ -24,10 +27,9 @@ const messages: Record<string, string> = {
   SAVED_LOGIN_WRITE_FAILED: '登录成功，但无法保存密码，下次启动请手动登录',
   SAVED_LOGIN_DELETE_FAILED: '无法清除系统保存的密码，请重试退出登录',
   NETEASE_LOGIN_REQUIRED: '服务端网易云账号未登录，请管理员访问 /loginServe 扫码', NETEASE_UNAVAILABLE: '网易云服务暂不可用，请稍后重试',
-  MUSIC_NOT_AVAILABLE: '当前账号无法获取这首歌曲的完整音源', MUSIC_TRIAL_ONLY: '这首歌曲仅能试听，不能上传完整音乐', MUSIC_AUDIO_UNSUPPORTED: '音源不是受支持的 MP3，暂无法添加',
+  MUSIC_NOT_AVAILABLE: '当前账号无法获取这首歌曲的完整音源', MUSIC_TRIAL_ONLY: '这首歌曲仅能试听，不能添加完整音源', MUSIC_AUDIO_UNSUPPORTED: '音源不是受支持的 MP3，暂无法添加',
   MUSIC_SOURCE_INVALID: '网易云返回的音源地址无效，已阻止下载', MUSIC_DOWNLOAD_FAILED: '服务端下载音乐失败，请稍后重试', MUSIC_TOO_LARGE: '音乐超过 100MB 限制', MUSIC_IMPORT_BUSY: '服务端正在处理其他音乐，请稍后重试', MUSIC_IMPORT_FAILED: '添加未完成，请重试',
 
-  OSS_NOT_CONFIGURED: '服务端尚未配置 OSS 凭据或地域', OSS_INVALID_CONFIG: 'OSS 连接配置无效，请检查接入点与地域', OSS_ACCESS_POINT_INCOMPLETE: 'OSS 接入点域名和别名必须同时配置', OSS_UPLOAD_FAILED: 'OSS 上传失败，请检查网络、凭据及接入点授权',
   FORBIDDEN: '没有此操作权限', HOST_ONLY: '仅房主可操作', ROOM_FULL: '房间已满，最多 8 人', STATE_CONFLICT: '房间状态已更新，请重新操作',
   PLAYBACK_TRANSITION_PENDING: '正在准备播放，请稍候', FILE_ONLY: '直播不能暂停或拖动进度', LIVE_ONLY: '当前音源不是系统推流', STALE_SOURCE: '音源已切换，请重新操作', PROVIDER_OFFLINE: '音源提供者已离线',
   INSUFFICIENT_BANDWIDTH: '带宽不足，请等待或主动选择有损模式', RELAY_BUDGET_EXHAUSTED: '服务器中继预算已用完',
@@ -37,17 +39,8 @@ const messages: Record<string, string> = {
 };
 export const useApp = defineStore('app', () => {
   const user = ref<{ id: string; name: string } | null>(null), room = ref<RoomSnapshot | null>(null), connected = ref(false), notice = ref(''), native = ref(false), nativeReason = ref('');
-  const stun = ref<{ checking: boolean; servers: { url: string; ok: boolean; error: string }[] }>({ checking: false, servers: [] });
   const media = ref({ status: 'idle', detail: '', bufferedMs: 0, driftMs: 0, receiveBps: 0 });
-  const webrtc = ref<Record<string, { roomId: string; peerId: string; sourceEpoch: number; status: string; detail: string }>>({});
   const chatMessages = ref<ChatMessage[]>([]);
-  function currentConnection(event: { roomId: string; peerId: string; sourceEpoch: number }) {
-    const current = room.value;
-    return !!current && event.roomId === current.id &&
-      [current.playback.sourceId ? current.playback.sourceEpoch : undefined, current.pending?.playback.sourceEpoch].includes(event.sourceEpoch) &&
-      current.members.some(member => member.id === event.peerId && member.online);
-  }
-  const webrtcWarnings = computed(() => Object.values(webrtc.value).filter(event => currentConnection(event) && event.status !== 'connected'));
   const now = ref(Date.now()), offset = ref(0), busy = ref(false);
   let acceptEvents = true, clockSynced = false;
   function requestClock() { void bridge.send({ type: 'clock', requestId: crypto.randomUUID(), clientSentAt: Date.now() }).catch(error); }
@@ -68,8 +61,7 @@ export const useApp = defineStore('app', () => {
   async function initialize() {
     if (initialized) return; initialized = true;
     const cap = await bridge.capabilities(); native.value = cap.native; nativeReason.value = cap.reason;
-    await bridge.subscribe('connection', e => { if (!acceptEvents) return; connected.value = e.connected; if (e.connected) requestClock(); else {clearActionFeedback();stun.value = { checking: false, servers: [] };} });
-    await bridge.subscribe('stun-status', e => { if (!acceptEvents) return; stun.value = e; });
+    await bridge.subscribe('connection', e => { if (!acceptEvents) return; connected.value = e.connected; if (e.connected) requestClock(); else clearActionFeedback(); });
     await bridge.subscribe('playback-cache-warning', e => { if (acceptEvents) error(e.error); });
     await bridge.subscribe('media-status', e => { if (!acceptEvents) return; media.value = e; });
     await bridge.subscribe('system-media-control', (event:SystemMediaEvent) => {
@@ -77,20 +69,14 @@ export const useApp = defineStore('app', () => {
       const action=systemMediaAction(event,room.value,user.value?.id??null,connected.value);
       if(action)void act(action);
     });
-    await bridge.subscribe('webrtc-status', event => {
-      if (!acceptEvents || !currentConnection(event)) return;
-      webrtc.value = { ...webrtc.value, [`${event.peerId}:${event.sourceEpoch}`]: event };
-    });
     await bridge.subscribe('clock-offset', e => { if (!acceptEvents) return; offset.value = e.offsetMs; });
     await bridge.subscribe('server-message', message => {
       if (!acceptEvents) return;
       if(message.type==='result')finishAction(message.commandId);
       if (message.type === 'snapshot') {
         if (room.value?.id !== message.data.id) chatMessages.value = [];
-        if (room.value?.id !== message.data.id) webrtc.value = {};
         if (!clockSynced && Number.isFinite(message.data.serverNow)) offset.value = message.data.serverNow - Date.now();
         room.value = message.data; void bridge.syncCloud(message.data, offset.value);
-        webrtc.value = Object.fromEntries(Object.entries(webrtc.value).filter(([, event]) => currentConnection(event)));
       }
       else if (message.type === 'chat-history' && message.roomId === room.value?.id) chatMessages.value = message.messages.slice(-100);
       else if ((message.type === 'chat' || message.type === 'chat-result') && message.data.roomId === room.value?.id) {
@@ -150,8 +136,6 @@ export const useApp = defineStore('app', () => {
       user.value = null; room.value = null; connected.value = false; notice.value = ''; offset.value = 0;
       chatMessages.value = [];
       media.value = { status: 'idle', detail: '', bufferedMs: 0, driftMs: 0, receiveBps: 0 };
-      webrtc.value = {};
-      stun.value = { checking: false, servers: [] };
     } catch (e) { acceptEvents = true; error(e); }
     finally { busy.value = false; }
   }
@@ -170,9 +154,8 @@ export const useApp = defineStore('app', () => {
   async function exitRoom() {
     try {
       await bridge.leave(); clearActionFeedback();room.value = null; chatMessages.value = [];
-      webrtc.value = {};
       media.value = { status: 'idle', detail: '', bufferedMs: 0, driftMs: 0, receiveBps: 0 };
     } catch (e) { error(e); }
   }
-  return { user, room, chatMessages, connected, notice, native, nativeReason, media, stun, webrtcWarnings, busy, pendingActions, host, permission, progress, offset, initialize, login, restoreLogin, logout, act, addFile, exitRoom, error };
+  return { user, room, chatMessages, connected, notice, native, nativeReason, media, busy, pendingActions, host, permission, progress, offset, initialize, login, restoreLogin, logout, act, addFile, exitRoom, error };
 });

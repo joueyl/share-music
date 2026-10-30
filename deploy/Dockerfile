@@ -8,7 +8,7 @@ RUN npm ci --ignore-scripts
 RUN npm run build -w @music-share/server
 RUN npm prune --omit=dev --ignore-scripts
 FROM node:22.18-bookworm-slim
-ENV NODE_ENV=production PORT=3000 BIND_ADDRESS=0.0.0.0 DATABASE_PATH=/data/music-share.sqlite
+ENV NODE_ENV=production PORT=3000 BIND_ADDRESS=0.0.0.0 DATABASE_DRIVER=mysql
 WORKDIR /app
 COPY --from=build --chown=node:node /app/node_modules node_modules
 COPY --from=build --chown=node:node /app/apps/server/dist apps/server/dist

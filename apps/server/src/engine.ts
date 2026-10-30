@@ -1,34 +1,47 @@
 import { randomUUID } from 'node:crypto';
-import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, MAX_MEMBERS, type Action, type AudioSpec, type Command, type Member, type Permissions, type Playback, type RoomSnapshot, type Track, positionAt, supportsLossless } from '../../../packages/shared/src';
+import { roomActivityText } from './room-activity';
+import type { ChatMessage } from '../../../packages/shared/src';
+import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, MAX_MEMBERS, type Action, type AudioSpec, type Command, type Member, type Permissions, type Playback, type RoomSnapshot, type RoomSettings, type Track, roomSettingsSchema, hasRemoteAudio, positionAt, supportsLossless } from '../../../packages/shared/src';
 
 export class DomainError extends Error { constructor(public code: string) { super(code); } }
 const fail = (code: string): never => { throw new DomainError(code); };
-export type RoomRecord = { id: string; name: string; hostId: string; defaults: Permissions; overrides: Record<string, Partial<Permissions>> };
+export type RoomRecord = { id: string; name: string; hostId: string; defaults: Permissions; overrides: Record<string, Partial<Permissions>>; settings?: RoomSettings; inviteCode?: string; playlist?: Track[] };
 type InternalRoom = RoomSnapshot & { offlineAt: Map<string, number>; dedup: Map<string, { fingerprint: string; version: number }>; lastIndex: number };
 const stopped = (epoch = 0, now = 0): Playback => ({ sourceId: null, sourceEpoch: epoch, sourceType: null, playState: 'stopped', positionMs: 0, effectiveAtServerMs: now, providerId: null, qualityMode: 'lossless', spec: null, bitrateBps: 0, instant: false });
 
 export class RoomEngine {
   readonly rooms = new Map<string, InternalRoom>();
   private preparedEpochs = new Map<string, number>();
-  constructor(private persist: (record: RoomRecord) => void = () => {}, private publish: (room: RoomSnapshot) => void = () => {}, private now: () => number = Date.now, private registeredAsset: (key:string,hash:string)=>boolean = ()=>false) {}
+  constructor(private persist: (record: RoomRecord) => void = () => {}, private publish: (room: RoomSnapshot) => void = () => {}, private now: () => number = Date.now, private registeredAsset: (key:string,hash:string)=>boolean = ()=>false, private publishActivity: (message: ChatMessage) => void = () => {}) {}
   restore(records: RoomRecord[]) { for (const record of records) this.rooms.set(record.id, this.make(record)); }
   private make(record: RoomRecord): InternalRoom {
-    return { ...record, stateVersion: 0, members: [], playlist: [], playback: stopped(), pending: null, requests: [], serverNow: this.now(), offlineAt: new Map([[record.hostId, this.now()]]), dedup: new Map(), lastIndex: -1 };
+    return { ...record, stateVersion: 0, members: [], settings: record.settings ?? roomSettingsSchema.parse({}), inviteCode: record.inviteCode ?? randomUUID().replaceAll('-', '').slice(0,12), playlist: (record.playlist ?? []).map(t=>({...t,available:hasRemoteAudio(t)})), playback: stopped(), pending: null, requests: [], serverNow: this.now(), offlineAt: new Map([[record.hostId, this.now()]]), dedup: new Map(), lastIndex: -1 };
   }
-  create(name: string, hostId: string): RoomSnapshot {
+  create(name: string, hostId: string, settings?: RoomSettings, defaults: Permissions = DEFAULT_PERMISSIONS): RoomSnapshot {
     const id = randomUUID();
-    const room = this.make({ id, name, hostId, defaults: { ...DEFAULT_PERMISSIONS }, overrides: {} });
+    const room = this.make({ id, name, hostId, defaults: { ...defaults }, overrides: {}, settings });
     this.rooms.set(id, room); this.save(room); return this.snapshot(id);
   }
   private get(id: string): InternalRoom { return this.rooms.get(id) ?? fail('ROOM_NOT_FOUND'); }
   snapshot(id: string): RoomSnapshot {
     const r = this.get(id);
-    return structuredClone({ id: r.id, name: r.name, hostId: r.hostId, stateVersion: r.stateVersion, defaults: r.defaults, members: r.members, playlist: r.playlist, playback: r.playback, pending: r.pending, requests: r.requests, serverNow: this.now() });
+    return structuredClone({ id: r.id, name: r.name, hostId: r.hostId, settings: r.settings, inviteCode: r.inviteCode, stateVersion: r.stateVersion, defaults: r.defaults, members: r.members, playlist: r.playlist, playback: r.playback, pending: r.pending, requests: r.requests, serverNow: this.now() });
   }
-  list() { return [...this.rooms.values()].map(r => ({ id: r.id, name: r.name, members: r.members.filter(m => m.online).length, maxMembers: MAX_MEMBERS, qualityMode: r.playback.qualityMode })); }
+  list(userId?: string, keywords = '', category = '') {
+    return [...this.rooms.values()].filter(r => (r.settings?.visibility !== 'invite' || r.hostId === userId)
+      && (r.name+' '+(r.settings?.description??'')).toLowerCase().includes(keywords.toLowerCase())
+      && (!category || r.settings?.category===category)).map(r => ({ id:r.id,name:r.name,hostId:r.hostId,settings:r.settings,
+        members:r.members.filter(m=>m.online).length,maxMembers:MAX_MEMBERS,qualityMode:r.playback.qualityMode }));
+  }
+  resolveInvite(code:string) { const r=[...this.rooms.values()].find(r=>r.inviteCode===code) ?? fail('ROOM_NOT_FOUND'); return {id:r.id,name:r.name}; }
+  updateSettings(id:string,userId:string,name:string|undefined,settings:RoomSettings,expected:number) {
+    const r=this.get(id); if(r.hostId!==userId)fail('HOST_ONLY');
+    if(r.stateVersion!==expected)fail('STATE_CONFLICT');
+    if(name!==undefined)r.name=name; r.settings=settings; this.changed(r,true); return this.snapshot(id);
+  }
   private overrides = new Map<string, Record<string, Partial<Permissions>>>();
   restoreOverrides(records: RoomRecord[]) { for (const r of records) this.overrides.set(r.id, r.overrides); }
-  private save(r: InternalRoom) { this.persist({ id: r.id, name: r.name, hostId: r.hostId, defaults: r.defaults, overrides: this.overrides.get(r.id) ?? {} }); }
+  private save(r: InternalRoom) { this.persist({ id: r.id, name: r.name, hostId: r.hostId, defaults: r.defaults, overrides: this.overrides.get(r.id) ?? {}, settings:r.settings, inviteCode:r.inviteCode, playlist:r.playlist }); }
   private refreshPermissions(r: InternalRoom) {
     for (const m of r.members) { m.overrides = this.overrides.get(r.id)?.[m.id] ?? {}; m.permissions = m.id === r.hostId ? { ...ALL_PERMISSIONS } : { ...r.defaults, ...m.overrides }; }
   }
@@ -46,9 +59,9 @@ export class RoomEngine {
   leave(id: string, userId: string) {
     const r = this.get(id); const m = r.members.find(m => m.id === userId); if (!m?.online) return;
     m.online = false; r.offlineAt.set(userId, this.now());
-    for (const t of r.playlist) if (t.providerId === userId && !t.ossKey) t.available = false;
+    for (const t of r.playlist) if (t.providerId === userId && !hasRemoteAudio(t)) t.available = false;
     r.requests = r.requests.filter(q => q.memberId !== userId);
-    if (r.pending?.playback.providerId === userId && !r.playlist.find(t => t.id === r.pending?.playback.sourceId)?.ossKey) r.pending = null;
+    if (r.pending?.playback.providerId === userId && !hasRemoteAudio(r.playlist.find(t => t.id === r.pending?.playback.sourceId))) r.pending = null;
     if (r.playback.leaderId === userId) r.playback.leaderId = null;
     // File playback continues only while recipients have verified buffered data.
     // Receivers report exhaustion; live playback cannot continue without its provider.
@@ -88,16 +101,20 @@ export class RoomEngine {
     if (command.expectedStateVersion !== r.stateVersion) fail('STATE_CONFLICT');
     const a = command.action;
     if (r.pending && ['play', 'instant', 'next', 'previous', 'pause', 'resume', 'seek', 'quality'].includes(a.type)) fail('PLAYBACK_TRANSITION_PENDING');
+    const before = this.snapshot(r.id);
     this.apply(r, userId, a);
-    this.changed(r, a.type === 'permission' || a.type === 'defaults');
+    this.changed(r, ['permission','defaults','enqueue','instant','remove','reorder','clear'].includes(a.type));
     r.dedup.set(key, { fingerprint, version: r.stateVersion });
     if (r.dedup.size > 2048) r.dedup.delete(r.dedup.keys().next().value!);
+    const text = roomActivityText(a, before, this.snapshot(r.id));
+    if (text) this.publishActivity({ id: randomUUID(), requestId: command.commandId, roomId: r.id, userId, userName: this.member(r, userId).name, text, sentAt: this.now(), kind: 'activity' });
     return r.stateVersion;
   }
   private apply(r: InternalRoom, userId: string, a: Action) {
     switch (a.type) {
       case 'enqueue': {
         this.require(r, userId, 'enqueue');
+        if(a.payload.sourceUrl&&!this.registeredAsset(a.payload.sourceUrl,a.payload.contentHash))fail('FORBIDDEN');
         if (a.payload.ossKey && !new RegExp(`^music/${userId}/[a-f0-9-]{36}$`).test(a.payload.ossKey) && !this.registeredAsset(a.payload.ossKey,a.payload.contentHash)) fail('FORBIDDEN'); this.validateSpec(a.payload.spec, a.payload.lossless);
         if (r.playlist.length >= 200) fail('PLAYLIST_FULL');
         if (r.playlist.some(t => t.id === a.payload.id)) fail('DUPLICATE_TRACK');
@@ -120,6 +137,7 @@ export class RoomEngine {
         r.lastIndex = r.playlist.indexOf(t); this.prepare(r, this.filePlayback(r, t)); break;
       }
       case 'instant': {
+        if(a.payload.sourceUrl&&!this.registeredAsset(a.payload.sourceUrl,a.payload.contentHash))fail('FORBIDDEN');
         if (a.payload.ossKey && !new RegExp(`^music/${userId}/[a-f0-9-]{36}$`).test(a.payload.ossKey) && !this.registeredAsset(a.payload.ossKey,a.payload.contentHash)) fail('FORBIDDEN');
         if (r.playlist.length >= 200) fail('PLAYLIST_FULL');
         this.require(r, userId, 'skip'); this.require(r, userId, 'stream'); this.validateSpec(a.payload.spec, a.payload.lossless);
@@ -164,7 +182,7 @@ export class RoomEngine {
     const r = this.get(roomId); this.member(r, userId); const p = r.pending;
     if (!p || p.id !== transitionId || p.playback.sourceEpoch !== epoch || p.committed) return;
     if (!p.ready.includes(userId)) p.ready.push(userId);
-    if (r.playlist.find(t => t.id === p.playback.sourceId)?.ossKey) {
+    if (hasRemoteAudio(r.playlist.find(t => t.id === p.playback.sourceId))) {
       p.playback.leaderId = userId; p.committed = true;
       p.playback.effectiveAtServerMs = this.now() + 200;
       if (p.followTimeline) p.playback.positionMs = positionAt(p.previous, p.playback.effectiveAtServerMs);
@@ -174,7 +192,7 @@ export class RoomEngine {
   reportProgress(roomId: string, userId: string, epoch: number, positionMs: number, sampledAtServerMs?: number) {
     const r = this.get(roomId); this.member(r, userId);
     const p = r.playback, t = r.playlist.find(t => t.id === p.sourceId);
-    if (r.pending || !t?.ossKey || epoch !== p.sourceEpoch || p.playState !== 'playing' || positionMs > t.durationMs) return;
+    if (r.pending || !t || !hasRemoteAudio(t) || epoch !== p.sourceEpoch || p.playState !== 'playing' || positionMs > t.durationMs) return;
     const now = this.now(), sampledAt = Math.min(sampledAtServerMs ?? now, now);
     if (!Number.isFinite(positionMs) || positionMs < 0 || !Number.isFinite(sampledAt) ||
         sampledAt < now - 5000 || sampledAt < p.effectiveAtServerMs || (sampledAtServerMs ?? now) > now + 250) return;
@@ -187,7 +205,7 @@ export class RoomEngine {
   exhausted(roomId: string, userId: string, epoch: number) {
     const r = this.get(roomId); this.member(r, userId);
     if (epoch !== r.playback.sourceEpoch || r.pending || r.playback.sourceType !== 'file') return;
-    if (r.playlist.find(t => t.id === r.playback.sourceId)?.ossKey || r.members.find(m => m.id === r.playback.providerId)?.online) return;
+    if (hasRemoteAudio(r.playlist.find(t => t.id === r.playback.sourceId)) || r.members.find(m => m.id === r.playback.providerId)?.online) return;
     this.advance(r); this.changed(r);
   }
   sourceFailed(roomId: string, userId: string, epoch: number) {
@@ -199,7 +217,7 @@ export class RoomEngine {
     for (const r of this.rooms.values()) {
       const now = this.now(); let changed = false, durable = false;
       const p = r.pending;
-      if (p && !p.committed && !r.playlist.find(t => t.id === p.playback.sourceId)?.ossKey && (r.members.filter(m => m.online).every(m => p.ready.includes(m.id)) || now >= p.deadlineAt)) {
+      if (p && !p.committed && !hasRemoteAudio(r.playlist.find(t => t.id === p.playback.sourceId)) && (r.members.filter(m => m.online).every(m => p.ready.includes(m.id)) || now >= p.deadlineAt)) {
         p.committed = true; p.playback.effectiveAtServerMs = Math.max(p.playback.effectiveAtServerMs, now + 200); if (p.followTimeline) p.playback.positionMs = positionAt(p.previous, p.playback.effectiveAtServerMs); changed = true;
       }
       if (p?.committed && now >= p.playback.effectiveAtServerMs) { r.playback = p.playback; r.pending = null; changed = true; }

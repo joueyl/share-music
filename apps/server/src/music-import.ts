@@ -3,12 +3,12 @@ import { DomainError, RoomEngine } from './engine';
 import type { TrackMetadata } from '../../../packages/shared/src';
 import { normalizeAlbumCover, trackSchema } from '../../../packages/shared/src';
 import { NeteaseService } from './netease';
-import type { Database } from './database';
-import { OssStorage } from './oss';
+import type { DatabaseStore } from './database';
 const MAX = 100 * 1024 * 1024;
 export function musicDownloadUrl(input: string): URL {
+  if(typeof input!=='string'||input.length>8192)throw new DomainError('MUSIC_SOURCE_INVALID');
   let url: URL; try { url = new URL(input); } catch { throw new DomainError('MUSIC_SOURCE_INVALID'); }
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port || !/^[a-z0-9-]+\.music\.126\.net$/i.test(url.hostname)) throw new DomainError('MUSIC_SOURCE_INVALID');
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port || url.hash || !/^[a-z0-9-]+\.music\.126\.net$/i.test(url.hostname)) throw new DomainError('MUSIC_SOURCE_INVALID');
   url.protocol = 'https:'; return url;
 }
 export async function downloadMusic(input: string, request: typeof fetch = fetch): Promise<Buffer> {
@@ -21,6 +21,7 @@ export async function downloadMusic(input: string, request: typeof fetch = fetch
         if (!location) throw new DomainError('MUSIC_DOWNLOAD_FAILED');
         url=musicDownloadUrl(new URL(location,url).href); continue;
       }
+      if([401,403,404,410].includes(res.status)){await res.body?.cancel();throw new DomainError('MUSIC_LINK_EXPIRED');}
       if (!res.ok || !res.body) { await res.body?.cancel(); throw new DomainError('MUSIC_DOWNLOAD_FAILED'); }
       const length=Number(res.headers.get('content-length') ?? 0);
       if (length > MAX) { await res.body.cancel(); throw new DomainError('MUSIC_TOO_LARGE'); }
@@ -56,32 +57,34 @@ export function songCover(song:any):string|null {
   return normalizeAlbumCover(song?.al?.picUrl??song?.album?.picUrl);
 }
 export class MusicImport {
-  private jobs=new Map<string,Job>(); private active=0;
+  private jobs=new Map<string,Job>();private active=0;
   private sources=new Map<string,Promise<TrackMetadata>>();
-  constructor(private engine:RoomEngine, private netease:Pick<NeteaseService,'call'>, private oss:Pick<OssStorage,'upload'> & Partial<Pick<OssStorage,'exists'|'scope'|'staticUrl'>>, private request:typeof fetch=fetch, private db?:Database) {}
-  metadata(roomId:string,userId:string,trackId:string):TrackMetadata {
+  private reads=new Map<string,Promise<Buffer>>();
+  private registeredSources=new Set<string>();
+  constructor(private engine:RoomEngine,private netease:Pick<NeteaseService,'call'>,private request:typeof fetch=fetch,private db?:DatabaseStore,private now=Date.now) {}
+  private remember(url:string,hash:string){this.registeredSources.add(hash+':'+url);if(this.registeredSources.size>10000)this.registeredSources.delete(this.registeredSources.values().next().value!);}
+  registered(url:string,hash:string){return this.registeredSources.has(hash+':'+url);}
+  async authorize(track:TrackMetadata) {
+    if(!track.sourceUrl)return;
+    const saved=track.neteaseId?await this.db?.getMusicSource('netease',`netease:standard:${track.neteaseId}`):undefined;
+    if(saved?.sourceUrl===track.sourceUrl&&saved.contentHash===track.contentHash&&saved.sizeBytes===track.sizeBytes)this.remember(track.sourceUrl!,track.contentHash);
+  }
+  private memberTrack(roomId:string,userId:string,trackId:string) {
     const room=this.engine.snapshot(roomId);
     if(!room.members.some(m=>m.id===userId&&m.online))throw new DomainError('NOT_IN_ROOM');
-    const track=room.playlist.find(t=>t.id===trackId);if(!track)throw new DomainError('TRACK_NOT_FOUND');
-    const saved=this.db?.getMusicSourceByHash(this.oss.scope?.()??'default',track.contentHash);
-    if(!saved||saved.track.ossKey!==track.ossKey)return track;
-    const neteaseId=/^netease:standard:(\d{1,20})$/.exec(saved.source)?.[1];
-    return {...saved.track,id:track.id,...(neteaseId?{neteaseId}:{})};
+    const track=room.playlist.find(t=>t.id===trackId);if(!track)throw new DomainError('TRACK_NOT_FOUND');return track;
+  }
+  async metadata(roomId:string,userId:string,trackId:string):Promise<TrackMetadata> {
+    const track=this.memberTrack(roomId,userId,trackId),saved=await this.db?.findMusicByHash(track.contentHash);
+    this.memberTrack(roomId,userId,trackId);
+    const neteaseId=track.neteaseId??/^netease:standard:(\d{1,20})$/.exec(saved?.source??'')?.[1];
+    return {...track,...(neteaseId?{neteaseId}:{}),...(saved?{artists:track.artists||saved.track.artists,album:track.album||saved.track.album,coverUrl:track.coverUrl||saved.track.coverUrl}:{})};
   }
   async cover(roomId:string,userId:string,trackId:string):Promise<string|null> {
-    const room=this.engine.snapshot(roomId);
-    if(!room.members.some(m=>m.id===userId&&m.online))throw new DomainError('NOT_IN_ROOM');
-    const track=room.playlist.find(t=>t.id===trackId);
-    if(!track)throw new DomainError('TRACK_NOT_FOUND');
-    const current=normalizeAlbumCover(track.coverUrl);if(current)return current;
-    const scope=this.oss.scope?.()??'default',cached=this.db?.getMusicSourceByHash(scope,track.contentHash);
-    if(!cached||cached.track.ossKey!==track.ossKey)return null;
-    const saved=normalizeAlbumCover(cached.track.coverUrl);if(saved)return saved;
-    const songId=/^netease:standard:(\d{1,20})$/.exec(cached.source)?.[1];if(!songId)return null;
-    const detail=await this.netease.call('song_detail',{ids:songId});
-    const song=detail.songs?.find((s:any)=>String(s.id)===songId);if(!song)return null;
-    const coverUrl=songCover(song);
-    this.db?.saveMusicSource(scope,cached.source,{...cached.track,coverUrl});return coverUrl;
+    const track=await this.metadata(roomId,userId,trackId),current=normalizeAlbumCover(track.coverUrl);if(current)return current;
+    if(!track.neteaseId)return null;
+    const detail=await this.netease.call('song_detail',{ids:track.neteaseId});this.memberTrack(roomId,userId,trackId);
+    return songCover(detail.songs?.find((s:any)=>String(s.id)===track.neteaseId));
   }
   private room(roomId:string,userId:string) {
     const room=this.engine.snapshot(roomId),member=room.members.find(m=>m.id===userId&&m.online);
@@ -90,76 +93,82 @@ export class MusicImport {
     if(room.playlist.length>=200)throw new DomainError('PLAYLIST_FULL');return room;
   }
   add(roomId:string,userId:string,songId:string,requestId:string):Promise<TrackMetadata> {
-    return this.enqueueJob(roomId,userId,songId,requestId,()=>this.perform(roomId,userId,songId,requestId));
+    return this.enqueueJob(roomId,userId,songId,requestId,async()=>this.enqueue(roomId,userId,await this.importSong(songId),requestId));
   }
   addUploaded(roomId:string,userId:string,hash:string,requestId:string):Promise<TrackMetadata> {
-    return this.enqueueJob(roomId,userId,`uploaded:${hash}`,requestId,async()=>{
-      const scope=this.oss.scope?.()??'default';
-      if(!this.db?.getAsset(scope,hash))throw new DomainError('TRACK_NOT_FOUND');
-      const asset=this.db.uploadedTrack(scope,hash);
-      if(!asset?.ossKey)throw new DomainError('UPLOADED_MUSIC_METADATA_MISSING');
-      if(!this.oss.exists||!await this.oss.exists(asset.ossKey))throw new DomainError('UPLOADED_MUSIC_NOT_FOUND');
-      const room=this.room(roomId,userId),track=trackSchema.parse({...asset,id:randomUUID(),
-        ...(this.oss.staticUrl?{ossUrl:this.oss.staticUrl(asset.ossKey)}:{})});
-      this.engine.command(userId,{roomId,commandId:requestId,expectedStateVersion:room.stateVersion,action:{type:'enqueue',payload:track}});
-      return track;
+    return this.enqueueJob(roomId,userId,`library:${hash}`,requestId,async()=>{
+      const saved=await this.db?.findMusicByHash(hash),songId=/^netease:standard:(\d{1,20})$/.exec(saved?.source??'')?.[1];
+      if(!songId)throw new DomainError('TRACK_NOT_FOUND');
+      return this.enqueue(roomId,userId,await this.importSong(songId),requestId);
     });
+  }
+  private enqueue(roomId:string,userId:string,asset:TrackMetadata,requestId:string) {
+    const room=this.room(roomId,userId),track={...asset,id:randomUUID()};
+    this.engine.command(userId,{roomId,commandId:requestId,expectedStateVersion:room.stateVersion,action:{type:'enqueue',payload:track}});return track;
   }
   private enqueueJob(roomId:string,userId:string,songId:string,requestId:string,run:()=>Promise<TrackMetadata>):Promise<TrackMetadata> {
     const key=userId+':'+requestId,prior=this.jobs.get(key);
-    if(prior) {if(prior.songId!==songId||prior.roomId!==roomId)throw new DomainError('COMMAND_ID_REUSED');return prior.promise;}
-    this.room(roomId,userId);
-    if(this.active>=2)throw new DomainError('MUSIC_IMPORT_BUSY');
-    for(const [k,j]of this.jobs)if(Date.now()-j.at>3600000)this.jobs.delete(k);
-    if(this.jobs.size>=1000)throw new DomainError('MUSIC_IMPORT_BUSY');
-    this.active++;
-    const promise=run().finally(()=>this.active--);
-    this.jobs.set(key,{songId,roomId,promise,at:Date.now()});
+    if(prior){if(prior.songId!==songId||prior.roomId!==roomId)throw new DomainError('COMMAND_ID_REUSED');return prior.promise;}
+    this.room(roomId,userId);if(this.active>=2)throw new DomainError('MUSIC_IMPORT_BUSY');
+    for(const [k,j]of this.jobs)if(this.now()-j.at>3600000)this.jobs.delete(k);
+    if(this.jobs.size>=1000)throw new DomainError('MUSIC_IMPORT_BUSY');this.active++;
+    const promise=run().finally(()=>this.active--);this.jobs.set(key,{songId,roomId,promise,at:this.now()});
     void promise.catch(()=>this.jobs.delete(key));return promise;
   }
-  private async perform(roomId:string,userId:string,songId:string,requestId:string):Promise<TrackMetadata> {
-    const scope=this.oss.scope?.() ?? 'default',sourceId=`netease:standard:${songId}`,lock=scope+':'+sourceId;
-    let job=this.sources.get(lock);
-    if(!job){job=this.asset(roomId,userId,songId,scope,sourceId).finally(()=>this.sources.delete(lock));this.sources.set(lock,job);}
-    const asset=await job;
-    const room=this.room(roomId,userId),complete={...asset,id:randomUUID()};
-    this.engine.command(userId,{roomId,commandId:requestId,expectedStateVersion:room.stateVersion,action:{type:'enqueue',payload:complete}});
-    return complete;
+  importSong(songId:string,force=false):Promise<TrackMetadata> {
+    if(!/^\d{1,20}$/.test(songId))return Promise.reject(new DomainError('INVALID_REQUEST'));
+    const key=songId+(force?':refresh':':cached'),prior=this.sources.get(key);if(prior)return prior;
+    if(this.sources.size>=2)return Promise.reject(new DomainError('MUSIC_IMPORT_BUSY'));
+    const job=this.asset(songId,force).finally(()=>this.sources.delete(key));this.sources.set(key,job);return job;
   }
-  private async asset(roomId:string,userId:string,songId:string,scope:string,sourceId:string):Promise<TrackMetadata> {
-    const cached=this.db?.getMusicSource(scope,sourceId);
-    if(cached?.ossKey && this.oss.exists && await this.oss.exists(cached.ossKey)){
-      const track=trackSchema.parse(cached);
-      track.neteaseId=songId;
-      if(this.oss.staticUrl)track.ossUrl=this.oss.staticUrl(track.ossKey!);
-      // Backfill older cached assets without downloading or uploading audio again.
-      if(track.coverUrl===undefined){
-        try{
-          const detail=await this.netease.call('song_detail',{ids:songId});
-          const song=detail.songs?.find((s:any)=>String(s.id)===songId);
-          if(song){track.coverUrl=songCover(song);this.db?.saveMusicDetail(scope,sourceId,song);}
-        }catch{/* Optional artwork must not prevent playback of a cached asset. */}
-      }
-      this.db?.saveMusicSource(scope,sourceId,track);return track;
+  private async asset(songId:string,force:boolean):Promise<TrackMetadata> {
+    const sourceId=`netease:standard:${songId}`,cached=await this.db?.getMusicSource('netease',sourceId);
+    if(!force&&cached?.sourceUrl&&(cached.sourceExpiresAt??0)>this.now()+30000) {
+      const track=trackSchema.parse(cached);musicDownloadUrl(track.sourceUrl!);this.remember(track.sourceUrl!,track.contentHash);return track;
     }
+    const fetchedAt=this.now();
     const [detail,source]=await Promise.all([this.netease.call('song_detail',{ids:songId}),this.netease.call('song_url_v1',{id:songId,level:'standard'})]);
     const song=detail.songs?.find((s:any)=>String(s.id)===songId),audio=source.data?.find((s:any)=>String(s.id)===songId);
-    if(!song || !audio?.url || (audio.code && audio.code!==200))throw new DomainError('MUSIC_NOT_AVAILABLE');
+    if(!song||!audio?.url||(audio.code&&audio.code!==200))throw new DomainError('MUSIC_NOT_AVAILABLE');
     if(audio.freeTrialInfo)throw new DomainError('MUSIC_TRIAL_ONLY');
-    if(audio.type && audio.type.toLowerCase()!=='mp3')throw new DomainError('MUSIC_AUDIO_UNSUPPORTED');
-    const filename=songFilename(song);
-    const bytes=await downloadMusic(audio.url,this.request),spec=mp3Spec(bytes);
-    const durationMs=Math.round(Number(song.dt ?? song.duration));
-    if(typeof song.name!=='string' || !song.name.trim() || !Number.isFinite(durationMs) || durationMs<1 || durationMs>86400000)throw new DomainError('MUSIC_SOURCE_INVALID');
-    const track=trackSchema.parse({id:randomUUID(),name:String(song.name).slice(0,200),durationMs,sizeBytes:bytes.length,spec,lossless:false,bitrateBps:Math.max(1,Math.min(20000000,Math.round(Number(audio.br)||bytes.length*8000/durationMs))),contentHash:createHash('sha256').update(bytes).digest('hex')});
-    this.room(roomId,userId); // Permissions may have changed while downloading.
-    const {ossKey}=await this.oss.upload(userId,bytes,filename);
-    const complete=trackSchema.parse({...track,ossKey,coverUrl:songCover(song),neteaseId:songId,
-      artists:(song.ar??song.artists??[]).map((a:any)=>a.name).filter(Boolean).join(' / ').slice(0,1000),
-      album:String(song.al?.name??song.album?.name??'').slice(0,500),
-      ...(this.oss.staticUrl?{ossUrl:this.oss.staticUrl(ossKey)}:{})});
-    this.db?.saveMusicDetail(scope,sourceId,song);
-    this.db?.saveMusicSource(scope,sourceId,complete);
-    return complete;
+    if(audio.type&&audio.type.toLowerCase()!=='mp3')throw new DomainError('MUSIC_AUDIO_UNSUPPORTED');
+    const sourceUrl=musicDownloadUrl(audio.url).href;
+    // Bytes are transient: compute the hash/spec required by the existing verified client cache, never upload or persist audio.
+    const bytes=await downloadMusic(sourceUrl,this.request),spec=mp3Spec(bytes),durationMs=Math.round(Number(song.dt??song.duration));
+    if(typeof song.name!=='string'||!song.name.trim()||!Number.isFinite(durationMs)||durationMs<1||durationMs>86400000)throw new DomainError('MUSIC_SOURCE_INVALID');
+    const ttl=Number(audio.expi),seconds=Number.isFinite(ttl)&&ttl>0?Math.min(ttl,86400):300;
+    const complete=trackSchema.parse({id:cached?.id??randomUUID(),name:song.name.slice(0,200),durationMs,sizeBytes:bytes.length,spec,lossless:false,
+      bitrateBps:Math.max(1,Math.min(20000000,Math.round(Number(audio.br)||bytes.length*8000/durationMs))),contentHash:createHash('sha256').update(bytes).digest('hex'),
+      sourceUrl,sourceExpiresAt:Math.floor(fetchedAt+seconds*1000),coverUrl:songCover(song),neteaseId:songId,
+      artists:(song.ar??song.artists??[]).map((a:any)=>a.name).filter(Boolean).join(' / ').slice(0,1000),album:String(song.al?.name??song.album?.name??'').slice(0,500)});
+    await this.db?.saveMusicDetail('netease',sourceId,song);await this.db?.saveMusicSource('netease',sourceId,complete);
+    this.remember(sourceUrl,complete.contentHash);return complete;
+  }
+  private async resolve(track:TrackMetadata,force=false):Promise<TrackMetadata> {
+    const saved=track.neteaseId?undefined:await this.db?.findMusicByHash(track.contentHash);
+    const songId=track.neteaseId??/^netease:standard:(\d{1,20})$/.exec(saved?.source??'')?.[1];
+    if(!songId)throw new DomainError('MUSIC_SOURCE_UNREFRESHABLE');
+    const current=await this.importSong(songId,force);
+    if(current.contentHash!==track.contentHash||current.sizeBytes!==track.sizeBytes)throw new DomainError('MUSIC_CONTENT_CHANGED');
+    return current;
+  }
+  async url(roomId:string,userId:string,trackId:string,force=false):Promise<string> {
+    const track=this.memberTrack(roomId,userId,trackId),current=await this.resolve(track,force);this.memberTrack(roomId,userId,trackId);return current.sourceUrl!;
+  }
+  async readAudio(roomId:string,userId:string,trackId:string):Promise<Buffer> {
+    const track=this.memberTrack(roomId,userId,trackId);
+    if(track.sizeBytes>MAX)throw new DomainError('PLAYBACK_AUDIO_TOO_LARGE');
+    let job=this.reads.get(track.contentHash);
+    if(!job){
+      if(this.reads.size>=2)throw new DomainError('PLAYBACK_AUDIO_BUSY');
+      job=this.readVerified(track).finally(()=>this.reads.delete(track.contentHash));this.reads.set(track.contentHash,job);
+    }
+    const bytes=await job;this.memberTrack(roomId,userId,trackId);return bytes;
+  }
+  private async readVerified(track:TrackMetadata):Promise<Buffer> {
+    let current=await this.resolve(track),bytes:Buffer;
+    try{bytes=await downloadMusic(current.sourceUrl!,this.request);}
+    catch(e){if(!(e instanceof DomainError)||e.code!=='MUSIC_LINK_EXPIRED')throw e;current=await this.resolve(track,true);bytes=await downloadMusic(current.sourceUrl!,this.request);}
+    if(bytes.length!==track.sizeBytes||createHash('sha256').update(bytes).digest('hex')!==track.contentHash)throw new DomainError('PLAYBACK_AUDIO_INTEGRITY_FAILED');return bytes;
   }
 }

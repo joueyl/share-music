@@ -24,10 +24,19 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   private sessions = new Map<WebSocket, Session>();
   private authTimers = new Map<WebSocket, ReturnType<typeof setTimeout>>();
   private chats = new Map<string, ChatMessage[]>();
+  private publishActivity = (message: ChatMessage) => this.appendChat(message);
+  private appendChat(message: ChatMessage) {
+    const history = this.chats.get(message.roomId) ?? [];
+    history.push(message); if (history.length > 100) history.shift();
+    this.chats.delete(message.roomId); this.chats.set(message.roomId, history);
+    if (this.chats.size > 1000) this.chats.delete(this.chats.keys().next().value!);
+    for (const [peer, session] of this.sessions) if (session.roomId === message.roomId) this.send(peer, { type: 'chat', data: message });
+  }
   private heartbeat: ReturnType<typeof setInterval>;
   private publish = (room: RoomSnapshot) => { for (const [ws, s] of this.sessions) if (s.roomId === room.id) this.send(ws, { type: 'snapshot', data: room }); };
   constructor(@Inject(AppService) private app: AppService) {
     app.subscribers.add(this.publish);
+    app.activitySubscribers.add(this.publishActivity);
     this.heartbeat = setInterval(() => { const now = Date.now(); for (const [ws, s] of this.sessions) { if (now - s.lastPong > 20000 || now >= s.user.expiresAt) ws.close(4001, 'Session expired'); else ws.ping(); } }, 5000); this.heartbeat.unref();
   }
   private send(ws: WebSocket, message: unknown) { if (ws.readyState !== WebSocket.OPEN) return; if (ws.bufferedAmount > 256000) { ws.close(4008, 'Slow client'); return; } ws.send(JSON.stringify(message)); }
@@ -40,12 +49,13 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       let commandId: string | undefined;
       let chatRequestId: string | undefined;
       try {
+        await this.app.flush();
         const message = JSON.parse(raw.toString());
         let s = this.sessions.get(ws);
         if (!s) {
           this.app.limit(`ws-auth:${request.socket.remoteAddress}`, 20, 60000);
           const auth = z.object({ type: z.literal('auth'), token: z.string().max(4096) }).strict().parse(message);
-          const user = this.app.auth.verify(auth.token);
+          const user = await this.app.auth.verify(auth.token);
           // One control connection per identity: close the old connection before replacement.
           for (const [old, previous] of this.sessions) if (previous.user.id === user.id) { this.handleDisconnect(old); old.close(4009, 'Replaced by another session'); }
           clearTimeout(this.authTimers.get(ws)); this.authTimers.delete(ws);
@@ -59,7 +69,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           const room = this.app.engine.snapshot(v.roomId);
           if (!room.members.some(m => m.id === s!.user.id && m.online)) throw new DomainError('NOT_IN_ROOM');
           const history = this.chats.get(v.roomId) ?? [];
-          const prior = history.find(m => m.userId === s!.user.id && m.requestId === v.requestId);
+          const prior = history.find(m => m.kind !== 'activity' && m.userId === s!.user.id && m.requestId === v.requestId);
           if (prior) {
             if (prior.text !== v.text) throw new DomainError('COMMAND_ID_REUSED');
             this.send(ws, { type: 'chat-result', requestId: v.requestId, data: prior });
@@ -67,18 +77,16 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
           }
           this.app.limit(`chat:${s.user.id}`, 10, 10000);
           const data: ChatMessage = { id: randomUUID(), requestId: v.requestId, roomId: v.roomId, userId: s.user.id, userName: s.user.name, text: v.text, sentAt: Date.now() };
-          history.push(data); if (history.length > 100) history.shift();
-          this.chats.delete(v.roomId); this.chats.set(v.roomId, history);
-          if (this.chats.size > 1000) this.chats.delete(this.chats.keys().next().value!);
           this.send(ws, { type: 'chat-result', requestId: v.requestId, data });
-          for (const [peer, session] of this.sessions) if (session.roomId === v.roomId) this.send(peer, { type: 'chat', data });
+          this.appendChat(data);
           return;
         }
         if (message.type === 'command') {
           const command = envelopeSchema.parse(message.data); commandId = command.commandId;
           this.requireRoom(s, command.roomId);
+          if(command.action.type==='enqueue'||command.action.type==='instant')await this.app.musicImport.authorize(command.action.payload);
           const stateVersion = this.app.engine.command(s.user.id, command);
-          this.send(ws, { type: 'result', commandId, ok: true, stateVersion }); return;
+          await this.app.flush();this.send(ws, { type: 'result', commandId, ok: true, stateVersion }); return;
         }
         if (message.type === 'leave') {
           z.object({ type: z.literal('leave') }).strict().parse(message);
@@ -146,5 +154,5 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   }
   private requireRoom(s: Session, roomId: string) { if (s.roomId !== roomId) throw new DomainError('NOT_IN_ROOM'); }
   handleDisconnect(ws: WebSocket) { clearTimeout(this.authTimers.get(ws)); this.authTimers.delete(ws); const s = this.sessions.get(ws); this.sessions.delete(ws); if (s?.roomId) this.app.engine.leave(s.roomId, s.user.id); }
-  onModuleDestroy() { clearInterval(this.heartbeat); this.app.subscribers.delete(this.publish); for (const timer of this.authTimers.values()) clearTimeout(timer); for (const ws of this.sessions.keys()) ws.close(1001, 'Shutdown'); }
+  onModuleDestroy() { clearInterval(this.heartbeat); this.app.subscribers.delete(this.publish); this.app.activitySubscribers.delete(this.publishActivity); for (const timer of this.authTimers.values()) clearTimeout(timer); for (const ws of this.sessions.keys()) ws.close(1001, 'Shutdown'); }
 }
