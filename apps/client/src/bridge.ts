@@ -6,6 +6,7 @@ import { loadPlaybackSource } from './playback-source';
 import { rememberTrackArtwork, trackArtwork } from './track-artwork';
 import { normalizeAlbumCover, parsePlaylistLink, isPlaylistShortLink, playlistReference } from '@music-share/shared';
 import type { SystemMediaState } from './system-media';
+import type { ArtworkFrame } from './system-artwork';
 import { listen } from '@tauri-apps/api/event';
 import type { ChatMessage, Command, RoomSnapshot, TrackMetadata } from '@music-share/shared';
 type Listener = (event: any) => void;
@@ -31,6 +32,9 @@ export async function subscribe(name: string, handler: Listener) {
   const set = listeners.get(name) ?? new Set(); set.add(handler); listeners.set(name, set); return () => { set.delete(handler); nativeUnsubscribe?.(); };
 }
 export const desktop = isTauri();
+export const taskbarArtworkAvailable=desktop&&typeof navigator!=='undefined'&&/Windows/i.test(navigator.userAgent);
+export async function loadSystemArtwork(url:string) { return invoke<ArrayBuffer|number[]>('load_system_artwork',{url}); }
+export async function updateTaskbarArtwork(artwork:ArtworkFrame) { if(desktop)await invoke('update_taskbar_artwork',{artwork}); }
 export async function updateSystemMedia(state:SystemMediaState) { if(desktop)await invoke('update_system_media',{snapshot:state}); }
 export async function login(serverUrl: string, name: string, password: string, register: boolean): Promise<{ user: { id: string; name: string } }> {
   cancelChats('SESSION_EXPIRED');

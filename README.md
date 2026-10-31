@@ -63,9 +63,11 @@ npm run desktop
 
 ### 系统媒体控制（Windows / Linux）
 
-- Windows：通过 Win32 `ITaskbarList3` 添加任务栏缩略图工具栏。播放时将鼠标移到任务栏应用图标上，在预览下方可点击上一首、播放/暂停、下一首；图标随实际房间状态切换。另通过 SMTC 接入系统媒体面板及媒体快捷键，显示当前曲名、时长和进度。
+- Windows：通过 Win32 `ITaskbarList3` 添加任务栏缩略图工具栏。播放时将鼠标移到任务栏应用图标上，在预览下方可点击上一首、播放/暂停、下一首；图标随实际房间状态切换。悬停缩略图显示当前专辑封面，优先复用音频内嵌封面，其次使用当前网络封面；暂停保留封面，切歌清除旧封面，停止、断线或离房后恢复普通窗口预览。无封面或加载失败显示浅色唱片占位图；封面仅用于任务栏悬浮小窗，由隐藏的工具窗口代理提供；鼠标移到小窗后，Peek 显示真实主窗口内容，Alt+Tab 也由 Windows 显示真实主窗口画面，代理不单独出现在切换列表中。点击和关闭操作转交主窗口，隐藏到托盘时注销代理；代理注册或位图失败时回退系统真实窗口预览，不修改用户的 Peek 设置。另通过 SMTC 接入系统媒体面板及媒体快捷键，显示当前曲名、时长和进度。
 - Linux：通过用户会话 D-Bus 的 MPRIS 接入 GNOME/KDE 等桌面媒体控件及 `playerctl`，服务名为 `org.mpris.MediaPlayer2.com.musicshare.desktop.instance_<进程号>`。可用 `playerctl -l` 找到实际名称，再用 `playerctl --player=<名称> play-pause` 验证。Linux 没有统一的 Windows 式缩略图按钮接口，是否在任务栏悬停时显示按钮由桌面/面板实现决定；需要可用的桌面 D-Bus 会话。
 - 系统动作与应用内按钮使用同一条房间命令通道，不会只暂停本机造成不同步。无权限、断线、准备切歌或已离房时不执行控制，Windows 缩略图按钮也会禁用；事件携带房间、音轨及播放 epoch，忽略过期事件。离房或退出登录后状态清空，退出进程时卸载 SDK 事件和窗口钩子。SDK 不可用不会阻止应用内播放。
+
+封面缩略图使用 [Windows DWM 自定义缩略图接口](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmseticonicthumbnail)，在独立代理上应用，并通过 [SetTabProperties](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-itaskbarlist4-settabproperties) 的 `STPF_USEAPPPEEKALWAYS` 将 Peek 委托给真实主窗口。主窗口不强制使用封面位图，不改变系统媒体面板封面。网络封面仅从 HTTPS 网易云图片域读取，最多 10 MiB / 15 秒，过期异步结果不会覆盖新歌曲。
 
 此功能包含原生 SDK 代码，须重新构建并重启桌面客户端，网页刷新或只替换前端资源不足以生效。Windows 原生构建及控制通道测试不替代 Linux 桌面的实机验收。SDK 说明：[Windows 任务栏缩略图工具栏](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-itaskbarlist3-thumbbaraddbuttons)、[MPRIS 规范](https://specifications.freedesktop.org/mpris/latest/Player_Interface.html)。
 

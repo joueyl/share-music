@@ -4,6 +4,8 @@ import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, positionAt, type Action, type Cha
 import * as bridge from './bridge';
 import { saveLogin, loadSavedLogin, clearSavedLogin } from './saved-login';
 import { getServerUrl } from './server-config';
+import { trackArtwork } from './track-artwork';
+import { createSystemArtworkSync, systemArtworkPixels, type ArtworkRequest } from './system-artwork';
 import { systemMediaAction, systemMediaState, type SystemMediaEvent } from './system-media';
 const messages: Record<string, string> = {
   PLAYBACK_AUDIO_BUSY:'音频读取繁忙，请稍后切歌重试',
@@ -57,6 +59,13 @@ export const useApp = defineStore('app', () => {
     void bridge.updateSystemMedia(state).catch(()=>{}); // Optional desktop integration must not interrupt playback.
   }
   watch(()=>[room.value?.id,room.value?.playback.sourceId,room.value?.playback.sourceEpoch,room.value?.playback.playState,!!room.value?.pending,connected.value,permission.value.skip,permission.value.seek],syncSystemMedia);
+  const syncArtwork=createSystemArtworkSync(source=>systemArtworkPixels(source,bridge.loadSystemArtwork),bridge.updateTaskbarArtwork);
+  watch(():ArtworkRequest|null=>{
+    if(!bridge.taskbarArtworkAvailable||!connected.value||!room.value||room.value.playback.playState==='stopped')return null;
+    const track=room.value.playlist.find(item=>item.id===room.value!.playback.sourceId);
+    if(!track)return null;
+    return {roomId:room.value.id,trackId:track.id,sourceEpoch:room.value.playback.sourceEpoch,source:trackArtwork(getServerUrl(),track)||null};
+  },request=>{void syncArtwork(request);});
   function error(e: unknown) { const code = e instanceof Error ? e.message : String(e); notice.value = code.startsWith('CAPTURE_RATE_OR_CHANNEL_MISMATCH') ? `采集格式与输出设备不匹配，请刷新音源面板的设备格式，或调整 Windows 输出设备设置。${code.slice(code.indexOf(':') + 1)}` : messages[code] ?? code; }
   async function initialize() {
     if (initialized) return; initialized = true;

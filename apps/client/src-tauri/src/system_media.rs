@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+pub mod artwork;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -84,7 +85,7 @@ pub struct ControlEvent {
 #[cfg(feature = "desktop")]
 mod runtime;
 #[cfg(feature = "desktop")]
-pub use runtime::{initialize, shutdown, update};
+pub use runtime::{initialize, shutdown, update, update_artwork};
 
 #[cfg(test)]
 mod tests {
