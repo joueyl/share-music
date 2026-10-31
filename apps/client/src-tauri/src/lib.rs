@@ -109,6 +109,29 @@ mod desktop {
     #[tauri::command]
     fn logout() {}
 
+    #[tauri::command]
+    fn window_minimize(window: tauri::Window) {
+        let _ = window.minimize();
+    }
+    #[tauri::command]
+    fn window_toggle_maximize(window: tauri::Window) {
+        if let Ok(maximized) = window.is_maximized() {
+            if maximized {
+                let _ = window.unmaximize();
+            } else {
+                let _ = window.maximize();
+            }
+        }
+    }
+    #[tauri::command]
+    fn window_close(window: tauri::Window) {
+        let _ = window.close();
+    }
+    #[tauri::command]
+    fn start_dragging(window: tauri::Window) {
+        let _ = window.start_dragging();
+    }
+
     pub fn run() {
         let http = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -133,6 +156,12 @@ mod desktop {
                     ),
                 });
                 system_media::initialize(app.handle().clone());
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_shadow(false);
+                    if let Some(icon) = app.default_window_icon() {
+                        let _ = window.set_icon(icon.clone());
+                    }
+                }
                 Ok(())
             })
             .on_window_event(close_to_tray::on_window_event)
@@ -151,7 +180,11 @@ mod desktop {
                 load_saved_login,
                 save_login,
                 clear_saved_login,
-                logout
+                logout,
+                window_minimize,
+                window_toggle_maximize,
+                window_close,
+                start_dragging
             ])
             .build(tauri::generate_context!())
             .expect("Build Tauri application")

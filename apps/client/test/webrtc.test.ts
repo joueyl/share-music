@@ -2,6 +2,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 const native = vi.hoisted(() => ({ handlers: {} as Record<string, (event: any) => void> }));
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => true, invoke: vi.fn(async () => ({ native: false, capture: false, reason: 'HTML Audio · WebView2' })) }));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ setShadow: vi.fn().mockResolvedValue(undefined) }) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async (name, handler) => { native.handlers[name] = handler; return () => {}; }) }));
 const emit = (name: string, payload: any) => native.handlers[name]?.({ payload });
 const snapshot = () => ({ id: 'room', hostId: 'host', members: [{ id: 'peer', name: 'Listener', online: true }], playback: { sourceId: 'track', sourceEpoch: 4 }, pending: null });

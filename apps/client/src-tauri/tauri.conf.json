@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "共鸣 Music Share",
+  "productName": "同频 · TONE",
   "version": "1.0.1",
   "identifier": "com.musicshare.desktop",
   "build": {
@@ -17,7 +17,11 @@
         "width": 1320,
         "height": 900,
         "minWidth": 760,
-        "minHeight": 620
+        "minHeight": 620,
+        "decorations": false,
+        "shadow": false,
+        "maximizable": true,
+        "transparent": true
       }
     ],
     "security": {
@@ -26,6 +30,9 @@
   },
   "bundle": {
     "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
       "icons/icon.ico",
       "icons/icon.png",
       "icons/icon.icns"

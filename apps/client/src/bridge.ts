@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { apiResponse } from './api-response';
 import { CloudPlayer } from './cloud-player';
 import { AudioWaveform, releaseWaveformAudio } from './audio-waveform';
@@ -32,6 +33,29 @@ export async function subscribe(name: string, handler: Listener) {
   const set = listeners.get(name) ?? new Set(); set.add(handler); listeners.set(name, set); return () => { set.delete(handler); nativeUnsubscribe?.(); };
 }
 export const desktop = isTauri();
+if (desktop) {
+  getCurrentWindow().setShadow(false).catch(() => {});
+}
+export async function windowMinimize() { if (desktop) await invoke('window_minimize'); }
+export async function windowToggleMaximize() { if (desktop) await invoke('window_toggle_maximize'); }
+export async function windowClose() { if (desktop) await invoke('window_close'); }
+export async function startDragging() { if (desktop) await invoke('start_dragging'); }
+export async function isWindowMaximized(): Promise<boolean> {
+  if (!desktop) return false;
+  try {
+    return await getCurrentWindow().isMaximized();
+  } catch {
+    return false;
+  }
+}
+export async function onWindowResized(callback: () => void): Promise<(() => void) | undefined> {
+  if (!desktop) return undefined;
+  try {
+    return await getCurrentWindow().onResized(callback);
+  } catch {
+    return undefined;
+  }
+}
 export const taskbarArtworkAvailable=desktop&&typeof navigator!=='undefined'&&/Windows/i.test(navigator.userAgent);
 export async function loadSystemArtwork(url:string) { return invoke<ArrayBuffer|number[]>('load_system_artwork',{url}); }
 export async function updateTaskbarArtwork(artwork:ArtworkFrame) { if(desktop)await invoke('update_taskbar_artwork',{artwork}); }

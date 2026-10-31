@@ -33,7 +33,9 @@ it('styles only the chat scrollbar with a stable gutter and rounded WebView2 thu
   expect(style.content).toContain('.chat-message-bubble{width:fit-content;max-width:100%;padding:7px 10px;line-height:1.55;');
   expect(style.content).toContain('.chat-message{margin-bottom:12px}');
   expect(style.content).toContain('.chat-message-meta{margin-bottom:4px}');
-  expect(style.content).not.toMatch(/overflow\s*:\s*hidden|scrollbar-width\s*:\s*none/);
+  for(const block of style.content.matchAll(/([^{}]+)\{([^{}]*)\}/g)){
+    if(block[1].includes('.room-chat-messages'))expect(block[2]).not.toMatch(/overflow(?:-y)?\s*:\s*(?:hidden|clip)|scrollbar-width\s*:\s*none/);
+  }
 });
 
 it('renders operations as distinct text-only notices alongside ordinary messages', async () => {

@@ -16,3 +16,5 @@ native/build-com/
 release-artifacts/
 downloaded-artifacts/
 *.key
+
+.claude/

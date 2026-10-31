@@ -61,7 +61,16 @@ async function submit() {
 
 <template>
   <section class="room-chat" aria-labelledby="room-chat-title">
-    <header class="room-chat-header"><h3 id="room-chat-title">一起聊聊</h3><span class="chat-online">{{ app.room?.members.filter(m=>m.online).length??0 }} 在线</span><button class="icon-button" aria-label="房间成员与权限" @click="ui.members=true"><MoreHorizontal :size="18" /></button></header>
+    <header class="room-chat-header">
+      <div class="chat-header-room">
+        <h3 id="room-chat-title" class="chat-room-name" :title="app.room?.name">{{ app.room?.name || '一起听房间' }}</h3>
+        <span class="chat-room-badge">{{ app.room?.settings?.visibility === 'invite' ? '私密' : '公开' }}</span>
+      </div>
+      <span class="chat-online">{{ app.room?.members.filter(m=>m.online).length??0 }} 在线</span>
+      <button class="icon-button" aria-label="房间成员与邀请" title="房间成员与邀请" @click="ui.members=true">
+        <MoreHorizontal :size="18" />
+      </button>
+    </header>
     <div ref="list" class="room-chat-messages" role="log" aria-label="房间聊天消息" aria-live="polite" aria-relevant="additions" tabindex="0" @scroll="scrollPosition">
       <div v-if="!app.chatMessages.length" class="room-chat-empty"><MessageCircle :size="28" /><p>边听边聊，让音乐连接彼此</p><small>发送第一条消息吧</small></div>
       <template v-for="message in app.chatMessages" :key="message.id">
@@ -82,11 +91,41 @@ async function submit() {
       <div class="room-chat-actions"><button class="primary" aria-label="发送聊天消息" :aria-busy="sending" :disabled="!canSend"><LoaderCircle v-if="sending" :size="14" class="spinning" /><Send v-else :size="14" /><span class="sr-only">{{ sending ? '发送中' : '发送' }}</span></button></div>
       <p v-if="error" class="chat-error" role="alert">{{ error }}</p>
     </form>
-    <p class="room-chat-note">仅当前房间可见 · Shift+Enter 换行</p>
+    
   </section>
 </template>
 
 <style scoped>
+.chat-header-room {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chat-room-name {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: #1e293b !important;
+  margin: 0 !important;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-room-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: rgba(80, 139, 115, 0.12);
+  color: #2e7d5a;
+  border: 1px solid rgba(80, 139, 115, 0.22);
+  white-space: nowrap;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
 /* Compact messages without shrinking the text or its touch/keyboard controls. */
 .room-chat-messages{padding:14px 3px 10px}
 .chat-message{margin-bottom:12px}
@@ -117,7 +156,7 @@ async function submit() {
     min-height:32px;
   }
   .room-chat-messages::-webkit-scrollbar-thumb:hover{background-color:#7899c3}
-  .room-chat-messages::-webkit-scrollbar-thumb:active{background-color:#4f80db}
+  .room-chat-messages::-webkit-scrollbar-thumb:active{background-color:#5dbb00}
   .room-chat-messages::-webkit-scrollbar-button{display:none;width:0;height:0}
   .room-chat-messages::-webkit-scrollbar-corner{background:transparent}
 }

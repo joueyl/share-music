@@ -2,6 +2,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 const native = vi.hoisted(() => ({ desktop: false, invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => native.desktop, invoke: native.invoke }));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ setShadow: vi.fn().mockResolvedValue(undefined) }) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 class Socket {
  static OPEN = 1; static instances: Socket[] = [];

@@ -12,16 +12,18 @@
   "dependencies": {
     "@music-share/shared": "1.0.1",
     "@tauri-apps/api": "^2.9.0",
-    "vue": "^3.5.22",
-    "vue-router": "^4.6.0",
-    "pinia": "^3.0.3",
     "lucide-vue-next": "^0.468.0",
-    "music-metadata": "12.3.2"
+    "music-metadata": "12.3.2",
+    "pinia": "^3.0.3",
+    "three": "^0.174.0",
+    "vue": "^3.5.22",
+    "vue-router": "^4.6.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.0",
     "@vitejs/plugin-vue": "^6.0.1",
     "vite": "^7.1.9",
-    "vue-tsc": "^3.1.0"
+    "vue-tsc": "^3.1.0",
+    "@types/three": "^0.174.0"
   }
 }

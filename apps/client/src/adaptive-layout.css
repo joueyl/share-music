@@ -4,6 +4,7 @@
   :root{--workspace-nav:clamp(64px,10vh,96px);--workspace-player:clamp(88px,13vh,124px)}
   .shell:not(.auth-shell){height:100dvh;min-height:0}
   .shell:not(.auth-shell)>.main{height:100%;min-height:0;padding:var(--workspace-nav) 0 var(--workspace-player)}
+  .shell.in-room-shell:not(.auth-shell)>.main{padding:48px 0 var(--workspace-player)!important}
   .tone-navigation.sidebar{height:var(--workspace-nav);padding-top:12px;padding-bottom:12px}
   .global-player{height:var(--workspace-player)}
   .drawer-backdrop{bottom:var(--workspace-player)}
