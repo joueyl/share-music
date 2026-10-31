@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as THREE from 'three';
+import { createStageViewport, STAGE_RENDERER_OPTIONS } from '../stage-viewport';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RotateCcw } from 'lucide-vue-next';
@@ -273,8 +274,6 @@ function updateCameraFraming() {
   }
 
   camera.updateProjectionMatrix();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(w, h);
 }
 
 // Reset camera view to default position
@@ -298,10 +297,8 @@ onMounted(() => {
   camera = new THREE.PerspectiveCamera(35, w / h, 0.1, 100);
 
   // Renderer: 100% transparent background to blend seamlessly with room
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+  renderer = new THREE.WebGLRenderer(STAGE_RENDERER_OPTIONS);
   renderer.setClearColor(0x000000, 0);
-  renderer.setSize(w, h);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;
   renderer.shadowMap.enabled = true;
@@ -442,12 +439,15 @@ onMounted(() => {
     updateCameraFraming();
   });
 
+  const viewport = createStageViewport(renderer, container, updateCameraFraming);
+
   // Animation Loop
   const clock = new THREE.Clock();
 
   function animate() {
     animId = requestAnimationFrame(animate);
-    const delta = clock.getDelta();
+    viewport.sync();
+    const delta = Math.min(clock.getDelta(), 0.05);
 
     // 1. Playback status
     const isPlaying = !!props.track && app.connected && app.room?.playback.playState === 'playing';
@@ -498,17 +498,9 @@ onMounted(() => {
 
   animate();
 
-  // Resize listener
-  const resizeObserver = new ResizeObserver(() => {
-    updateCameraFraming();
-  });
-  resizeObserver.observe(container);
-
-  updateCameraFraming();
-
   onUnmounted(() => {
     cancelAnimationFrame(animId);
-    resizeObserver.disconnect();
+    viewport.dispose();
     if (controls) {
       controls.dispose();
     }
@@ -550,6 +542,8 @@ onMounted(() => {
 .turntable-3d-stage:active {
   cursor: grabbing;
 }
+
+:deep(canvas) { display: block; width: 100%; height: 100%; }
 
 .reset-view-pill {
   position: absolute;

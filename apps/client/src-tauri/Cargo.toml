@@ -1,6 +1,6 @@
 [package]
 name = "music-share-desktop"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2021"
 rust-version = "1.90"
 
@@ -15,7 +15,7 @@ required-features = ["desktop"]
 [features]
 default = ["desktop"]
 custom-protocol = ["tauri/custom-protocol"]
-desktop = ["dep:tauri", "dep:tauri-build", "dep:souvlaki", "dep:windows", "dep:tauri-plugin-updater"]
+desktop = ["dep:tauri", "dep:tauri-build", "dep:souvlaki", "dep:windows", "dep:tauri-plugin-updater", "dep:tauri-plugin-notification"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -31,6 +31,7 @@ url = "2"
 tauri = { version = "2", optional = true , features = ["tray-icon"] }
 tauri-plugin-updater = { version = "2", optional = true }
 md-5 = "0.10"
+tauri-plugin-notification = { version = "2", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }

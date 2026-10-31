@@ -6,6 +6,7 @@ import { ui } from '../ui';
 import { sendChat } from '../bridge';
 
 const app = useApp();
+const props=withDefaults(defineProps<{active?:boolean}>(),{active:true});
 const draft = ref(''), sending = ref(false), error = ref(''), unread = ref(0);
 const list = ref<HTMLElement | null>(null), atBottom = ref(true);
 const canSend = computed(() => !!app.room && app.connected && !!draft.value.trim() && !sending.value);
@@ -23,9 +24,11 @@ async function scrollToBottom() {
   atBottom.value = true; unread.value = 0;
 }
 watch(() => app.chatMessages.at(-1)?.id, () => {
+  if(!props.active)return;
   if (atBottom.value || app.chatMessages.at(-1)?.userId === app.user?.id) void scrollToBottom();
   else unread.value++;
 }, { immediate: true });
+watch(()=>props.active,value=>{if(value)void scrollToBottom();});
 watch(() => app.room?.id, () => { draft.value = ''; error.value = ''; pending = null; void scrollToBottom(); });
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
@@ -70,6 +73,7 @@ async function submit() {
       <button class="icon-button" aria-label="房间成员与邀请" title="房间成员与邀请" @click="ui.members=true">
         <MoreHorizontal :size="18" />
       </button>
+      <slot name="actions" />
     </header>
     <div ref="list" class="room-chat-messages" role="log" aria-label="房间聊天消息" aria-live="polite" aria-relevant="additions" tabindex="0" @scroll="scrollPosition">
       <div v-if="!app.chatMessages.length" class="room-chat-empty"><MessageCircle :size="28" /><p>边听边聊，让音乐连接彼此</p><small>发送第一条消息吧</small></div>

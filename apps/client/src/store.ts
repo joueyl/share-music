@@ -1,4 +1,7 @@
-import { computed, ref, watch } from 'vue';
+import { createChatAlerts } from './chat-alerts';
+import { createChatSound } from './chat-sound';
+import chatNotificationSound from './assets/chat-notification.wav?url';
+import { computed, onScopeDispose, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
 import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, positionAt, type Action, type ChatMessage, type RoomSnapshot } from '@music-share/shared';
 import * as bridge from './bridge';
@@ -8,6 +11,9 @@ import { trackArtwork } from './track-artwork';
 import { createSystemArtworkSync, systemArtworkPixels, type ArtworkRequest } from './system-artwork';
 import { systemMediaAction, systemMediaState, type SystemMediaEvent } from './system-media';
 const messages: Record<string, string> = {
+  CHAT_NOTIFICATION_FAILED:'系统通知请求失败，请检查系统通知设置',
+  CHAT_ATTENTION_FAILED:'任务栏提醒请求失败，系统可能不支持此提示方式',
+  CHAT_NOTIFICATION_SOUND_FAILED:'消息提示音未能播放，请在窗口内点击一次并检查系统音量',
   PLAYBACK_AUDIO_BUSY:'音频读取繁忙，请稍后切歌重试',
   PLAYBACK_WEB_SERVER_OUTDATED:'Web 播放需要新版音频读取接口，请先更新并重启服务端',
   UPLOADED_MUSIC_METADATA_MISSING:'该历史上传文件缺少音频参数，请重新添加原歌曲后再试',
@@ -67,8 +73,17 @@ export const useApp = defineStore('app', () => {
     return {roomId:room.value.id,trackId:track.id,sourceEpoch:room.value.playback.sourceEpoch,source:trackArtwork(getServerUrl(),track)||null};
   },request=>{void syncArtwork(request);});
   function error(e: unknown) { const code = e instanceof Error ? e.message : String(e); notice.value = code.startsWith('CAPTURE_RATE_OR_CHANNEL_MISMATCH') ? `采集格式与输出设备不匹配，请刷新音源面板的设备格式，或调整 Windows 输出设备设置。${code.slice(code.indexOf(':') + 1)}` : messages[code] ?? code; }
+  const chatSound=createChatSound(chatNotificationSound);
+  const chatAlerts=createChatAlerts({desktop:bridge.desktop,context:()=>acceptEvents&&room.value&&user.value?{roomId:room.value.id,userId:user.value.id,roomName:room.value.name}:null,notify:bridge.notifyChat,clearAttention:bridge.clearChatAttention,sound:chatSound,error});
+  watch(()=>[room.value?.id,user.value?.id],()=>chatAlerts.reset(),{flush:'sync'});
+  const unlockChatSound=()=>chatSound.unlock();
+  onScopeDispose(()=>{chatAlerts.reset();chatSound.dispose();if(typeof window!=='undefined'){window.removeEventListener?.('pointerdown',unlockChatSound,true);window.removeEventListener?.('keydown',unlockChatSound,true);}});
   async function initialize() {
     if (initialized) return; initialized = true;
+    if(bridge.desktop&&typeof window!=='undefined'){
+      window.addEventListener?.('pointerdown',unlockChatSound,true);
+      window.addEventListener?.('keydown',unlockChatSound,true);
+    }
     const cap = await bridge.capabilities(); native.value = cap.native; nativeReason.value = cap.reason;
     await bridge.subscribe('connection', e => { if (!acceptEvents) return; connected.value = e.connected; if (e.connected) requestClock(); else clearActionFeedback(); });
     await bridge.subscribe('playback-cache-warning', e => { if (acceptEvents) error(e.error); });
@@ -87,9 +102,9 @@ export const useApp = defineStore('app', () => {
         if (!clockSynced && Number.isFinite(message.data.serverNow)) offset.value = message.data.serverNow - Date.now();
         room.value = message.data; void bridge.syncCloud(message.data, offset.value);
       }
-      else if (message.type === 'chat-history' && message.roomId === room.value?.id) chatMessages.value = message.messages.slice(-100);
+      else if (message.type === 'chat-history' && message.roomId === room.value?.id) {chatMessages.value = message.messages.slice(-100);chatAlerts.seed(message.messages);}
       else if ((message.type === 'chat' || message.type === 'chat-result') && message.data.roomId === room.value?.id) {
-        if (!chatMessages.value.some(m => m.id === message.data.id)) chatMessages.value = [...chatMessages.value, message.data].slice(-100);
+        if (!chatMessages.value.some(m => m.id === message.data.id)) {chatMessages.value = [...chatMessages.value, message.data].slice(-100);if(message.type==='chat')chatAlerts.receive(message.data);}
       }
       else if (message.type === 'error' || message.type === 'result' && !message.ok || message.type === 'admission' && !message.ok) error(message.error);
       else if (message.type === 'clock') {
@@ -138,7 +153,7 @@ export const useApp = defineStore('app', () => {
   }
   async function logout() {
     if (busy.value) return;
-    busy.value = true; acceptEvents = false;clearActionFeedback();
+    busy.value = true; acceptEvents = false;clearActionFeedback();chatAlerts.reset();
     try {
       await clearSavedLogin();
       await bridge.logout();
@@ -161,6 +176,7 @@ export const useApp = defineStore('app', () => {
   function clearActionFeedback(){for(const timer of actionTimers.values())clearTimeout(timer);actionTimers.clear();pendingActions.value=0;}
   async function addFile(instant = false) { try { const track = await bridge.importFile(); await act({ type: instant ? 'instant' : 'enqueue', payload: track }); } catch (e) { if (String(e) !== 'Error: CANCELLED') error(e); } }
   async function exitRoom() {
+    chatAlerts.reset();
     try {
       await bridge.leave(); clearActionFeedback();room.value = null; chatMessages.value = [];
       media.value = { status: 'idle', detail: '', bufferedMs: 0, driftMs: 0, receiveBps: 0 };

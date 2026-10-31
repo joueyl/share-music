@@ -56,6 +56,10 @@ export async function onWindowResized(callback: () => void): Promise<(() => void
     return undefined;
   }
 }
+export async function notifyChat(payload:import('./chat-alerts').ChatAlertPayload) {
+  return invoke<import('./chat-alerts').ChatAlertResult>('send_chat_notification',{...payload});
+}
+export async function clearChatAttention() { if(desktop)await invoke('clear_chat_attention'); }
 export const taskbarArtworkAvailable=desktop&&typeof navigator!=='undefined'&&/Windows/i.test(navigator.userAgent);
 export async function loadSystemArtwork(url:string) { return invoke<ArrayBuffer|number[]>('load_system_artwork',{url}); }
 export async function updateTaskbarArtwork(artwork:ArtworkFrame) { if(desktop)await invoke('update_taskbar_artwork',{artwork}); }

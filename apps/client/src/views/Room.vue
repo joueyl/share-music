@@ -6,7 +6,7 @@ import { useApp } from '../store';
 import { ui, openSearch } from '../ui';
 import { stageTheme, lumiereCssVars } from '../stage-theme';
 import * as bridge from '../bridge';
-import RoomChat from '../components/RoomChat.vue';
+import ResponsiveRoomChat from '../components/ResponsiveRoomChat.vue';
 import SimilarRecommendations from '../components/SimilarRecommendations.vue';
 import RoomWaveform from '../components/RoomWaveform.vue';
 import TrackLyrics from '../components/TrackLyrics.vue';
@@ -20,6 +20,7 @@ const route = useRoute();
 const router = useRouter();
 const leaving = ref(false);
 const resolvedCover = ref('');
+const floatingChat=ref(false);
 
 const track = computed(() => app.room?.playlist.find((t) => t.id === app.room?.playback.sourceId));
 const coverUrl = computed(() => bridge.playingTrackCover(track.value) || resolvedCover.value);
@@ -88,7 +89,7 @@ async function invite() {
 
 <template>
   <section v-if="app.room" class="tone-room page in-room-stage-page">
-    <div class="listening-layout">
+    <div class="listening-layout" :class="{'is-chat-floating':floatingChat}">
       <div class="listening-main">
         <section
           class="listening-stage"
@@ -147,10 +148,10 @@ async function invite() {
 
             <div class="stage-song">
               <div class="stage-song-title">
-                <h2>{{ track?.name ?? '等待第一首音乐' }}</h2>
+                <h2 :title="track?.name">{{ track?.name ?? '等待第一首音乐' }}</h2>
                 <span v-if="track" class="source-badge">{{ track.lossless ? 'HQ' : '原音' }}</span>
               </div>
-              <p>
+              <p :title="[track?.artists, track?.album].filter(Boolean).join(' / ')">
                 {{ track?.artists ?? '添加一首收藏，开始共享' }}
                 <template v-if="track?.album"> / {{ track.album }}</template>
               </p>
@@ -183,7 +184,7 @@ async function invite() {
                 </div>
                 <div class="lumiere-song-meta">
                   <div class="lumiere-title-row">
-                    <h2 class="lumiere-title">{{ track?.name ?? '等待第一首音乐' }}</h2>
+                    <h2 class="lumiere-title" :title="track?.name">{{ track?.name ?? '等待第一首音乐' }}</h2>
                     <span v-if="track" class="source-badge">{{ track.lossless ? 'HQ' : '原音' }}</span>
                   </div>
                   <p class="lumiere-artist">
@@ -210,7 +211,7 @@ async function invite() {
         <!-- 相似推荐已按需求隐藏 -->
         <!-- <SimilarRecommendations :key="app.room.id" /> -->
       </div>
-      <RoomChat :key="app.room.id" />
+      <ResponsiveRoomChat :key="app.room.id" @floating="floatingChat=$event" />
     </div>
   </section>
   <div v-else class="empty-state">
@@ -223,6 +224,7 @@ async function invite() {
 .in-room-stage-page {
   padding-top: 4px;
   height: 100%;
+  min-height: 0;
   box-sizing: border-box;
 }
 
@@ -243,60 +245,106 @@ async function invite() {
   box-shadow: 0 10px 30px rgba(56, 82, 117, 0.05);
 }
 
-.stage-ipod-wrap,
-.stage-turntable-wrap {
-  position: absolute;
-  left: 20px;
-  top: 16px;
-  bottom: 16px;
-  width: 60%;
-  max-width: 720px;
-  height: calc(100% - 32px);
+.listening-layout {
+  flex: 1;
+  min-height: 0;
+  align-items: stretch;
+}
+.listening-layout.is-chat-floating { grid-template-columns: minmax(0, 1fr); }
+
+.listening-main {
+  min-width: 0;
+  min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 2;
+  flex-direction: column;
 }
 
 .listening-stage.ipod-active,
-.listening-stage.turntable-active {
-  min-height: 580px;
-  height: 100%;
+.listening-stage.turntable-active,
+.listening-stage.lumiere-active {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 16px;
+  flex: 1;
+  min-height: 340px;
+  height: auto;
+}
+
+.stage-ipod-wrap,
+.stage-turntable-wrap {
+  position: relative;
+  grid-column: 1;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .listening-stage.ipod-active .stage-song,
 .listening-stage.turntable-active .stage-song {
-  position: absolute;
-  left: auto;
-  right: 5%;
-  width: 33%;
-  max-width: 360px;
-  min-width: 260px;
-  top: 50%;
-  transform: translateY(-50%);
-}
-
-.listening-stage.ipod-active :deep(.stage-lyrics .lyric-scroll),
-.listening-stage.turntable-active :deep(.stage-lyrics .lyric-scroll) {
-  height: 390px;
-  max-width: 340px;
-}
-
-/* 流光纯歌词播放器模式 */
-.listening-stage.lumiere-active {
-  min-height: 580px;
-  height: 100%;
+  position: static;
+  grid-column: 2;
+  grid-row: 2;
+  width: auto;
+  max-width: none;
+  min-width: 0;
+  min-height: 0;
+  transform: none;
   display: flex;
   flex-direction: column;
-  position: relative;
+}
+
+.stage-song-title { min-width: 0; gap: 10px; }
+.stage-song-title .source-badge { flex-shrink: 0; }
+.stage-song > p {
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   overflow: hidden;
+}
+
+.listening-stage :deep(.stage-lyrics.lyrics-panel) {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.listening-stage :deep(.stage-lyrics .lyric-scroll) {
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+  padding-block: 36px;
+}
+
+.listening-stage .stage-audio-status {
+  position: static;
+  grid-column: 1 / -1;
+  grid-row: 3;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.listening-stage.lumiere-active {
+  grid-template-columns: minmax(0, 1fr);
   background: rgba(255, 255, 255, 0.52);
 }
 
 .stage-lumiere-wrap {
   position: relative;
+  grid-column: 1 / -1;
+  grid-row: 2;
+  min-width: 0;
+  min-height: 0;
   width: 100%;
-  height: 100%;
   display: flex;
   flex-direction: column;
   z-index: 1;
@@ -352,8 +400,9 @@ async function invite() {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 18px 28px 12px;
-  margin-right: 220px; /* 避开右上角房主控制胶囊 */
+  padding: 0 0 12px;
+  flex-shrink: 0;
+  min-width: 0;
 }
 
 .lumiere-song-cover {
@@ -389,12 +438,14 @@ async function invite() {
 }
 
 .lumiere-title-row {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
 .lumiere-title {
+  min-width: 0;
   font-size: 19px;
   font-weight: 600;
   color: #1e293b;
@@ -430,15 +481,13 @@ async function invite() {
 }
 
 .lumiere-empty-lyric {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+  position: relative;
   text-align: center;
-  font-size: 18px !important;
+  font-size: 16px !important;
   color: var(--lumiere-primary, #1d6fee) !important;
   line-height: 1.8 !important;
-  padding: 0 !important;
+  padding: 16px !important;
+  margin: auto;
 }
 
 .lumiere-empty-lyric .text-button {
@@ -452,9 +501,10 @@ async function invite() {
 }
 
 .stage-top-presence {
-  position: absolute;
-  top: 20px;
-  right: 24px;
+  position: relative;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  min-width: 0;
   z-index: 10;
   display: flex;
   align-items: center;
@@ -465,8 +515,11 @@ async function invite() {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  height: 38px;
-  padding: 0 8px 0 14px;
+  min-height: 38px;
+  max-width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  padding: 6px 8px 6px 14px;
   background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
@@ -488,6 +541,7 @@ async function invite() {
 }
 
 .controller-info {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -573,5 +627,25 @@ async function invite() {
   color: #64748b;
   font-size: 11px;
   font-weight: 500;
+}
+@media (max-width: 900px) {
+  .in-room-stage-page { height: auto; min-height: 100%; padding: 12px 16px 20px; }
+  .listening-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .listening-stage.ipod-active,
+  .listening-stage.turntable-active,
+  .listening-stage.lumiere-active {
+    flex: none;
+    min-height: 500px;
+    height: clamp(500px, calc(100dvh - 184px), 640px);
+  }
+  .listening-layout > :deep(.room-chat) { height: 400px; min-height: 320px; }
+}
+
+@media (min-width: 901px) and (max-height: 639px) {
+  .in-room-stage-page { height: auto; min-height: 100%; }
+  .listening-stage.ipod-active,
+  .listening-stage.turntable-active,
+  .listening-stage.lumiere-active { flex: none; height: 460px; }
+  .listening-layout > :deep(.room-chat) { height: 420px; }
 }
 </style>

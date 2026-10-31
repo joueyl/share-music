@@ -435,7 +435,21 @@ function onHeaderMouseDown(e: MouseEvent) {
 }
 
 .shell.in-room-shell .main {
-  padding-top: 48px;
+  padding-top: 52px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+@media (max-width: 900px), (max-height: 639px) {
+  .shell.in-room-shell .main { padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
+  .shell.in-room-shell .in-room-page { height: auto; min-height: 100%; }
+}
+
+@media (max-width: 600px) {
+  .tone-room-nav { padding-inline: 12px; }
+  .room-nav-right { gap: 4px; }
+  .room-mode-btn { padding-inline: 6px; }
+  .window-controls { margin-left: 0; padding-left: 2px; }
 }
 
 .shell :deep(.discovery-page) {

@@ -21,7 +21,7 @@ importers:
   apps/client:
     dependencies:
       '@music-share/shared':
-        specifier: 1.1.0
+        specifier: 1.2.0
         version: link:../../packages/shared
       '@tauri-apps/api':
         specifier: ^2.9.0
@@ -64,7 +64,7 @@ importers:
   apps/server:
     dependencies:
       '@music-share/shared':
-        specifier: 1.1.0
+        specifier: 1.2.0
         version: link:../../packages/shared
       '@nestjs/common':
         specifier: ^11.1.0

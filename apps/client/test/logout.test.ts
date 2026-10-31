@@ -275,3 +275,17 @@ it('keeps action feedback until each server receipt and clears it on failure, ti
  await app.act({type:'stop',payload:{}});expect(app.pendingActions).toBe(1);
  socket.close();expect(app.pendingActions).toBe(0);await app.logout();
 });
+
+it('sends native chat alerts once only for fresh incoming messages and clears attention on logout',async()=>{
+ native.desktop=true;native.invoke.mockImplementation(async(command:string)=>command==='send_chat_notification'?{notificationRequested:true,attentionRequested:true}:command==='media_capabilities'?{native:false}:undefined);
+ const {useApp}=await import('../src/store');const app=useApp();await app.initialize();await app.login('tester','test-password',false);
+ const socket=Socket.instances[0];socket.open();socket.message({type:'authenticated'});
+ socket.message({type:'snapshot',data:{id:'room',name:'房间',hostId:'test-user',members:[],playlist:[],stateVersion:1,pending:null,playback:{playState:'stopped'}}});
+ const msg=(id:string,changes:any={})=>({id,requestId:id,roomId:'room',userId:'other',userName:'成员',text:'你好',sentAt:1,...changes});
+ socket.message({type:'chat-history',roomId:'room',messages:[msg('history')]});
+ for(const data of [msg('history'),msg('own',{userId:'test-user'}),msg('activity',{kind:'activity'}),msg('fresh'),msg('fresh')])socket.message({type:'chat',data});
+ for(let i=0;i<8;i++)await Promise.resolve();
+ expect(native.invoke.mock.calls.filter(([command])=>command==='send_chat_notification')).toEqual([['send_chat_notification',{title:'房间 · 成员',body:'你好'}]]);
+ await app.logout();expect(native.invoke).toHaveBeenCalledWith('clear_chat_attention');
+ socket.message({type:'chat',data:msg('stale')});await Promise.resolve();expect(native.invoke.mock.calls.filter(([command])=>command==='send_chat_notification')).toHaveLength(1);
+});

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as THREE from 'three';
+import { createStageViewport, STAGE_RENDERER_OPTIONS } from '../stage-viewport';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RotateCcw } from 'lucide-vue-next';
@@ -449,11 +450,10 @@ onMounted(() => {
   // 相机距离优化为 2.78：保持 iPod 优雅完整呈现，同时放大屏幕显示比例，显著提高屏幕文字物理像素
   camera.position.set(0, 0.01, 2.78);
 
-  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
-  renderer.setSize(width, height);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer = new THREE.WebGLRenderer(STAGE_RENDERER_OPTIONS);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
@@ -596,11 +596,17 @@ onMounted(() => {
     updateThemeMaterials();
   });
 
+  const viewport = createStageViewport(renderer, container, (w, h) => {
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  });
+
   // 渲染循环
   const clock = new THREE.Clock();
 
   function animate() {
     animId = requestAnimationFrame(animate);
+    viewport.sync();
     const elapsedTime = clock.getElapsedTime();
 
     if (ipodGroup) {
@@ -653,23 +659,10 @@ onMounted(() => {
     }
   }, 250);
 
-  const resizeObserver = new ResizeObserver(() => {
-    if (!containerRef.value || !renderer || !camera) return;
-    const w = containerRef.value.clientWidth;
-    const h = containerRef.value.clientHeight;
-    if (w > 0 && h > 0) {
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-      renderer.setSize(w, h);
-    }
-  });
-  resizeObserver.observe(container);
-
   onUnmounted(() => {
     cancelAnimationFrame(animId);
     clearInterval(progressTimer);
-    resizeObserver.disconnect();
+    viewport.dispose();
     if (controls) {
       controls.dispose();
     }
@@ -716,6 +709,8 @@ onMounted(() => {
 .ipod-3d-stage:active {
   cursor: grabbing;
 }
+
+:deep(canvas) { display: block; width: 100%; height: 100%; }
 
 .reset-view-pill {
   position: absolute;

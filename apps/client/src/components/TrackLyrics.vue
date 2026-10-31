@@ -138,7 +138,7 @@ function lineVars(i:number){
         v-for="(model,j) in lineModels[current]"
         :key="j"
         :model="model"
-        :margin="lineMargins[current]?.[j]"
+        :margin="`min(${lineMargins[current]?.[j] ?? '0px'}, 1em)`"
       /></span>
      </div>
     </Transition>
@@ -200,8 +200,10 @@ function lineVars(i:number){
   flex: 1;
   min-height: 0;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: safe center;
+  justify-content: safe center;
+  overflow: auto;
+  scrollbar-gutter: stable;
   padding: 24px;
 }
 
@@ -223,6 +225,17 @@ function lineVars(i:number){
   perspective: var(--gw-perspective, 1000px);
   transform-origin: center;
 }
+
+/* Untimed LRC can be a single long token: wrap it inside this lyric viewport. */
+.lumiere-line-inner :deep(.gw-word) {
+  flex-shrink: 0;
+  max-width: calc(100% - 1em);
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.lumiere-line-inner :deep(.gw-spin),
+.lumiere-line-inner :deep(.gw-body) { max-width: 100%; }
 
 .lumiere-line-inner.is-breathing {
   animation: lumiere-breathe var(--gw-breathe-dur, 7s) ease-in-out infinite;
@@ -267,14 +280,13 @@ function lineVars(i:number){
 }
 
 .lumiere-empty {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  margin: 0;
-  font-size: clamp(1.5rem, 3.5vw, 2.5rem);
+  position: static;
+  margin: auto;
+  max-width: 100%;
+  font-size: clamp(1rem, 2.5vw, 1.5rem);
   color: var(--lumiere-base, #64748b);
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /* 减少动态效果：去掉景深、缩放与呼吸，保留行高亮层级 */

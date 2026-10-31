@@ -1,5 +1,7 @@
 #[cfg(feature = "desktop")]
 pub mod app_updates;
+#[cfg(feature = "desktop")]
+pub mod chat_notifications;
 pub mod buffer;
 pub mod clock;
 pub mod close_to_tray;
@@ -139,6 +141,7 @@ mod desktop {
             .build()
             .expect("HTTP client");
         tauri::Builder::default()
+            .plugin(tauri_plugin_notification::init())
             .setup(move |app| {
                 app.manage(close_to_tray::CloseToTray::default());
                 if close_to_tray::install(app.handle()).is_err() {
@@ -164,12 +167,19 @@ mod desktop {
                 }
                 Ok(())
             })
-            .on_window_event(close_to_tray::on_window_event)
+            .on_window_event(|window, event| {
+                close_to_tray::on_window_event(window, event);
+                if window.label() == "main" && matches!(event, tauri::WindowEvent::Focused(true)) {
+                    let _ = window.request_user_attention(None);
+                }
+            })
             .invoke_handler(tauri::generate_handler![
                 app_updates::updater_status,
                 app_updates::check_app_update,
                 app_updates::install_app_update,
                 app_updates::restart_after_update,
+                chat_notifications::send_chat_notification,
+                chat_notifications::clear_chat_attention,
                 media_capabilities,
                 update_system_media,
                 load_system_artwork,
