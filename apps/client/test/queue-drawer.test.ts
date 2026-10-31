@@ -63,3 +63,37 @@ it('auto-scrolls near an edge and stops the animation when the gesture is cancel
  expect(list.scrollTop).toBeGreaterThan(0);
  dialog.props.onPointercancel();expect(cancelAnimationFrame).toHaveBeenCalled();expect(f.app.act).not.toHaveBeenCalled();
 });
+const row=(root:any,id:string)=>all(root).find(n=>n.props['data-track-id']===id);
+const doubleClick=(interactive=false)=>({preventDefault:vi.fn(),target:{closest:()=>interactive?{}:null}});
+it('plays a queue song on double-click through the existing room command, not single-click',async()=>{
+ const {root}=await mount();expect(row(root,'a').props.onClick).toBeUndefined();
+ row(root,'a').props.onDblclick(doubleClick());await settle();
+ expect(f.app.act).toHaveBeenCalledExactlyOnceWith({type:'play',payload:{trackId:'a'}});
+ expect(all(root).find(n=>n.props['aria-label']==='播放此曲')?.props.onClick).toBeTypeOf('function');
+});
+it('resumes a paused current song without restarting an already playing song',async()=>{
+ const {root}=await mount();f.app.room.playback.playState='playing';
+ row(root,'b').props.onDblclick(doubleClick());await settle();expect(f.app.act).not.toHaveBeenCalled();
+ f.app.room.playback.playState='paused';await settle();
+ row(root,'b').props.onDblclick(doubleClick());await settle();
+ expect(f.app.act).toHaveBeenCalledExactlyOnceWith({type:'resume',payload:{}});
+});
+it('guards double-click playback against permission, connection, pending actions and unavailable songs',async()=>{
+ const {root}=await mount();
+ for(const patch of [()=>f.app.permission.skip=false,()=>{f.app.permission.skip=true;f.app.connected=false;},()=>{f.app.connected=true;f.app.room.pending={id:'pending'};},()=>{f.app.room.pending=null;f.app.pendingActions=1;},()=>{f.app.pendingActions=0;f.app.room.playlist[0].available=false;}]){
+  patch();await settle();row(root,'a').props.onDblclick(doubleClick());await settle();expect(f.app.act).not.toHaveBeenCalled();
+ }
+});
+it('does not play when double-clicking controls, dragging, or immediately after dropping a song',async()=>{
+ const {root,dialog}=await mount();
+ row(root,'a').props.onDblclick(doubleClick(true));await settle();expect(f.app.act).not.toHaveBeenCalled();
+ grip(root,'a').props.onPointerdown(pointer(20));row(root,'a').props.onDblclick(doubleClick());await settle();expect(f.app.act).not.toHaveBeenCalled();
+ dialog.props.onPointermove(pointer(140));await settle();await dialog.props.onPointerup(pointer(140));
+ row(root,'a').props.onDblclick(doubleClick());await settle();expect(f.app.act).not.toHaveBeenCalled();
+});
+it('coalesces repeated activation while a playback command is being sent',async()=>{
+ const {root}=await mount();let finish!:()=>void;
+ f.app.act.mockImplementation(()=>new Promise<void>(resolve=>finish=resolve));
+ row(root,'a').props.onDblclick(doubleClick());row(root,'a').props.onDblclick(doubleClick());await settle();
+ expect(f.app.act).toHaveBeenCalledOnce();finish();await settle();
+});

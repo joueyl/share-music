@@ -16,10 +16,11 @@ function backdropClose(){if(gesture||Date.now()<ignoreBackdropUntil)return;close
 function afterLeave(){emit('close');if(searchAfterClose)openSearch();}
 useDialogFocus(dialog,close);
 const current=computed(()=>app.room?.playlist.find(t=>t.id===app.room?.playback.sourceId));
-const scroll=ref<HTMLElement|null>(null),draft=ref<string[]>([]),dragging=ref(''),dropTarget=ref(''),sorting=ref(false);
+const scroll=ref<HTMLElement|null>(null),draft=ref<string[]>([]),dragging=ref(''),dropTarget=ref(''),sorting=ref(false),playing=ref(false);
 const queue=computed(()=>{const tracks=app.room?.playlist??[];return draft.value.length?draft.value.map(id=>tracks.find(t=>t.id===id)).filter((t):t is typeof tracks[number]=>!!t):tracks;});
 const blocked=computed(()=>!app.connected||!!app.room?.pending);
 const canReorder=computed(()=>app.host&&!blocked.value&&!sorting.value&&!app.pendingActions);
+const canPlay=computed(()=>app.permission.skip&&!blocked.value&&!sorting.value&&!playing.value&&!app.pendingActions&&!dragging.value&&visible.value);
 let gesture:{id:string;pointer:number;y:number;version:number;roomId:string;handle:HTMLElement}|null=null;
 let frame=0,lastX=0,lastY=0;
 function cancelDrag(){
@@ -71,6 +72,20 @@ watch(()=>[app.room?.id,app.room?.stateVersion,canReorder.value,tab.value],cance
 onUnmounted(cancelDrag);
 const format=(ms:number)=>`${Math.floor(ms/60000).toString().padStart(2,'0')}:${Math.floor(ms/1000%60).toString().padStart(2,'0')}`;
 function move(id:string,delta:number){if(!canReorder.value||!app.room)return;const ids=app.room.playlist.map(t=>t.id),index=ids.indexOf(id),target=index+delta;if(index<0||target<0||target>=ids.length)return;[ids[index],ids[target]]=[ids[target]!,ids[index]!];void submitOrder(ids);}
+async function play(id:string){
+ if(!canPlay.value||gesture||Date.now()<ignoreBackdropUntil||!app.room)return;
+ const item=app.room.playlist.find(track=>track.id===id);if(!item?.available)return;
+ const active=app.room.playback.sourceId===id;
+ if(active&&app.room.playback.playState!=='paused')return;
+ playing.value=true;
+ try{await app.act(active?{type:'resume',payload:{}}:{type:'play',payload:{trackId:id}});}
+ finally{playing.value=false;}
+}
+function playFromRow(event:MouseEvent,id:string){
+ const target=event.target as Element|null;
+ if(target?.closest?.('button,details,summary,a,input,select,textarea,[role="button"]'))return;
+ event.preventDefault();void play(id);
+}
 function add(){searchAfterClose=true;close();}
 </script>
 <template><Teleport to="body"><Transition name="drawer" appear @after-leave="afterLeave"><div v-if="visible" class="drawer-backdrop" @click.self="backdropClose"><aside ref="dialog" class="queue-drawer" @pointermove="dragMove" @pointerup="finishDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag" role="dialog" aria-modal="true" aria-label="共享播放列表">
@@ -80,10 +95,10 @@ function add(){searchAfterClose=true;close();}
  <template v-else>
  <div class="queue-next-heading"><strong>播放顺序 <small>{{ queue.length }}</small></strong><span id="queue-sort-hint">{{ app.host?'拖动手柄排序 · Alt+↑↓ 微调':'房主可调整顺序' }}</span></div>
  <div ref="scroll" class="queue-scroll" tabindex="0" aria-label="播放队列" :aria-busy="sorting">
-  <div v-for="(item,i) in queue" :key="item.id" class="queue-row" :class="{'is-playing':item.id===current?.id,'is-dragging':dragging===item.id,'is-drop-target':dropTarget===item.id}" :data-track-id="item.id">
-   <button v-if="app.host" type="button" class="queue-drag-handle" :disabled="!canReorder" :aria-label="`拖动调整 ${item.name} 的顺序`" aria-describedby="queue-sort-hint" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" @pointerdown="startDrag($event,item.id)" @keydown.alt.up.prevent="move(item.id,-1)" @keydown.alt.down.prevent="move(item.id,1)"><GripVertical :size="16" /></button>
+  <div v-for="(item,i) in queue" :key="item.id" class="queue-row" :class="{'is-playing':item.id===current?.id,'is-dragging':dragging===item.id,'is-drop-target':dropTarget===item.id}" :data-track-id="item.id" @dblclick="playFromRow($event,item.id)">
+   <button v-if="app.host" type="button" class="queue-drag-handle" @dblclick.stop :disabled="!canReorder" :aria-label="`拖动调整 ${item.name} 的顺序`" aria-describedby="queue-sort-hint" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" @pointerdown="startDrag($event,item.id)" @keydown.alt.up.prevent="move(item.id,-1)" @keydown.alt.down.prevent="move(item.id,1)"><GripVertical :size="16" /></button>
    <span class="queue-index">{{ (i+1).toString().padStart(2,'0') }}</span><AlbumArt :src="bridge.playingTrackCover(item)" :draggable="false" /><span class="queue-track"><strong>{{ item.name }}</strong><small>{{ item.artists||'未知歌手' }} · {{ item.id===current?.id?'正在播放':app.room?.members.find(m=>m.id===item.providerId)?.name??'成员' }}{{ item.id===current?.id?'':'添加' }}</small></span><time>{{ format(item.durationMs) }}</time>
-   <div class="track-actions"><AudioLines v-if="item.id===current?.id" class="queue-playing-icon" :size="16" /><button v-else class="icon-button" aria-label="播放此曲" :disabled="!app.permission.skip||!item.available||blocked||!!dragging" @click="app.act({type:'play',payload:{trackId:item.id}})"><Play :size="15" /></button><details class="queue-more"><summary aria-label="歌曲操作">···</summary><div><button v-if="app.host" :disabled="!canReorder||i===0" aria-label="上移" @click="move(item.id,-1)"><ArrowUp :size="14" />上移</button><button v-if="app.host" :disabled="!canReorder||i===queue.length-1" aria-label="下移" @click="move(item.id,1)"><ArrowDown :size="14" />下移</button><button v-if="app.host||item.providerId===app.user?.id" aria-label="移除音轨" :disabled="blocked||item.id===current?.id||item.id===app.room?.pending?.playback.sourceId||!!dragging" @click="app.act({type:'remove',payload:{trackId:item.id}})"><Trash2 :size="14" />移除</button></div></details></div>
+   <div class="track-actions" @dblclick.stop><AudioLines v-if="item.id===current?.id" class="queue-playing-icon" :size="16" /><button v-else class="icon-button" aria-label="播放此曲" :disabled="!canPlay||!item.available" @click="play(item.id)"><Play :size="15" /></button><details class="queue-more"><summary aria-label="歌曲操作">···</summary><div><button v-if="app.host" :disabled="!canReorder||i===0" aria-label="上移" @click="move(item.id,-1)"><ArrowUp :size="14" />上移</button><button v-if="app.host" :disabled="!canReorder||i===queue.length-1" aria-label="下移" @click="move(item.id,1)"><ArrowDown :size="14" />下移</button><button v-if="app.host||item.providerId===app.user?.id" aria-label="移除音轨" :disabled="blocked||item.id===current?.id||item.id===app.room?.pending?.playback.sourceId||!!dragging" @click="app.act({type:'remove',payload:{trackId:item.id}})"><Trash2 :size="14" />移除</button></div></details></div>
   </div>
   <div v-if="!queue.length" class="empty-state compact">把喜欢的歌，加入共同的列表</div>
  </div></template>
