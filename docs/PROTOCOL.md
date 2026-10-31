@@ -33,6 +33,6 @@ WebSocket `/ws` 建立后 5 秒内发送 `auth` 与 token；成功后发送 `joi
 
 客户端 `bridge.ts` 管理 HTTP、WebSocket 与唯一播放器，`cloud-player.ts` 控制 HTML Audio；Rust `apps/client/src-tauri/src/music_cache.rs` 和 `playback_audio.rs` 提供桌面下载、完整性校验与缓存。
 
-客户端通过受权限保护的音乐接口取得音源：桌面下载 HTTPS 网易云 CDN 原始字节，浏览器使用 `/api/rooms/:id/music/:trackId/audio`。下载限制为 100 MiB，校验文件大小与 SHA-256 后创建 Blob；服务端只临时读取音频。接口和链接刷新策略见 [API](API.md) 与 [音乐来源说明](MUSIC-SEARCH.md)。
+客户端通过受权限保护的音乐接口取得音源：桌面下载 HTTPS 网易云 CDN 原始字节，浏览器使用 `/api/rooms/:id/music/:trackId/audio`。下载限制为 100 MiB，前端计算 MD5 并比对接口值和文件大小后创建 Blob；下载失败或不一致时自动强制刷新直链与配套摘要、大小并重新下载校验一次，成功后继续播放；桌面缓存同样校验。后端只从接口保存 MD5 和大小，不为导入或续链下载音频；网页音频代理仅做有界下载和权限检查。接口和链接刷新策略见 [API](API.md) 与 [音乐来源说明](MUSIC-SEARCH.md)。
 
 播放器等待目标位置 seek 完成且 buffered 后报告 ready，服务端提交生效时间后按共享时间轴播放、暂停和纠偏。房间、歌曲或播放代次切换后忽略过期下载与异步结果；换歌和离房释放内存 Blob，桌面磁盘缓存按内容哈希复用。本地音量不影响其他成员。

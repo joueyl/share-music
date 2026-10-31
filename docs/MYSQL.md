@@ -107,4 +107,4 @@ npm run db:cleanup-room-songs -w @music-share/server -- --confirm
 
 版本 2 为 songs 增加 source_url（TEXT）与 source_expires_at（BIGINT 毫秒）。新增和刷新歌曲都会更新 URL、过期时间及完整 JSON，scope 为 netease；房间队列使用独立歌曲 UUID。
 
-链接按使用需求获取，不在迁移时批量访问音乐提供商。音频只为计算哈希、音频参数和网页播放而临时读取，不在服务端保存音频文件；桌面客户端使用本地校验缓存。
+链接按使用需求获取，不在迁移时批量访问音乐提供商。后端从接口读取 MD5 和文件大小，导入和续链不读取音频；仅网页播放代理临时转发音频，不在服务端保存音频文件。桌面客户端使用本地校验缓存。

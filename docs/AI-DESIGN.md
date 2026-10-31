@@ -107,8 +107,8 @@
 ## 7. 技术与真实数据边界
 
 - 保持 Tauri 2 + Vue 3 + TypeScript + Pinia + Vue Router，NestJS 后端、shared 协议校验；不为局部样式引入第二套框架。
-- 唯一播放器由 bridge / CloudPlayer 控制 HTML Audio，切路由不创建第二个 Audio。Windows 由 WebView2 解码，Rust 提供缓存、校验、系统媒体、凭据和更新等能力。
-- 保留 Blob 清理、SHA-256/大小校验、seek/buffered 后 ready、服务端提交和时间轴同步；本地音量不改变其他成员的音量。
+- 唯一播放器由 bridge / CloudPlayer 控制 HTML Audio，切路由不创建第二个 Audio。Windows 由 WebView2 解码，Rust 提供客户端缓存、下载校验、系统媒体、凭据和更新等能力。后端采用上游接口 MD5，导入和续链不下载音频；接口缺少有效 MD5 或大小时明确失败，不伪造规格。
+- 保留 Blob 清理、前端 MD5/大小校验；不一致时自动强制刷新直链与配套元数据并重试一次，只有再次失败才提示错误，不改队列或播放进度。保留 seek/buffered 后 ready、服务端提交和时间轴同步；本地音量不改变其他成员的音量。
 - 使用现有 bridge/store；权限、容量、expectedStateVersion、requestId / commandId 必须保留。异步请求处理取消、卸载、房间/歌曲切换与旧响应。
 - 生产使用 MySQL；公共歌曲来源与 room_tracks 快照分离，房间队列写入 room_tracks，不因 UI 变化自动迁移/删除用户数据。
 - 依据 [API](API.md)、[协议](PROTOCOL.md)、[音乐来源说明](MUSIC-SEARCH.md)。接口未部署、鉴权失败和上游失败是不同状态，不能一律伪装为空数据。

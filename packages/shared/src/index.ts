@@ -23,8 +23,8 @@ export const trackSchema = z.object({
   ossUrl: z.string().max(2048).url().startsWith('https://').optional(),
   coverUrl: z.string().max(2048).url().startsWith('https://').nullable().optional(),
   ossKey: z.string().max(500).optional(), id: z.string().uuid(), name: z.string().trim().min(1).max(200), durationMs: z.number().int().min(1).max(86_400_000),
-  sizeBytes: z.number().int().positive().max(10_000_000_000), spec: audioSpecSchema,
-  lossless: z.boolean(), bitrateBps: z.number().int().positive().max(20_000_000), contentHash: z.string().regex(/^[a-f0-9]{64}$/),
+  sizeBytes: z.number().int().positive().max(10_000_000_000), spec: audioSpecSchema.optional(),
+  lossless: z.boolean(), bitrateBps: z.number().int().positive().max(20_000_000), contentHash: z.string().regex(/^(?:[a-f0-9]{32}|[a-f0-9]{64})$/),
 }).strict();
 export type TrackMetadata = z.infer<typeof trackSchema>;
 export type Track = TrackMetadata & { providerId: string; available: boolean };

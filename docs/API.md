@@ -117,7 +117,7 @@ members[], playlist[], playback, pending, requests[], serverNow
 ## 3. 歌曲：只保存音乐直链
 
 MySQL 保存音乐来源 ID、直链、过期时间和元数据，音频文件不在服务端持久化。
-为兼容现有客户端的 SHA-256 缓存校验，首次导入及刷新时会临时读取音频计算哈希/音频参数，读完即丢弃，不写音频文件。
+导入和续链使用 `song_url_v1` 返回的 `md5`、`size` 与链接，不下载音频或计算哈希。MD5 必须为 32 位十六进制（统一转小写），大小为 1–100 MiB 的整数字节数；缺少或无效元数据时拒绝导入。前端下载后计算 MD5、比对大小，通过后才创建播放 Blob。
 
 ### TrackMetadata
 
@@ -131,9 +131,9 @@ MySQL 保存音乐来源 ID、直链、过期时间和元数据，音频文件�
 | coverUrl | 可选 HTTPS 封面或 null，最长 2048 |
 | durationMs | 1–86400000 |
 | sizeBytes | 音频字节数；实际下载限制 100 MiB |
-| spec | `{sampleRate,bits,channels}`，整数音频规格 |
+| spec | 可选 `{sampleRate,bits,channels}`；直链 MP3 导入不读取音频推测规格，未取得时省略 |
 | lossless / bitrateBps | boolean；码率 1–20000000；当前在线导入仅支持完整 MP3 |
-| contentHash | 真实音频字节 SHA-256，64 位小写十六进制 |
+| contentHash | 新歌曲使用上游接口 MD5，32 位小写十六进制；64 位 SHA-256 仅兼容已有记录 |
 
 ### GET /api/music/uploaded
 
@@ -164,7 +164,7 @@ body：`{"songId":"123","requestId":"UUID"}`。
 ### POST /api/rooms/:id/music/uploaded
 
 从音乐库按内容哈希查找稳定歌曲 ID，再复用/刷新音乐链接入队。
-body：`{"hash":"64位小写SHA-256","requestId":"UUID"}`，返回 `{ok:true,track}`，track.id 为新队列 UUID。
+body：`{"hash":"32位小写MD5（也接受已有记录的64位SHA-256）","requestId":"UUID"}`，返回 `{ok:true,track}`，track.id 为新队列 UUID。
 权限和限流同上；不存在可续期来源时返回 TRACK_NOT_FOUND。
 
 ### POST /api/rooms/:id/music/play
@@ -174,11 +174,11 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 
 ### GET /api/rooms/:id/music/:trackId?refresh=0
 
-需当前在线成员，返回 `{url}`，`Cache-Control: private, no-store`；每用户每分钟 60 次。
+需当前在线成员，返回 `{url,contentHash,sizeBytes}`（同一次取链的 MD5 和大小），`Cache-Control: private, no-store`；每用户每分钟 60 次。
 - 已保存链接距离过期不足 30 秒时，按稳定歌曲 ID 重新取链，成功后更新数据库。
-- `refresh=1` 强制重新获取，供桌面端发现链接提前失效时调用。
-- 桌面端下载失败最多强制取链重试一次；再次失败直接报错，不无限循环。
-- 刷新后的音频哈希或长度变化时返回 MUSIC_CONTENT_CHANGED，需重新添加歌曲，不降低缓存完整性验证。
+- `refresh=1` 强制重新获取，供客户端发现链接提前失效或 MD5/大小不一致时调用。
+- 桌面及 Web 客户端下载失败或校验不一致时，自动强制取链、采用配套 MD5/大小并重新下载校验一次，成功后继续播放；重试失败才报错，不无限循环。
+- 同一稳定歌曲 ID 刷新后的 MD5 或长度变化时，返回新的元数据用于校验和缓存，不沿用旧摘要，不要求手动重新添加，也不修改队列 UUID、状态版本或播放时间轴。
 
 ### GET /api/rooms/:id/music/:trackId/metadata
 
@@ -191,7 +191,7 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 ### GET /api/rooms/:id/music/:trackId/audio
 
 网页端返回 `application/octet-stream` 原始音频，`Cache-Control: private, no-store`。
-服务端代理当前网易云链接，遇到 HTTP 401/403/404/410 时最多刷新并重试一次；校验字节数和哈希，读取前后检查成员身份。
+服务端代理当前网易云链接，遇到 HTTP 401/403/404/410 时最多刷新并重试一次；限制总大小、超时和重定向，读取前后检查成员身份，不计算音频哈希。前端按歌曲元数据校验大小与 MD5。
 单次最多 100 MiB，每用户每分钟 30 次，进程最多两个不同下载任务。所有重定向逐跳校验允许域名，不接受本机、私网或任意 URL。
 需要管理员网易云登录状态仍有效；被下架、无权限或仅试听的歌曲不会因重试而绕过限制。
 
@@ -222,7 +222,7 @@ POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。密码�
 每账号只保留一条控制连接。房间的队列/权限操作通过：
 
 ```json
-{"type":"command","data":{"commandId":"UUID","roomId":"UUID","expectedStateVersion":3,"action":{"type":"enqueue","payload":{"id":"UUID","name":"歌曲","durationMs":120000,"sizeBytes":4096,"spec":{"sampleRate":44100,"bits":16,"channels":2},"lossless":false,"bitrateBps":128000,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}
+{"type":"command","data":{"commandId":"UUID","roomId":"UUID","expectedStateVersion":3,"action":{"type":"enqueue","payload":{"id":"UUID","name":"歌曲","durationMs":120000,"sizeBytes":4096,"spec":{"sampleRate":44100,"bits":16,"channels":2},"lossless":false,"bitrateBps":128000,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}
 ```
 
 成功：`{type:'result',commandId,ok:true,stateVersion}`；失败：`{type:'result',commandId,ok:false,error}`，状态冲突还推送快照。
@@ -243,7 +243,7 @@ POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。密码�
 | 403 | HOST_ONLY、FORBIDDEN、NETEASE_LOGIN_ORIGIN_FORBIDDEN |
 | 429 | RATE_LIMITED |
 | 410 | LOCAL_UPLOAD_NOT_SUPPORTED |
-| 400 | MUSIC_LINK_EXPIRED、MUSIC_SOURCE_UNREFRESHABLE、MUSIC_CONTENT_CHANGED、MUSIC_DOWNLOAD_FAILED |
+| 400 | MUSIC_LINK_EXPIRED、MUSIC_SOURCE_UNREFRESHABLE、MUSIC_DOWNLOAD_FAILED |
 | 503 | DATABASE_UNAVAILABLE |
 
 其他领域错误通常为 400。STATE_CONFLICT 后获取最新快照，重新确认用户意图再提交，不要无限重试。

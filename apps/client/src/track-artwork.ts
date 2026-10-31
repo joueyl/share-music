@@ -4,7 +4,7 @@ const key = 'music-share:artwork:v1';
 const entries = shallowRef(new Map<string,string>());
 const embedded = shallowRef(new Map<string,string>());
 export function setEmbeddedTrackArtwork(hash:string,url:string) {
-  if(!/^[a-f0-9]{64}$/.test(hash)||!url.startsWith('blob:'))return;
+  if(!/^(?:[a-f0-9]{32}|[a-f0-9]{64})$/.test(hash)||!url.startsWith('blob:'))return;
   const next=new Map(embedded.value);next.set(hash,url);embedded.value=next;
 }
 export function releaseEmbeddedTrackArtwork(hash:string,url:string) {
@@ -26,7 +26,7 @@ function load() {
   } catch { /* Artwork caching is optional, even if browser storage is unavailable. */ }
 }
 function cacheKey(server:string,hash:unknown):string|null {
-  if(typeof hash!=='string'||!/^[a-f0-9]{64}$/.test(hash))return null;
+  if(typeof hash!=='string'||!/^(?:[a-f0-9]{32}|[a-f0-9]{64})$/.test(hash))return null;
   try{return `${new URL(server).origin}|${hash}`;}catch{return null;}
 }
 export function rememberTrackArtwork(server:string,hash:unknown,value:unknown) {

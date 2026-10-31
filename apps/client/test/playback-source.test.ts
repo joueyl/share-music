@@ -1,10 +1,12 @@
+import { createHash } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 import { invoke } from '@tauri-apps/api/core';
 import { loadPlaybackSource } from '../src/playback-source';
 import { trackArtwork, rememberTrackArtwork } from '../src/track-artwork';
 import { mp3WithPictures, png } from './fixtures/embedded-audio';
-const metadata = { contentHash:'a'.repeat(64), sizeBytes:4, name:'song.mp3', ossKey:'music/files/song.mp3' };
+const checksum=(data:Uint8Array)=>createHash('md5').update(data).digest('hex');
+const metadata = { contentHash:checksum(new Uint8Array([255,251,144,0])), sizeBytes:4, name:'song.mp3', ossKey:'music/files/song.mp3' };
 const key = {contentHash:metadata.contentHash,sizeBytes:metadata.sizeBytes};
 afterEach(() => { vi.restoreAllMocks(); vi.mocked(invoke).mockReset(); });
 it('refreshes an expired direct link once on a native download failure',async()=>{
@@ -37,7 +39,7 @@ it('downloads and caches a miss and plays the same native bytes as a local Blob'
   source.release(); expect(revoke).toHaveBeenCalledWith('blob:local-song');
 });
 it('reads a persistent cache hit without requesting a signed URL or downloading from OSS', async () => {
-  vi.mocked(invoke).mockResolvedValueOnce(new Uint8Array([1,2,3,4]).buffer);
+  vi.mocked(invoke).mockResolvedValueOnce(new Uint8Array([255,251,144,0]).buffer);
   vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:cached-song');
   const getUrl=vi.fn(async()=>{throw new Error('offline or signed URL expired');});
   const source=await loadPlaybackSource(getUrl,true,metadata);
@@ -45,22 +47,22 @@ it('reads a persistent cache hit without requesting a signed URL or downloading 
   expect(invoke).toHaveBeenCalledExactlyOnceWith('read_cached_audio',key);
 });
 it('leaves browser playback unchanged and rejects missing native audio bytes', async () => {
-  expect(await loadPlaybackSource('https://oss.test/song', false, metadata)).toBe('https://oss.test/song');
+  await expect(loadPlaybackSource('https://oss.test/song', false, metadata)).rejects.toThrow('PLAYBACK_AUDIO_DOWNLOAD_FAILED');
   expect(invoke).not.toHaveBeenCalled();
   vi.mocked(invoke).mockResolvedValue(new ArrayBuffer(0));
   await expect(loadPlaybackSource('https://oss.test/song', true, metadata)).rejects.toThrow('PLAYBACK_AUDIO_DOWNLOAD_FAILED');
 });
 it('plays authenticated Web audio as an analysable Blob without requesting OSS directly or invoking native APIs',async()=>{
- const bytes=new Uint8Array([255,251,144,0]).buffer,web=vi.fn(async()=>bytes),signedUrl=vi.fn(async()=>{throw new Error('must not request OSS');});
+ const bytes=new Uint8Array([255,251,144,0]).buffer,web=vi.fn(async()=>bytes),signedUrl=vi.fn(async()=>({url:'https://m801.music.126.net/song.mp3',contentHash:metadata.contentHash,sizeBytes:4}));
  const create=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:web-audio'),revoke=vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
  const source=await loadPlaybackSource(signedUrl,false,metadata,web);
- expect(web).toHaveBeenCalledOnce();expect(signedUrl).not.toHaveBeenCalled();expect(invoke).not.toHaveBeenCalled();
+ expect(web).toHaveBeenCalledOnce();expect(signedUrl).toHaveBeenCalledExactlyOnceWith(false);expect(invoke).not.toHaveBeenCalled();
  if(typeof source==='string')throw new Error('expected Blob source');
  expect(new Uint8Array(await (create.mock.calls[0][0] as Blob).arrayBuffer())).toEqual(new Uint8Array(bytes));
  source.release();source.release();expect(revoke).toHaveBeenCalledExactlyOnceWith('blob:web-audio');
 });
 it('extracts the embedded image from cached audio, gives it priority, and releases both local URLs',async()=>{
-  const bytes=mp3WithPictures(),track={...metadata,contentHash:'f'.repeat(64),sizeBytes:bytes.length};
+  const bytes=mp3WithPictures(),track={...metadata,contentHash:checksum(bytes),sizeBytes:bytes.length};
   const server='https://share.jouei.cn',remote='https://p1.music.126.net/network.jpg';
   rememberTrackArtwork(server,track.contentHash,remote);
   vi.mocked(invoke).mockResolvedValueOnce(bytes.buffer);
@@ -73,4 +75,55 @@ it('extracts the embedded image from cached audio, gives it priority, and releas
   if(typeof source==='string')throw new Error('expected local source');
   source.release();source.release();
   expect(trackArtwork(server,track)).toBe(remote);expect(revoke.mock.calls).toEqual([['blob:audio'],['blob:embedded-cover']]);
+});
+
+it('rejects corrupted desktop and Web bytes before allocating playback or cover URLs',async()=>{
+ const create=vi.spyOn(URL,'createObjectURL'),corrupt=new Uint8Array([0,0,0,0]).buffer;
+ vi.mocked(invoke).mockResolvedValueOnce(corrupt);
+ await expect(loadPlaybackSource('https://m801.music.126.net/song.mp3',true,metadata)).rejects.toThrow('PLAYBACK_AUDIO_INTEGRITY_FAILED');
+ await expect(loadPlaybackSource('unused',false,metadata,async()=>corrupt)).rejects.toThrow('PLAYBACK_AUDIO_INTEGRITY_FAILED');
+ expect(create).not.toHaveBeenCalled();
+});
+
+it('refreshes changed MD5 and size after native integrity failure and plays the new bytes',async()=>{
+ const bytes=new Uint8Array([1,2,3,4,5]),fresh={url:'https://m801.music.126.net/fresh.mp3',contentHash:checksum(bytes),sizeBytes:5};
+ const source=vi.fn(async(refresh=false)=>refresh?fresh:{url:'https://m801.music.126.net/expired.mp3',...key});
+ vi.mocked(invoke).mockResolvedValueOnce(new ArrayBuffer(0)).mockRejectedValueOnce('PLAYBACK_AUDIO_INTEGRITY_FAILED').mockResolvedValueOnce(bytes.buffer);
+ const create=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:renewed');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+ const result=await loadPlaybackSource(source,true,metadata);
+ expect(source.mock.calls).toEqual([[false],[true]]);
+ expect(invoke).toHaveBeenLastCalledWith('load_playback_audio',{url:fresh.url,contentHash:fresh.contentHash,sizeBytes:5});
+ expect(create).toHaveBeenCalledOnce();if(typeof result!=='string')result.release();
+});
+it('refreshes Web checksum mismatch once and verifies against the fresh MD5 and size',async()=>{
+ const bytes=new Uint8Array([1,2,3,4,5]),fresh={url:'https://m801.music.126.net/fresh.mp3',contentHash:checksum(bytes),sizeBytes:5};
+ const source=vi.fn(async(refresh=false)=>refresh?fresh:{url:'https://m801.music.126.net/expired.mp3',...key});
+ const web=vi.fn(async(current:{sizeBytes:number})=>current.sizeBytes===4?new Uint8Array([0,0,0,0]).buffer:bytes.buffer);
+ const create=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:web-renewed');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+ const result=await loadPlaybackSource(source,false,metadata,web);
+ expect(source.mock.calls).toEqual([[false],[true]]);expect(web).toHaveBeenCalledTimes(2);
+ expect(web.mock.calls[1][0]).toMatchObject({contentHash:fresh.contentHash,sizeBytes:5});
+ expect(create).toHaveBeenCalledOnce();if(typeof result!=='string')result.release();
+});
+it('bounds repeated mismatches and never retries authorization failures or plays corrupt bytes',async()=>{
+ const source=vi.fn(async()=>({url:'https://m801.music.126.net/song.mp3',...key})),web=vi.fn(async()=>new Uint8Array([0,0,0,0]).buffer);
+ const create=vi.spyOn(URL,'createObjectURL');
+ await expect(loadPlaybackSource(source,false,metadata,web)).rejects.toThrow('PLAYBACK_AUDIO_INTEGRITY_FAILED');
+ expect(source.mock.calls).toEqual([[false],[true]]);expect(web).toHaveBeenCalledTimes(2);expect(create).not.toHaveBeenCalled();
+ source.mockClear();web.mockRejectedValueOnce(new Error('NOT_IN_ROOM'));
+ await expect(loadPlaybackSource(source,false,metadata,web)).rejects.toThrow('NOT_IN_ROOM');expect(source).toHaveBeenCalledOnce();
+});
+it('refreshes after a corrupt cache or Web size mismatch without retrying more than once',async()=>{
+ const bytes=new Uint8Array([255,251,144,0]),source=vi.fn(async()=>({url:'https://m801.music.126.net/fresh.mp3',...key}));
+ vi.mocked(invoke).mockResolvedValueOnce(new Uint8Array([0,0,0,0]).buffer).mockResolvedValueOnce(bytes.buffer);
+ vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:renewed');vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+ const cached=await loadPlaybackSource(source,true,metadata);expect(source).toHaveBeenCalledExactlyOnceWith(true);if(typeof cached!=='string')cached.release();
+ source.mockClear();const web=vi.fn().mockRejectedValueOnce(new Error('PLAYBACK_AUDIO_INTEGRITY_FAILED')).mockResolvedValueOnce(bytes.buffer);
+ const streamed=await loadPlaybackSource(source,false,metadata,web);expect(source.mock.calls).toEqual([[false],[true]]);if(typeof streamed!=='string')streamed.release();
+});
+it('refreshes a failed Web proxy download once and preserves the final upstream error',async()=>{
+ const source=vi.fn(async()=>({url:'https://m801.music.126.net/song.mp3',...key}));
+ const web=vi.fn().mockRejectedValueOnce(new Error('MUSIC_DOWNLOAD_FAILED')).mockRejectedValueOnce(new Error('MUSIC_LINK_EXPIRED'));
+ await expect(loadPlaybackSource(source,false,metadata,web)).rejects.toThrow('MUSIC_LINK_EXPIRED');
+ expect(source.mock.calls).toEqual([[false],[true]]);expect(web).toHaveBeenCalledTimes(2);
 });

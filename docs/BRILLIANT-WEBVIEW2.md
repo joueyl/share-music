@@ -20,12 +20,12 @@ Brilliant 项目：brilliant-cloud://witty-jaguar/share-music。
 - GET /api/rooms/resolve/:code：12 位房间码解析后 WebSocket join。
 - PUT /api/rooms/:id/settings：完整设置和 expectedStateVersion；冲突提示用户，不无限重试。
 - 网易云搜索 / music/uploaded：搜索点歌和共享音乐库，requestId 幂等。
-- /music/:trackId 与 refresh=1：桌面下载直链，下载失败只强刷一次。
-- /music/:trackId/audio：浏览器 Bearer 鉴权代理；校验长度、SHA-256 后创建 Blob。
+- /music/:trackId 与 refresh=1：返回直链与配套 MD5/大小，客户端遇到下载失败或校验不一致时自动强刷并重试一次。
+- /music/:trackId/audio：浏览器 Bearer 鉴权代理；前端计算 MD5 并比对接口值、长度后创建 Blob。
 
 ## 播放边界
 
-CloudPlayer 唯一控制 HTMLAudioElement。桌面由系统 WebView（Windows 为 WebView2）解码。Rust 缓存读取和 HTTPS 下载仅提供校验后的原始字节，HTML Audio 播放同一 Blob；波形分析与内嵌封面基于同一音频。
+CloudPlayer 唯一控制 HTMLAudioElement。桌面由系统 WebView（Windows 为 WebView2）解码。Rust 客户端缓存读取和 HTTPS 下载按接口 MD5 与大小校验原始字节，前端在创建 Blob 前统一复核，HTML Audio 播放同一 Blob；波形分析与内嵌封面基于同一音频。
 
 ready 必须等待目标位置 seek 完成并 buffered；服务器提交后依据共享时间轴播放/暂停/纠偏。退出房间、切歌或过时下载会清理或释放 Blob。本地音量不改变房间音量。Windows 系统媒体按键继续调用房间指令，不创建原生播放器。
 

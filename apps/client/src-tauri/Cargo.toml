@@ -30,6 +30,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 url = "2"
 tauri = { version = "2", optional = true , features = ["tray-icon"] }
 tauri-plugin-updater = { version = "2", optional = true }
+md-5 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }

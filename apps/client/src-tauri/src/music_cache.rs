@@ -1,3 +1,4 @@
+use md5::Md5;
 use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
@@ -25,7 +26,7 @@ impl MusicCache {
         }
     }
     fn validate(hash: &str, size: u64) -> Result<(), String> {
-        if hash.len() != 64
+        if ![32, 64].contains(&hash.len())
             || !hash
                 .bytes()
                 .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
@@ -40,7 +41,12 @@ impl MusicCache {
         self.root.join(format!("{hash}.audio"))
     }
     fn valid(bytes: &[u8], hash: &str, size: u64) -> bool {
-        bytes.len() as u64 == size && format!("{:x}", Sha256::digest(bytes)) == hash
+        bytes.len() as u64 == size
+            && if hash.len() == 32 {
+                format!("{:x}", Md5::digest(bytes)) == hash
+            } else {
+                format!("{:x}", Sha256::digest(bytes)) == hash
+            }
     }
     pub async fn read(&self, hash: &str, size: u64) -> Result<Option<Vec<u8>>, String> {
         Self::validate(hash, size)?;
@@ -159,8 +165,18 @@ mod tests {
     }
     fn sample() -> (Vec<u8>, String) {
         let bytes = b"test audio bytes".to_vec();
-        let hash = format!("{:x}", Sha256::digest(&bytes));
+        let hash = format!("{:x}", Md5::digest(&bytes));
         (bytes, hash)
+    }
+    #[test]
+    fn md5_and_legacy_sha256_have_distinct_validated_keys() {
+        let (bytes, md5) = sample();
+        let size = bytes.len() as u64;
+        let sha = format!("{:x}", Sha256::digest(&bytes));
+        assert!(MusicCache::valid(&bytes, &md5, size));
+        assert!(MusicCache::valid(&bytes, &sha, size));
+        assert!(!MusicCache::valid(b"corrupt audio!!", &md5, size));
+        assert!(!MusicCache::valid(&bytes, &"0".repeat(32), size));
     }
     #[tokio::test]
     async fn cache_survives_restart_and_does_not_download_on_second_play() {

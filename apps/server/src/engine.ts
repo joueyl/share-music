@@ -71,10 +71,10 @@ export class RoomEngine {
   private member(r: InternalRoom, userId: string): Member { return r.members.find(m => m.id === userId && m.online) ?? fail('NOT_IN_ROOM'); }
   private require(r: InternalRoom, userId: string, permission: keyof Permissions) { if (!this.member(r, userId).permissions[permission]) fail('FORBIDDEN'); }
   private host(r: InternalRoom, userId: string) { this.member(r, userId); if (r.hostId !== userId) fail('HOST_ONLY'); }
-  private validateSpec(spec: AudioSpec, lossless = true) { if (lossless && !supportsLossless(spec)) fail('UNSUPPORTED_AUDIO_SPEC'); }
+  private validateSpec(spec: AudioSpec | undefined, lossless = true) { if (lossless && (!spec || !supportsLossless(spec))) fail('UNSUPPORTED_AUDIO_SPEC'); }
   private filePlayback(r: InternalRoom, t: Track, instant = false): Playback {
     if (!t.available) fail('PROVIDER_OFFLINE');
-    return { sourceId: t.id, sourceEpoch: Math.max(r.playback.sourceEpoch, r.pending?.playback.sourceEpoch ?? 0) + 1, sourceType: 'file', playState: 'playing', positionMs: 0, effectiveAtServerMs: this.now() + 3000, providerId: t.providerId, qualityMode: t.lossless ? 'lossless' : 'source', spec: t.spec, bitrateBps: t.bitrateBps, instant };
+    return { sourceId: t.id, sourceEpoch: Math.max(r.playback.sourceEpoch, r.pending?.playback.sourceEpoch ?? 0) + 1, sourceType: 'file', playState: 'playing', positionMs: 0, effectiveAtServerMs: this.now() + 3000, providerId: t.providerId, qualityMode: t.lossless ? 'lossless' : 'source', spec: t.spec ?? null, bitrateBps: t.bitrateBps, instant };
   }
   private prepare(r: InternalRoom, playback: Playback, followTimeline = false) {
     const now = this.now();

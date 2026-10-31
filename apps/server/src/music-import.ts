@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { DomainError, RoomEngine } from './engine';
 import type { TrackMetadata } from '../../../packages/shared/src';
 import { normalizeAlbumCover, trackSchema } from '../../../packages/shared/src';
@@ -33,18 +33,6 @@ export async function downloadMusic(input: string, request: typeof fetch = fetch
     }
     throw new DomainError('MUSIC_DOWNLOAD_FAILED');
   } catch(error) { if (error instanceof DomainError) throw error; throw new DomainError('MUSIC_DOWNLOAD_FAILED'); }
-}
-/** Read MP3 frame metadata without invoking third-party file parsers. */
-export function mp3Spec(bytes: Buffer) {
-  let start=0;
-  if(bytes.subarray(0,3).toString()==='ID3' && bytes.length>=10) start=10+((bytes[6]&127)<<21)+((bytes[7]&127)<<14)+((bytes[8]&127)<<7)+(bytes[9]&127);
-  for(let i=start;i<Math.min(bytes.length-4,start+65536);i++) {
-    if(bytes[i]!==255 || (bytes[i+1]&224)!==224)continue;
-    const version=(bytes[i+1]>>3)&3,layer=(bytes[i+1]>>1)&3,index=(bytes[i+2]>>2)&3,bitrate=(bytes[i+2]>>4)&15;
-    if(version===1 || layer!==1 || index===3 || !bitrate || bitrate===15)continue;
-    return {sampleRate:[44100,48000,32000][index]/(version===3?1:version===2?2:4),bits:16,channels:(bytes[i+3]>>6)===3?1:2};
-  }
-  throw new DomainError('MUSIC_AUDIO_UNSUPPORTED');
 }
 export function songFilename(song:{name?:unknown;ar?:unknown;artists?:unknown}):string {
   const raw=Array.isArray(song.ar)&&song.ar.length?song.ar:song.artists;
@@ -123,7 +111,7 @@ export class MusicImport {
   }
   private async asset(songId:string,force:boolean):Promise<TrackMetadata> {
     const sourceId=`netease:standard:${songId}`,cached=await this.db?.getMusicSource('netease',sourceId);
-    if(!force&&cached?.sourceUrl&&(cached.sourceExpiresAt??0)>this.now()+30000) {
+    if(!force&&cached?.sourceUrl&&/^[a-f0-9]{32}$/.test(cached.contentHash)&&(cached.sourceExpiresAt??0)>this.now()+30000) {
       const track=trackSchema.parse(cached);musicDownloadUrl(track.sourceUrl!);this.remember(track.sourceUrl!,track.contentHash);return track;
     }
     const fetchedAt=this.now();
@@ -133,12 +121,14 @@ export class MusicImport {
     if(audio.freeTrialInfo)throw new DomainError('MUSIC_TRIAL_ONLY');
     if(audio.type&&audio.type.toLowerCase()!=='mp3')throw new DomainError('MUSIC_AUDIO_UNSUPPORTED');
     const sourceUrl=musicDownloadUrl(audio.url).href;
-    // Bytes are transient: compute the hash/spec required by the existing verified client cache, never upload or persist audio.
-    const bytes=await downloadMusic(sourceUrl,this.request),spec=mp3Spec(bytes),durationMs=Math.round(Number(song.dt??song.duration));
+    // Trust only validated provider metadata here; the client verifies the downloaded bytes.
+    const contentHash=typeof audio.md5==='string'?audio.md5.toLowerCase():'',sizeBytes=audio.size,durationMs=Math.round(Number(song.dt??song.duration));
+    if(!/^[a-f0-9]{32}$/.test(contentHash)||!Number.isSafeInteger(sizeBytes)||sizeBytes<1)throw new DomainError('MUSIC_SOURCE_INVALID');
+    if(sizeBytes>MAX)throw new DomainError('MUSIC_TOO_LARGE');
     if(typeof song.name!=='string'||!song.name.trim()||!Number.isFinite(durationMs)||durationMs<1||durationMs>86400000)throw new DomainError('MUSIC_SOURCE_INVALID');
     const ttl=Number(audio.expi),seconds=Number.isFinite(ttl)&&ttl>0?Math.min(ttl,86400):300;
-    const complete=trackSchema.parse({id:cached?.id??randomUUID(),name:song.name.slice(0,200),durationMs,sizeBytes:bytes.length,spec,lossless:false,
-      bitrateBps:Math.max(1,Math.min(20000000,Math.round(Number(audio.br)||bytes.length*8000/durationMs))),contentHash:createHash('sha256').update(bytes).digest('hex'),
+    const complete=trackSchema.parse({id:cached?.id??randomUUID(),name:song.name.slice(0,200),durationMs,sizeBytes,lossless:false,
+      bitrateBps:Math.max(1,Math.min(20000000,Math.round(Number(audio.br)||sizeBytes*8000/durationMs))),contentHash,
       sourceUrl,sourceExpiresAt:Math.floor(fetchedAt+seconds*1000),coverUrl:songCover(song),neteaseId:songId,
       artists:(song.ar??song.artists??[]).map((a:any)=>a.name).filter(Boolean).join(' / ').slice(0,1000),album:String(song.al?.name??song.album?.name??'').slice(0,500)});
     await this.db?.saveMusicDetail('netease',sourceId,song);await this.db?.saveMusicSource('netease',sourceId,complete);
@@ -149,26 +139,32 @@ export class MusicImport {
     const songId=track.neteaseId??/^netease:standard:(\d{1,20})$/.exec(saved?.source??'')?.[1];
     if(!songId)throw new DomainError('MUSIC_SOURCE_UNREFRESHABLE');
     const current=await this.importSong(songId,force);
-    if(current.contentHash!==track.contentHash||current.sizeBytes!==track.sizeBytes)throw new DomainError('MUSIC_CONTENT_CHANGED');
     return current;
   }
+  async playbackSource(roomId:string,userId:string,trackId:string,force=false) {
+    const track=this.memberTrack(roomId,userId,trackId),current=await this.resolve(track,force);
+    this.memberTrack(roomId,userId,trackId);
+    return {url:current.sourceUrl!,contentHash:current.contentHash,sizeBytes:current.sizeBytes};
+  }
   async url(roomId:string,userId:string,trackId:string,force=false):Promise<string> {
-    const track=this.memberTrack(roomId,userId,trackId),current=await this.resolve(track,force);this.memberTrack(roomId,userId,trackId);return current.sourceUrl!;
+    return (await this.playbackSource(roomId,userId,trackId,force)).url;
   }
   async readAudio(roomId:string,userId:string,trackId:string):Promise<Buffer> {
-    const track=this.memberTrack(roomId,userId,trackId);
+    const track=await this.resolve(this.memberTrack(roomId,userId,trackId));
+    this.memberTrack(roomId,userId,trackId);
     if(track.sizeBytes>MAX)throw new DomainError('PLAYBACK_AUDIO_TOO_LARGE');
     let job=this.reads.get(track.contentHash);
     if(!job){
       if(this.reads.size>=2)throw new DomainError('PLAYBACK_AUDIO_BUSY');
-      job=this.readVerified(track).finally(()=>this.reads.delete(track.contentHash));this.reads.set(track.contentHash,job);
+      job=this.readSource(track).finally(()=>this.reads.delete(track.contentHash));this.reads.set(track.contentHash,job);
     }
     const bytes=await job;this.memberTrack(roomId,userId,trackId);return bytes;
   }
-  private async readVerified(track:TrackMetadata):Promise<Buffer> {
-    let current=await this.resolve(track),bytes:Buffer;
+  private async readSource(track:TrackMetadata):Promise<Buffer> {
+    let current=track,bytes:Buffer;
     try{bytes=await downloadMusic(current.sourceUrl!,this.request);}
     catch(e){if(!(e instanceof DomainError)||e.code!=='MUSIC_LINK_EXPIRED')throw e;current=await this.resolve(track,true);bytes=await downloadMusic(current.sourceUrl!,this.request);}
-    if(bytes.length!==track.sizeBytes||createHash('sha256').update(bytes).digest('hex')!==track.contentHash)throw new DomainError('PLAYBACK_AUDIO_INTEGRITY_FAILED');return bytes;
+    // The proxy bounds traffic and rechecks membership; checksum comparison belongs to the client.
+    return bytes;
   }
 }
