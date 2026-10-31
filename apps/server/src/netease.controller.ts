@@ -7,6 +7,12 @@ import { DomainError } from './engine';
 import { httpError } from './controller';
 import { loginPage } from './netease.page';
 
+const password = z.string().min(1).max(128);
+export const neteasePasswordSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('phone'), phone: z.string().trim().regex(/^\d{5,20}$/), countrycode: z.string().trim().regex(/^\d{1,4}$/).default('86'), password }).strict(),
+  z.object({ type: z.literal('email'), email: z.string().trim().email().max(254), password }).strict(),
+]);
+
 export function adminAllowed(req: Pick<Request, 'headers' | 'socket'>, secret = process.env.NETEASE_ADMIN_TOKEN) {
   if (secret) {
     const expected = 'Basic ' + Buffer.from('admin:' + secret).toString('base64');
@@ -51,6 +57,9 @@ export class NeteaseController {
   }
   @Post('loginServe/check') async check(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: unknown) {
     try { this.admin(req, res); const { sessionId } = z.object({ sessionId: z.string().uuid() }).strict().parse(body); return await this.app.netease.check(sessionId); } catch (e) { httpError(e); }
+  }
+  @Post('loginServe/password') async password(@Req() req: Request, @Res({ passthrough: true }) res: Response, @Body() body: unknown) {
+    try { this.admin(req, res); this.app.limit(`netease-password:${req.socket.remoteAddress}`, 5, 60000); this.app.limit('netease-password', 10, 60000); return await this.app.netease.passwordLogin(neteasePasswordSchema.parse(body)); } catch (e) { httpError(e); }
   }
   @Get('api/netease/:method') async get(@Param('method') method: string, @Query() query: unknown, @Headers('authorization') header?: string) { return this.call(method, query, header); }
   @Post('api/netease/:method') async post(@Param('method') method: string, @Body() body: unknown, @Headers('authorization') header?: string) { return this.call(method, body, header); }

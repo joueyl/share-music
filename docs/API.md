@@ -205,16 +205,17 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 相似推荐：`GET /api/netease/simi_song?id=歌曲网易云ID&limit=12&offset=0`，返回上游 `songs` 列表。id 必须为 1–20 位数字，limit 为 1–100，offset 为 0–100000 的整数。客户端根据当前播放加载，过滤当前歌曲、重复结果和队列已有歌曲；点选后通过既有音乐添加接口入队，不自动播放。此功能需要同步更新服务端白名单。
 仅转发白名单参数，禁止注入 Cookie、代理和地址。详情见 [NETEASE.md](NETEASE.md)、[MUSIC-SEARCH.md](MUSIC-SEARCH.md)。
 
-管理员扫码页面与普通用户鉴权独立：
+管理员网易云登录页面与普通用户鉴权独立（不改变客户端用户名登录）：
 
 | 方法 / 路径 | body / 返回 |
 |---|---|
-| GET /loginServe | HTML 扫码管理页 |
+| GET /loginServe | HTML 管理页，支持二维码、手机号密码和邮箱密码登录 |
 | POST /loginServe/qr | 返回 `{sessionId,image,expiresAt}` |
 | POST /loginServe/check | `{sessionId}`，返回 `{code:800/801/802/803}` |
+| POST /loginServe/password | 手机号：`{type:"phone",phone,countrycode?:"86",password}`；邮箱：`{type:"email",email,password}`。成功返回 `{code:200}` |
 
 配置 NETEASE_ADMIN_TOKEN 时使用 HTTP Basic，用户名 admin、密码为该本地配置值；未配置时只允许直接本机访问。
-POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。
+POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。密码登录每来源每分钟最多 5 次，全局每分钟最多 10 次。手机号为 5–20 位数字，国家区号为 1–4 位数字（不含 +，默认 86），邮箱不超过 254 字符，密码 1–128 字符，拒绝额外字段。密码仅用于本次上游请求，不持久化。失败不覆盖旧凭据；新登录请求使旧二维码/密码请求结果失效。账号密码错误返回 INVALID_CREDENTIALS；上游风控或安全验证返回 NETEASE_LOGIN_REJECTED，需改用二维码；上游不可用返回 NETEASE_UNAVAILABLE。不提供短信验证码发送或交互式风控验证。
 
 ## 5. WebSocket /ws
 

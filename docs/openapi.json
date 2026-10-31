@@ -2017,7 +2017,7 @@
     },
     "/loginServe": {
       "get": {
-        "summary": "管理员网易云扫码登录（独立 Basic 鉴权）",
+        "summary": "管理员网易云登录：二维码、手机号或邮箱（独立 Basic 鉴权）",
         "operationId": "get_loginServe",
         "tags": [
           "管理"
@@ -2329,6 +2329,166 @@
                     "minLength": 1,
                     "maxLength": 4096
                   }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/loginServe/password": {
+      "post": {
+        "summary": "管理员网易云手机号/邮箱密码登录",
+        "operationId": "post_loginServe_password",
+        "tags": [
+          "管理"
+        ],
+        "security": [
+          {
+            "adminBasic": []
+          }
+        ],
+        "description": "Same-origin POST; 5 attempts per source per minute and 10 globally. Only confirmed login saves the global server cookie. Password is not persisted. Upstream security challenges require QR login.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "phone"
+                        ]
+                      },
+                      "password": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "writeOnly": true
+                      },
+                      "phone": {
+                        "type": "string",
+                        "pattern": "^\\d{5,20}$"
+                      },
+                      "countrycode": {
+                        "type": "string",
+                        "pattern": "^\\d{1,4}$",
+                        "default": "86"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "phone",
+                      "password"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "email"
+                        ]
+                      },
+                      "password": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "writeOnly": true
+                      },
+                      "email": {
+                        "type": "string",
+                        "format": "email",
+                        "maxLength": 254
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "email",
+                      "password"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "凭据已保存，不返回 Cookie/token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    }
+                  },
+                  "required": [
+                    "code"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
                 }
               }
             }

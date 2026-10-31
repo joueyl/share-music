@@ -123,3 +123,15 @@ it('isolates room chat, validates messages, confirms retries and restores histor
  const limited=randomUUID();member.send({type:'chat',roomId:room.id,requestId:limited,text:'too fast'});expect((await member.wait(m=>m.type==='chat-error'&&m.requestId===limited)).error).toBe('RATE_LIMITED');
  member.send({type:'leave'});const left=randomUUID();member.send({type:'chat',roomId:room.id,requestId:left,text:'after leave'});expect((await member.wait(m=>m.type==='chat-error'&&m.requestId===left)).error).toBe('NOT_IN_ROOM');
 },10000);
+
+it('protects password management with admin/origin checks and validates before invoking upstream',async()=>{
+ const post=(body:unknown,headers:Record<string,string>={})=>fetch(base+'/loginServe/password',{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify(body)});
+ const input={type:'email',email:'test@example.com',password:'test'};
+ expect((await post(input,{'X-Forwarded-For':'203.0.113.1'})).status).toBe(401);
+ expect((await post(input,{Origin:'https://evil.example.com'})).status).toBe(403);
+ const invalid=await post({...input,proxy:'http://evil.example.com'});expect(invalid.status).toBe(400);expect((await invalid.json()).error).toBe('INVALID_REQUEST');
+ const invalidPhone=await post({type:'phone',phone:'abc',countrycode:'86',password:'test'});expect(invalidPhone.status).toBe(400);
+ expect(invalidPhone.headers.get('cache-control')).toBe('no-store');
+ for(let i=0;i<3;i++)await post({});
+ expect((await post({})).status).toBe(429);
+});

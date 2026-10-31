@@ -5,11 +5,12 @@ import { DomainError } from './engine';
 
 type Result = { body: Record<string, any>; cookie?: string[] };
 export type MusicInvoker = (name: string, params: Record<string, unknown>) => Promise<Result>;
+export type PasswordLogin = { type: 'phone'; phone: string; countrycode: string; password: string } | { type: 'email'; email: string; password: string };
 // The upstream library logs raw error responses. Isolate and discard its output so
 // login cookies never reach server logs; terminating the worker also bounds requests.
 const invoke: MusicInvoker = (name, params) => new Promise((resolve, reject) => {
   const worker = new Worker(`const {parentPort,workerData}=require('node:worker_threads');
-    (async()=>{try{const api=require(workerData.module);if(!Object.hasOwn(api,workerData.name)||typeof api[workerData.name]!=='function')throw Error();const result=await api[workerData.name](workerData.params);parentPort.postMessage({ok:true,result});}catch{parentPort.postMessage({ok:false});}})();`,
+    (async()=>{try{const api=require(workerData.module);if(!Object.hasOwn(api,workerData.name)||typeof api[workerData.name]!=='function')throw Error();const result=await api[workerData.name](workerData.params);parentPort.postMessage({ok:true,result});}catch(e){if(['login','login_cellphone'].includes(workerData.name)&&Number.isInteger(e?.body?.code))parentPort.postMessage({ok:true,result:{body:{code:e.body.code}}});else parentPort.postMessage({ok:false});}})();`,
     { eval: true, workerData: { module: require.resolve('NeteaseCloudMusicApi'), name, params }, stdout: true, stderr: true });
   worker.stdout?.resume(); worker.stderr?.resume();
   const timer = setTimeout(() => { void worker.terminate(); reject(new DomainError('NETEASE_UNAVAILABLE')); }, 18000);
@@ -66,6 +67,25 @@ export class NeteaseService {
     const id = randomUUID(); this.attempt = { id, key, expiresAt: this.now() + 180000, lastCheck: -Infinity, code: 801 };
     return { sessionId: id, image, expiresAt: this.attempt.expiresAt };
   }
+  async passwordLogin(input: PasswordLogin) {
+    const version = ++this.generation; this.attempt = undefined;
+    const params = input.type === 'phone'
+      ? { phone: input.phone, countrycode: input.countrycode, password: input.password }
+      : { email: input.email, password: input.password };
+    const result = await this.request(input.type === 'phone' ? 'login_cellphone' : 'login', params);
+    if (version !== this.generation) throw new DomainError('NETEASE_LOGIN_REPLACED');
+    if (Number(result.body?.code) !== 200) {
+      if ([501, 502].includes(Number(result.body?.code))) throw new DomainError('INVALID_CREDENTIALS');
+      throw new DomainError('NETEASE_LOGIN_REJECTED');
+    }
+    await this.saveCredential(result);
+    return { code: 200 };
+  }
+  private async saveCredential(result: Result) {
+    const cookie = Array.isArray(result.cookie) && result.cookie.length ? result.cookie.map(c => c.split(';')[0]).join('; ') : result.body.cookie;
+    if (typeof cookie !== 'string' || cookie.length > 64000 || !/(?:^|;\s*)MUSIC_U=[^;\s]+/.test(cookie)) throw new DomainError('NETEASE_INVALID_RESPONSE');
+    await this.db.setSetting('netease.cookie', cookie);
+  }
   async check(id: string): Promise<{ code: number }> {
     const attempt = this.attempt;
     if (!attempt || attempt.id !== id) throw new DomainError('NETEASE_LOGIN_REPLACED');
@@ -80,9 +100,7 @@ export class NeteaseService {
       const code = Number(result.body?.code);
       if (![800, 801, 802, 803].includes(code)) throw new DomainError('NETEASE_INVALID_RESPONSE');
       if (code === 803) {
-        const cookie = Array.isArray(result.cookie) && result.cookie.length ? result.cookie.map(c => c.split(';')[0]).join('; ') : result.body.cookie;
-        if (typeof cookie !== 'string' || cookie.length > 64000 || !/(?:^|;\s*)MUSIC_U=[^;\s]+/.test(cookie)) throw new DomainError('NETEASE_INVALID_RESPONSE');
-        await this.db.setSetting('netease.cookie', cookie);
+        await this.saveCredential(result);
       }
       attempt.code = code; return { code };
     })();
