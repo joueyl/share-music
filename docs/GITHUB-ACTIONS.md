@@ -1,6 +1,6 @@
 # GitHub Actions 自动打包
 
-工作流：`.github/workflows/desktop-release.yml`，名称为 **Desktop installers**。现覆盖 Windows x64、Linux x64 和 macOS Intel / Apple Silicon 四种构建目标，并支持配置签名后的应用内更新。旧 Windows 单平台工作流已移除，避免重复创建草稿。
+工作流：`.github/workflows/desktop-release.yml`，名称为 **Desktop installers**。现覆盖 Windows x64、Linux x64 和 macOS Intel / Apple Silicon 四种构建目标，并支持配置签名后的应用内更新。
 
 ## 首次配置
 
@@ -14,7 +14,7 @@
 在 **Actions → Desktop installers → Run workflow** 选择分支并运行，一次触发全部四种构建目标。流水线将：
 
 - 校验版本、更新日志和生产服务地址，执行 `npm ci` 与 JavaScript 测试。
-- 安装固定 Rust 1.90.0，使用对应平台的系统 WebView / HTML Audio；不构建 FFmpeg / vcpkg 媒体运行时。
+- 安装固定 Rust 1.90.0，使用对应平台的系统 WebView / HTML Audio。
 - 缓存 Cargo 下载与 Rust 依赖，构建 Tauri 桌面壳及客户端。
 - 调用对应平台的 `package:win` / `package:linux` / `package:mac` 及检查命令。Linux 安装 WebKitGTK 4.1、GTK3、PipeWire、D-Bus 等依赖；macOS 分别使用 Intel / Apple Silicon runner，并设置最低系统版本 13.0。
 - 每个目标独立上传名为 `music-share-目标-版本号` 的 Actions Artifact，保留 30 天；包含对应安装包、`SHA256SUMS-目标.txt`、`RELEASE-NOTES.md`。文件名统一包含版本、平台及架构，避免冲突。
@@ -59,10 +59,10 @@ Windows、Linux 和两种 macOS 架构均使用固定提交版本的 `Swatinem/r
 - `cache-on-failure` 允许普通任务失败后保存已生成的缓存，但缓存服务异常、任务取消或 runner 中断时不保证保存。
 - 第一次仍需冷构建。可先在默认分支 `main` 手动运行一次，后续标签构建可复用可访问的默认分支缓存；不同标签之间不保证直接共享。命中与保存结果可查看 **Cache Cargo downloads and Rust dependencies** 及其 Post 步骤。
 
-此修改仅增加 Cargo/Rust 缓存，原有 npm 与 vcpkg 缓存策略不变。缓存失效、依赖或工具链变化时仍可能重新编译，不保证固定加速比例。
+npm 依赖与 Cargo/Rust 编译产物分别缓存。缓存失效、依赖或工具链变化时仍可能重新编译，不保证固定加速比例。
 
 ## 验证边界
 
 本地可运行 `npm run test:ci-release` 和 `npm run test:version`。这些测试覆盖标签与版本匹配、公开地址校验、日志提取、四架构产物筛选、汇总和真实 SHA-256 计算，不代表已在 GitHub runner 上完成原生编译、安装包生成或实机安装验收。
 
-此工作流已接入 Tauri Updater：配置匹配的公钥和签名 Secrets 后生成 `.sig`、`latest.json`，并在收集及汇总时验证签名。不自动公开 Release、不部署 NestJS 服务，也不上传 OSS。首次配置和完整流程见 [GitHub 更新配置](UPDATER.md)。
+此工作流已接入 Tauri Updater：配置匹配的公钥和签名 Secrets 后生成 `.sig`、`latest.json`，并在收集及汇总时验证签名。不自动公开 Release，也不部署 NestJS 服务。首次配置和完整流程见 [GitHub 更新配置](UPDATER.md)。

@@ -3,7 +3,7 @@
   "info": {
     "title": "同频 TONE API",
     "version": "0.2.2-mysql",
-    "description": "MySQL-backed server. Registration and login use username and password only. WebSocket protocol is documented separately in docs/API.md and docs/PROTOCOL.md. Music is stored as direct provider URLs and expiry timestamps; no OSS upload. See docs/API.md for bounded refresh, 100 MiB integrity verification and local-file limitations."
+    "description": "MySQL-backed server. Registration and login use username and password only. WebSocket protocol is documented separately in docs/API.md and docs/PROTOCOL.md. Music is stored as direct provider URLs and expiry timestamps. See docs/API.md for bounded refresh, 100 MiB integrity verification."
   },
   "servers": [
     {

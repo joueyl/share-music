@@ -6,7 +6,7 @@
 
 - 本机默认地址 `http://localhost:3000`；生产环境使用 HTTPS / WSS。
 - 除 `/api/health`、`/api/login` 外，业务 HTTP 请求需 `Authorization: Bearer <token>`。
-- JSON 接口使用 `Content-Type: application/json`；不再支持原始音频上传。请求对象严格校验，不接受未声明字段。
+- JSON 接口使用 `Content-Type: application/json`。请求对象严格校验，不接受未声明字段。
 - UUID 字段采用标准 UUID；时间戳和时长均为毫秒；`offset` 从 0 开始。
 - NestJS 默认成功状态：GET/PUT 为 **200**，POST 为 **201**。
 - 错误为 `{"error":"错误码"}`，参数错误还带 `issues:[{path,message}]`。
@@ -116,7 +116,7 @@ members[], playlist[], playback, pending, requests[], serverNow
 
 ## 3. 歌曲：只保存音乐直链
 
-音乐不再上传到 OSS，也不在服务端持久化音频文件。MySQL 保存来源 ID、直链、过期时间和元数据。
+MySQL 保存音乐来源 ID、直链、过期时间和元数据，音频文件不在服务端持久化。
 为兼容现有客户端的 SHA-256 缓存校验，首次导入及刷新时会临时读取音频计算哈希/音频参数，读完即丢弃，不写音频文件。
 
 ### TrackMetadata
@@ -134,11 +134,10 @@ members[], playlist[], playback, pending, requests[], serverNow
 | spec | `{sampleRate,bits,channels}`，整数音频规格 |
 | lossless / bitrateBps | boolean；码率 1–20000000；当前在线导入仅支持完整 MP3 |
 | contentHash | 真实音频字节 SHA-256，64 位小写十六进制 |
-| ossKey / ossUrl | 仅旧数据兼容保留，新导入不返回、不使用 OSS 播放 |
 
 ### GET /api/music/uploaded
 
-保留旧路径兼容客户端，但现在返回**音乐库**，不再读取 OSS 上传索引。
+返回共享音乐库的歌曲来源记录。
 query：keywords 默认空、最长 100；offset 默认 0、范围 0–1000000；limit 默认 20、范围 1–100。
 返回 `{"songs":[{id,neteaseId,name,artists,album,coverUrl,canAdd,durationMs,sizeBytes}],"total":6}`。
 id 为内容哈希，不是队列 UUID；按内容去重，所有登录用户共享音乐库，每分钟 60 次。
@@ -146,14 +145,13 @@ id 为内容哈希，不是队列 UUID；按内容去重，所有登录用户共
 
 ### POST /api/music/upload
 
-路径保留，语义改为**登记歌曲链接**，不自动加入房间：
+登记歌曲链接，不自动加入房间：
 
 ```json
 {"songId":"123"}
 ```
 
 返回 `{track:TrackMetadata}`。每用户每分钟 10 次；仅接受 songId，不接受客户端提供的任意外部 URL。
-原 `application/octet-stream` 上传明确返回 **410 / LOCAL_UPLOAD_NOT_SUPPORTED**，X-Music-Filename 不再使用。
 
 ### POST /api/rooms/:id/music/netease
 
@@ -165,9 +163,9 @@ body：`{"songId":"123","requestId":"UUID"}`。
 
 ### POST /api/rooms/:id/music/uploaded
 
-保留旧路径，改为从音乐库按内容哈希查找稳定歌曲 ID，再复用/刷新音乐链接入队。
+从音乐库按内容哈希查找稳定歌曲 ID，再复用/刷新音乐链接入队。
 body：`{"hash":"64位小写SHA-256","requestId":"UUID"}`，返回 `{ok:true,track}`，track.id 为新队列 UUID。
-权限和限流同上；不存在可续期来源时返回 TRACK_NOT_FOUND，不访问 OSS。
+权限和限流同上；不存在可续期来源时返回 TRACK_NOT_FOUND。
 
 ### POST /api/rooms/:id/music/play
 
@@ -232,7 +230,7 @@ POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。密码�
 支持 action：enqueue、remove、reorder、clear、play、instant、next、previous、pause、resume、stop、seek、quality、defaults、permission。
 负载结构以 `packages/shared/src/index.ts` 的 commandSchema 为准。
 聊天消息 `{type:'chat',roomId,requestId,text}`，text 1–500 字符；返回 chat-result/chat-error，房内广播 chat；最近 100 条仅存内存。
-时钟、信令、ready、直播和带宽租约见 [PROTOCOL.md](PROTOCOL.md)。
+时钟、ready 和音源加载见 [PROTOCOL.md](PROTOCOL.md)。
 
 ## 6. 健康检查和错误
 
@@ -252,7 +250,7 @@ POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。密码�
 
 ## 7. 数据持久化边界
 
-MySQL 保存账号、房间设置/房主/权限、歌曲直链/过期时间/来源和详情、历史上传索引、网易云登录配置、房间队列及顺序。
+MySQL 保存账号、房间设置/房主/权限、歌曲直链/过期时间/来源和详情、网易云登录配置、房间队列及顺序。
 在线成员、正在播放的时间轴、pending、聊天、临时权限请求、命令去重均为进程态；重启后播放停止，客户端重新 join。
 旧 SQLite 从未保存的队列/历史不能凭空恢复。该版本仍要求**单服务实例**，不能仅靠 MySQL 横向扩容。
 
@@ -265,4 +263,4 @@ MySQL 保存账号、房间设置/房主/权限、歌曲直链/过期时间/来�
 
 失败码：`PLAYLIST_LINK_IS_ALBUM`（专辑链接，不是歌单）、`PLAYLIST_LINK_INVALID`（输入或目标不是受支持歌单）、`PLAYLIST_LINK_RESOLVE_FAILED`（超时/不可用/非 HTTP 重定向）、`PLAYLIST_LINK_REDIRECT_LIMIT`（循环/超出跳转限制）；其他鉴权和限流错误沿用通用格式。
 
-排查部署：新版解析接口在未认证时应返回 HTTP 401 JSON；若 POST 路径返回 HTTP 404，需更新服务端或检查 `/api/` 代理转发。前端对此单独显示“短链接解析接口不存在”，不再与上游 301/302 跳转失败混为一谈。
+排查部署：新版解析接口在未认证时应返回 HTTP 401 JSON；若 POST 路径返回 HTTP 404，需更新服务端或检查 `/api/` 代理转发。前端对此单独显示“短链接解析接口不存在”，与上游 301/302 跳转失败分别反馈。
