@@ -34,6 +34,24 @@ mod desktop {
             .map_err(|_| "SYSTEM_MEDIA_UNAVAILABLE".into())
     }
     #[tauri::command]
+    async fn load_system_artwork(
+        state: State<'_, AppState>,
+        url: String,
+    ) -> Result<tauri::ipc::Response, String> {
+        Ok(tauri::ipc::Response::new(
+            system_media::artwork::download(&state.http, &url).await?,
+        ))
+    }
+    #[tauri::command]
+    fn update_taskbar_artwork(
+        app: tauri::AppHandle,
+        artwork: system_media::artwork::ArtworkFrame,
+    ) -> Result<(), String> {
+        artwork.validate()?;
+        app.run_on_main_thread(move || system_media::update_artwork(artwork))
+            .map_err(|_| "SYSTEM_MEDIA_UNAVAILABLE".into())
+    }
+    #[tauri::command]
     async fn load_playback_audio(
         app: tauri::AppHandle,
         state: State<'_, AppState>,
@@ -154,6 +172,8 @@ mod desktop {
                 app_updates::restart_after_update,
                 media_capabilities,
                 update_system_media,
+                load_system_artwork,
+                update_taskbar_artwork,
                 load_playback_audio,
                 read_cached_audio,
                 can_remember_login,

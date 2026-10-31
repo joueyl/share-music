@@ -27,11 +27,14 @@ it('prioritizes lyrics over the removed now-playing label on desktop and narrow 
  expect(css).toContain('.stage-song h2{font-size:21px;line-height:32px}');
  expect(css).toContain('.stage-lyrics .lyric-scroll{text-align:center;height:164px;');
 });
-it('removes the listening-room breadcrumb and lifts the whole room body without removing actions',()=>{
+it('moves the room heading and actions to chat and navigation without restoring the breadcrumb',()=>{
  const room=read('../src/views/Room.vue'),css=read('../src/brilliant.css');
  expect(room).not.toContain('LISTENING ROOM /');
- expect(room).toContain('<h1>{{ app.room.name }}</h1>');
- for(const action of ['邀请好友','aria-label="房间设置"','aria-label="离开房间"'])expect(room).toContain(action);
+ const chat=read('../src/components/RoomChat.vue'),app=read('../src/App.vue'),members=read('../src/components/RoomMembersDialog.vue');
+ expect(chat).toContain("{{ app.room?.name || '一起听房间' }}");
+ expect(chat).toContain('aria-label="房间成员与邀请"');
+ expect(members).toContain('复制邀请房间');
+ for(const action of ['title="房间设置"','title="退出房间"','@click.stop="exitCurrentRoom"'])expect(app).toContain(action);
  expect(css).toContain('.tone-room.page{padding-top:0}');
  expect(css).toContain('gap:20px;height:48px;margin-bottom:18px}.room-titlebar h1');
  expect(css).toContain('.tone-room .room-titlebar{height:auto;min-height:48px}');

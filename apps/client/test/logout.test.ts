@@ -2,6 +2,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 const native = vi.hoisted(() => ({ desktop: false, invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => native.desktop, invoke: native.invoke }));
+vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ setShadow: vi.fn().mockResolvedValue(undefined) }) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 class Socket {
  static OPEN = 1; static instances: Socket[] = [];
@@ -190,13 +191,15 @@ it('adds uploaded music using its hash and a stable request ID without uploading
 
 it('fetches Web playback bytes through the authenticated room endpoint and verifies integrity',async()=>{
  const bridge=await import('../src/bridge');await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
- const bytes=new Uint8Array([255,251,144,0]);const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),b=>b.toString(16).padStart(2,'0')).join('');
+ const bytes=new Uint8Array([255,251,144,0]);const {audioMd5}=await import('../src/audio-integrity');const hash=await audioMd5(bytes);
  const fetcher=vi.fn(async()=>new Response(bytes));vi.stubGlobal('fetch',fetcher);
- const track={sizeBytes:bytes.length,contentHash:hash} as any;
+ const track={sizeBytes:bytes.length,contentHash:hash,name:'song.mp3'} as any;
  expect(new Uint8Array(await bridge.browserAudio('room','song',track))).toEqual(bytes);
  const [url,options]=fetcher.mock.calls[0] as unknown as [string,RequestInit];
  expect(url).toBe('http://127.0.0.1:3000/api/rooms/room/music/song/audio');expect(options.headers).toMatchObject({Authorization:'Bearer test-token'});
- await expect(bridge.browserAudio('room','song',{...track,contentHash:'0'.repeat(64)})).rejects.toThrow('PLAYBACK_AUDIO_INTEGRITY_FAILED');
+ const {loadPlaybackSource}=await import('../src/playback-source');
+ const corrupt={...track,contentHash:'0'.repeat(32)};
+ await expect(loadPlaybackSource('unused',false,corrupt,()=>bridge.browserAudio('room','song',corrupt))).rejects.toThrow('PLAYBACK_AUDIO_INTEGRITY_FAILED');
 });
 
 it('loads and searches uploaded OSS music through the authenticated API with cancellation',async()=>{

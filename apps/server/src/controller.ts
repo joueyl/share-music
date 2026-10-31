@@ -39,7 +39,7 @@ export class ApiController {
   @Post('rooms/:id/music/uploaded') async addUploaded(@Param('id') id:string,@Body() body:unknown,@Headers('authorization') header?:string) {
     try{
       const user=await this.user(header);this.app.limit(`music-import:${user.id}`,200,600000);
-      const {hash,requestId}=z.object({hash:z.string().regex(/^[a-f0-9]{64}$/),requestId:z.string().uuid()}).strict().parse(body);
+      const {hash,requestId}=z.object({hash:z.string().regex(/^(?:[a-f0-9]{32}|[a-f0-9]{64})$/),requestId:z.string().uuid()}).strict().parse(body);
       const track=await this.app.musicImport.addUploaded(z.string().uuid().parse(id),user.id,hash,requestId);await this.app.flush();return {ok:true,track};
     }catch(e){httpError(e);}
   }
@@ -62,7 +62,7 @@ export class ApiController {
   @Get('rooms/:id/music/:trackId') @Header('Cache-Control','private, no-store') async music(@Param('id') id:string,@Param('trackId') trackId:string,@Headers('authorization') header?:string,@Query() query?:unknown) {
     try {const user=await this.user(header);this.app.limit(`music-link:${user.id}`,60,60000);
       const q=z.object({refresh:z.enum(['0','1']).default('0')}).strict().parse(query??{});
-      return {url:await this.app.musicImport.url(z.string().uuid().parse(id),user.id,z.string().uuid().parse(trackId),q.refresh==='1')};
+      return await this.app.musicImport.playbackSource(z.string().uuid().parse(id),user.id,z.string().uuid().parse(trackId),q.refresh==='1');
     }catch(e){httpError(e);}
   }
   @Get('rooms/:id/music/:trackId/cover') async cover(@Param('id') id:string,@Param('trackId') trackId:string,@Headers('authorization') header?:string) {

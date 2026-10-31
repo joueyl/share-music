@@ -7,6 +7,7 @@ import { loadPlaybackSource } from './playback-source';
 import { rememberTrackArtwork, trackArtwork } from './track-artwork';
 import { normalizeAlbumCover, parsePlaylistLink, isPlaylistShortLink, playlistReference } from '@music-share/shared';
 import type { SystemMediaState } from './system-media';
+import type { ArtworkFrame } from './system-artwork';
 import { listen } from '@tauri-apps/api/event';
 import type { ChatMessage, Command, RoomSnapshot, TrackMetadata } from '@music-share/shared';
 type Listener = (event: any) => void;
@@ -55,6 +56,9 @@ export async function onWindowResized(callback: () => void): Promise<(() => void
     return undefined;
   }
 }
+export const taskbarArtworkAvailable=desktop&&typeof navigator!=='undefined'&&/Windows/i.test(navigator.userAgent);
+export async function loadSystemArtwork(url:string) { return invoke<ArrayBuffer|number[]>('load_system_artwork',{url}); }
+export async function updateTaskbarArtwork(artwork:ArtworkFrame) { if(desktop)await invoke('update_taskbar_artwork',{artwork}); }
 export async function updateSystemMedia(state:SystemMediaState) { if(desktop)await invoke('update_system_media',{snapshot:state}); }
 export async function login(serverUrl: string, name: string, password: string, register: boolean): Promise<{ user: { id: string; name: string } }> {
   cancelChats('SESSION_EXPIRED');
@@ -188,10 +192,10 @@ function replacePlaybackAudio(previous: HTMLAudioElement) {
   audio = next; return next;
 }
 const cloudPlayer = audio ? new CloudPlayer(audio,
-  async (roomId, trackId, track) => loadPlaybackSource(async (refresh=false) => (await browserRequest(`/rooms/${roomId}/music/${trackId}`+(refresh?'?refresh=1':''))).url, desktop, track,
-    ()=>browserAudio(roomId,trackId,track)),
+  async (roomId, trackId, track) => loadPlaybackSource(async (refresh=false) => await browserRequest(`/rooms/${roomId}/music/${trackId}`+(refresh?'?refresh=1':'')), desktop, track,
+    current=>browserAudio(roomId,trackId,current)),
   send, emit, Date.now, replacePlaybackAudio) : null;
-export async function browserAudio(roomId:string,trackId:string,track:TrackMetadata):Promise<ArrayBuffer>{
+export async function browserAudio(roomId:string,trackId:string,track:Pick<TrackMetadata,'sizeBytes'>):Promise<ArrayBuffer>{
  if(!Number.isSafeInteger(track.sizeBytes)||track.sizeBytes<1||track.sizeBytes>100*1024*1024)throw new Error('PLAYBACK_AUDIO_TOO_LARGE');
  let response:Response;
  try{response=await fetch(base+`/api/rooms/${roomId}/music/${trackId}/audio`,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(75000),cache:'no-store'});}
@@ -207,8 +211,6 @@ export async function browserAudio(roomId:string,trackId:string,track:TrackMetad
  }finally{await reader.cancel().catch(()=>{});}
  if(size!==expected)throw new Error('PLAYBACK_AUDIO_INTEGRITY_FAILED');
  const data=await new Blob(parts).arrayBuffer();
- const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',data)),b=>b.toString(16).padStart(2,'0')).join('');
- if(hash!==track.contentHash)throw new Error('PLAYBACK_AUDIO_INTEGRITY_FAILED');
  return data;
 }
 function clearCloud() { cloudPlayer?.clear(); }

@@ -6,7 +6,7 @@
 
 - 本机默认地址 `http://localhost:3000`；生产环境使用 HTTPS / WSS。
 - 除 `/api/health`、`/api/login` 外，业务 HTTP 请求需 `Authorization: Bearer <token>`。
-- JSON 接口使用 `Content-Type: application/json`；不再支持原始音频上传。请求对象严格校验，不接受未声明字段。
+- JSON 接口使用 `Content-Type: application/json`。请求对象严格校验，不接受未声明字段。
 - UUID 字段采用标准 UUID；时间戳和时长均为毫秒；`offset` 从 0 开始。
 - NestJS 默认成功状态：GET/PUT 为 **200**，POST 为 **201**。
 - 错误为 `{"error":"错误码"}`，参数错误还带 `issues:[{path,message}]`。
@@ -116,8 +116,8 @@ members[], playlist[], playback, pending, requests[], serverNow
 
 ## 3. 歌曲：只保存音乐直链
 
-音乐不再上传到 OSS，也不在服务端持久化音频文件。MySQL 保存来源 ID、直链、过期时间和元数据。
-为兼容现有客户端的 SHA-256 缓存校验，首次导入及刷新时会临时读取音频计算哈希/音频参数，读完即丢弃，不写音频文件。
+MySQL 保存音乐来源 ID、直链、过期时间和元数据，音频文件不在服务端持久化。
+导入和续链使用 `song_url_v1` 返回的 `md5`、`size` 与链接，不下载音频或计算哈希。MD5 必须为 32 位十六进制（统一转小写），大小为 1–100 MiB 的整数字节数；缺少或无效元数据时拒绝导入。前端下载后计算 MD5、比对大小，通过后才创建播放 Blob。
 
 ### TrackMetadata
 
@@ -131,14 +131,13 @@ members[], playlist[], playback, pending, requests[], serverNow
 | coverUrl | 可选 HTTPS 封面或 null，最长 2048 |
 | durationMs | 1–86400000 |
 | sizeBytes | 音频字节数；实际下载限制 100 MiB |
-| spec | `{sampleRate,bits,channels}`，整数音频规格 |
+| spec | 可选 `{sampleRate,bits,channels}`；直链 MP3 导入不读取音频推测规格，未取得时省略 |
 | lossless / bitrateBps | boolean；码率 1–20000000；当前在线导入仅支持完整 MP3 |
-| contentHash | 真实音频字节 SHA-256，64 位小写十六进制 |
-| ossKey / ossUrl | 仅旧数据兼容保留，新导入不返回、不使用 OSS 播放 |
+| contentHash | 新歌曲使用上游接口 MD5，32 位小写十六进制；64 位 SHA-256 仅兼容已有记录 |
 
 ### GET /api/music/uploaded
 
-保留旧路径兼容客户端，但现在返回**音乐库**，不再读取 OSS 上传索引。
+返回共享音乐库的歌曲来源记录。
 query：keywords 默认空、最长 100；offset 默认 0、范围 0–1000000；limit 默认 20、范围 1–100。
 返回 `{"songs":[{id,neteaseId,name,artists,album,coverUrl,canAdd,durationMs,sizeBytes}],"total":6}`。
 id 为内容哈希，不是队列 UUID；按内容去重，所有登录用户共享音乐库，每分钟 60 次。
@@ -146,14 +145,13 @@ id 为内容哈希，不是队列 UUID；按内容去重，所有登录用户共
 
 ### POST /api/music/upload
 
-路径保留，语义改为**登记歌曲链接**，不自动加入房间：
+登记歌曲链接，不自动加入房间：
 
 ```json
 {"songId":"123"}
 ```
 
 返回 `{track:TrackMetadata}`。每用户每分钟 10 次；仅接受 songId，不接受客户端提供的任意外部 URL。
-原 `application/octet-stream` 上传明确返回 **410 / LOCAL_UPLOAD_NOT_SUPPORTED**，X-Music-Filename 不再使用。
 
 ### POST /api/rooms/:id/music/netease
 
@@ -165,9 +163,9 @@ body：`{"songId":"123","requestId":"UUID"}`。
 
 ### POST /api/rooms/:id/music/uploaded
 
-保留旧路径，改为从音乐库按内容哈希查找稳定歌曲 ID，再复用/刷新音乐链接入队。
-body：`{"hash":"64位小写SHA-256","requestId":"UUID"}`，返回 `{ok:true,track}`，track.id 为新队列 UUID。
-权限和限流同上；不存在可续期来源时返回 TRACK_NOT_FOUND，不访问 OSS。
+从音乐库按内容哈希查找稳定歌曲 ID，再复用/刷新音乐链接入队。
+body：`{"hash":"32位小写MD5（也接受已有记录的64位SHA-256）","requestId":"UUID"}`，返回 `{ok:true,track}`，track.id 为新队列 UUID。
+权限和限流同上；不存在可续期来源时返回 TRACK_NOT_FOUND。
 
 ### POST /api/rooms/:id/music/play
 
@@ -176,11 +174,11 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 
 ### GET /api/rooms/:id/music/:trackId?refresh=0
 
-需当前在线成员，返回 `{url}`，`Cache-Control: private, no-store`；每用户每分钟 60 次。
+需当前在线成员，返回 `{url,contentHash,sizeBytes}`（同一次取链的 MD5 和大小），`Cache-Control: private, no-store`；每用户每分钟 60 次。
 - 已保存链接距离过期不足 30 秒时，按稳定歌曲 ID 重新取链，成功后更新数据库。
-- `refresh=1` 强制重新获取，供桌面端发现链接提前失效时调用。
-- 桌面端下载失败最多强制取链重试一次；再次失败直接报错，不无限循环。
-- 刷新后的音频哈希或长度变化时返回 MUSIC_CONTENT_CHANGED，需重新添加歌曲，不降低缓存完整性验证。
+- `refresh=1` 强制重新获取，供客户端发现链接提前失效或 MD5/大小不一致时调用。
+- 桌面及 Web 客户端下载失败或校验不一致时，自动强制取链、采用配套 MD5/大小并重新下载校验一次，成功后继续播放；重试失败才报错，不无限循环。
+- 同一稳定歌曲 ID 刷新后的 MD5 或长度变化时，返回新的元数据用于校验和缓存，不沿用旧摘要，不要求手动重新添加，也不修改队列 UUID、状态版本或播放时间轴。
 
 ### GET /api/rooms/:id/music/:trackId/metadata
 
@@ -193,7 +191,7 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 ### GET /api/rooms/:id/music/:trackId/audio
 
 网页端返回 `application/octet-stream` 原始音频，`Cache-Control: private, no-store`。
-服务端代理当前网易云链接，遇到 HTTP 401/403/404/410 时最多刷新并重试一次；校验字节数和哈希，读取前后检查成员身份。
+服务端代理当前网易云链接，遇到 HTTP 401/403/404/410 时最多刷新并重试一次；限制总大小、超时和重定向，读取前后检查成员身份，不计算音频哈希。前端按歌曲元数据校验大小与 MD5。
 单次最多 100 MiB，每用户每分钟 30 次，进程最多两个不同下载任务。所有重定向逐跳校验允许域名，不接受本机、私网或任意 URL。
 需要管理员网易云登录状态仍有效；被下架、无权限或仅试听的歌曲不会因重试而绕过限制。
 
@@ -205,16 +203,17 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 相似推荐：`GET /api/netease/simi_song?id=歌曲网易云ID&limit=12&offset=0`，返回上游 `songs` 列表。id 必须为 1–20 位数字，limit 为 1–100，offset 为 0–100000 的整数。客户端根据当前播放加载，过滤当前歌曲、重复结果和队列已有歌曲；点选后通过既有音乐添加接口入队，不自动播放。此功能需要同步更新服务端白名单。
 仅转发白名单参数，禁止注入 Cookie、代理和地址。详情见 [NETEASE.md](NETEASE.md)、[MUSIC-SEARCH.md](MUSIC-SEARCH.md)。
 
-管理员扫码页面与普通用户鉴权独立：
+管理员网易云登录页面与普通用户鉴权独立（不改变客户端用户名登录）：
 
 | 方法 / 路径 | body / 返回 |
 |---|---|
-| GET /loginServe | HTML 扫码管理页 |
+| GET /loginServe | HTML 管理页，支持二维码、手机号密码和邮箱密码登录 |
 | POST /loginServe/qr | 返回 `{sessionId,image,expiresAt}` |
 | POST /loginServe/check | `{sessionId}`，返回 `{code:800/801/802/803}` |
+| POST /loginServe/password | 手机号：`{type:"phone",phone,countrycode?:"86",password}`；邮箱：`{type:"email",email,password}`。成功返回 `{code:200}` |
 
 配置 NETEASE_ADMIN_TOKEN 时使用 HTTP Basic，用户名 admin、密码为该本地配置值；未配置时只允许直接本机访问。
-POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。
+POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。密码登录每来源每分钟最多 5 次，全局每分钟最多 10 次。手机号为 5–20 位数字，国家区号为 1–4 位数字（不含 +，默认 86），邮箱不超过 254 字符，密码 1–128 字符，拒绝额外字段。密码仅用于本次上游请求，不持久化。失败不覆盖旧凭据；新登录请求使旧二维码/密码请求结果失效。账号密码错误返回 INVALID_CREDENTIALS；上游风控或安全验证返回 NETEASE_LOGIN_REJECTED，需改用二维码；上游不可用返回 NETEASE_UNAVAILABLE。不提供短信验证码发送或交互式风控验证。
 
 ## 5. WebSocket /ws
 
@@ -223,7 +222,7 @@ POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。
 每账号只保留一条控制连接。房间的队列/权限操作通过：
 
 ```json
-{"type":"command","data":{"commandId":"UUID","roomId":"UUID","expectedStateVersion":3,"action":{"type":"enqueue","payload":{"id":"UUID","name":"歌曲","durationMs":120000,"sizeBytes":4096,"spec":{"sampleRate":44100,"bits":16,"channels":2},"lossless":false,"bitrateBps":128000,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}
+{"type":"command","data":{"commandId":"UUID","roomId":"UUID","expectedStateVersion":3,"action":{"type":"enqueue","payload":{"id":"UUID","name":"歌曲","durationMs":120000,"sizeBytes":4096,"spec":{"sampleRate":44100,"bits":16,"channels":2},"lossless":false,"bitrateBps":128000,"contentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}}
 ```
 
 成功：`{type:'result',commandId,ok:true,stateVersion}`；失败：`{type:'result',commandId,ok:false,error}`，状态冲突还推送快照。
@@ -231,7 +230,7 @@ POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。
 支持 action：enqueue、remove、reorder、clear、play、instant、next、previous、pause、resume、stop、seek、quality、defaults、permission。
 负载结构以 `packages/shared/src/index.ts` 的 commandSchema 为准。
 聊天消息 `{type:'chat',roomId,requestId,text}`，text 1–500 字符；返回 chat-result/chat-error，房内广播 chat；最近 100 条仅存内存。
-时钟、信令、ready、直播和带宽租约见 [PROTOCOL.md](PROTOCOL.md)。
+时钟、ready 和音源加载见 [PROTOCOL.md](PROTOCOL.md)。
 
 ## 6. 健康检查和错误
 
@@ -244,14 +243,14 @@ POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。
 | 403 | HOST_ONLY、FORBIDDEN、NETEASE_LOGIN_ORIGIN_FORBIDDEN |
 | 429 | RATE_LIMITED |
 | 410 | LOCAL_UPLOAD_NOT_SUPPORTED |
-| 400 | MUSIC_LINK_EXPIRED、MUSIC_SOURCE_UNREFRESHABLE、MUSIC_CONTENT_CHANGED、MUSIC_DOWNLOAD_FAILED |
+| 400 | MUSIC_LINK_EXPIRED、MUSIC_SOURCE_UNREFRESHABLE、MUSIC_DOWNLOAD_FAILED |
 | 503 | DATABASE_UNAVAILABLE |
 
 其他领域错误通常为 400。STATE_CONFLICT 后获取最新快照，重新确认用户意图再提交，不要无限重试。
 
 ## 7. 数据持久化边界
 
-MySQL 保存账号、房间设置/房主/权限、歌曲直链/过期时间/来源和详情、历史上传索引、网易云登录配置、房间队列及顺序。
+MySQL 保存账号、房间设置/房主/权限、歌曲直链/过期时间/来源和详情、网易云登录配置、房间队列及顺序。
 在线成员、正在播放的时间轴、pending、聊天、临时权限请求、命令去重均为进程态；重启后播放停止，客户端重新 join。
 旧 SQLite 从未保存的队列/历史不能凭空恢复。该版本仍要求**单服务实例**，不能仅靠 MySQL 横向扩容。
 
@@ -264,4 +263,4 @@ MySQL 保存账号、房间设置/房主/权限、歌曲直链/过期时间/来�
 
 失败码：`PLAYLIST_LINK_IS_ALBUM`（专辑链接，不是歌单）、`PLAYLIST_LINK_INVALID`（输入或目标不是受支持歌单）、`PLAYLIST_LINK_RESOLVE_FAILED`（超时/不可用/非 HTTP 重定向）、`PLAYLIST_LINK_REDIRECT_LIMIT`（循环/超出跳转限制）；其他鉴权和限流错误沿用通用格式。
 
-排查部署：新版解析接口在未认证时应返回 HTTP 401 JSON；若 POST 路径返回 HTTP 404，需更新服务端或检查 `/api/` 代理转发。前端对此单独显示“短链接解析接口不存在”，不再与上游 301/302 跳转失败混为一谈。
+排查部署：新版解析接口在未认证时应返回 HTTP 401 JSON；若 POST 路径返回 HTTP 404，需更新服务端或检查 `/api/` 代理转发。前端对此单独显示“短链接解析接口不存在”，与上游 301/302 跳转失败分别反馈。

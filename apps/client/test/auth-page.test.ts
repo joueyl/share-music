@@ -9,17 +9,18 @@ vi.mock('vue-router', () => ({ useRouter: () => ({ replace: fixture.route }) }))
 const settle = async () => { for (let i = 0; i < 8; i++) { await Promise.resolve(); await nextTick(); } };
 let mounted: ReturnType<typeof renderer.createApp> | undefined;
 async function mount() { const root = node('root'); mounted = renderer.createApp(AuthPage); mounted.mount(root); await settle(); return root; }
-const button = (root: any, label: string) => all(root).find(n => n.type === 'button' && text(n) === label);
+const visibleText = (n: any): string => n.type === 'comment' ? '' : n.text + n.children.map(visibleText).join('');
+const button = (root: any, label: string) => all(root).find(n => n.type === 'button' && visibleText(n).trim() === label);
 const field = (root: any, placeholder: string) => all(root).find(n => n.type === 'input' && n.props.placeholder === placeholder);
 beforeEach(() => {
- vi.stubGlobal('Document', class {}); vi.stubGlobal('ShadowRoot', class {});
+ vi.stubGlobal('document', {getElementById: () => null}); vi.stubGlobal('Document', class {}); vi.stubGlobal('ShadowRoot', class {});
  fixture.remember.mockReset().mockResolvedValue(false); fixture.clear.mockReset();
  fixture.app = reactive({ user: null, busy: false, notice: '', initialize: vi.fn().mockResolvedValue(undefined), restoreLogin: vi.fn().mockResolvedValue(null), login: vi.fn().mockResolvedValue(undefined), error: vi.fn() });
 });
 afterEach(() => { mounted?.unmount(); vi.unstubAllGlobals(); });
-it('renders the Brilliant login composition, real form and exported turntable', async () => {
- const root = await mount(); expect(text(root)).toContain('有人和你，听见同一秒。'); expect(text(root)).toContain('欢迎回到同频');
- expect(all(root).find(n => n.type === 'img').props.src).toContain('login-turntable.svg');
+it('renders the brand login composition and real form', async () => {
+ const root = await mount(); expect(text(root)).toContain('在这里 我们一起听'); expect(text(root)).toContain('欢迎回到同频');
+ expect(all(root).find(n => n.type === 'svg' && n.props['aria-label'] === '同频 Logo')).toBeTruthy();
  expect(button(root, '登录，一起听')).toBeTruthy(); expect(field(root, '请输入密码').props.minlength).toBe('10');
  const checkbox = all(root).find(n => n.type === 'input' && n.props.type === 'checkbox'); expect(checkbox.props.disabled).toBe(true);
 });
@@ -30,7 +31,7 @@ it('toggles password visibility without changing credentials and explains unsupp
  button(root, '忘记密码').props.onClick(); expect(fixture.app.notice).toContain('暂不支持');
 });
 it('validates confirmation locally, then sends the existing username/password API contract', async () => {
- const root = await mount(); button(root, '注册').props.onClick(); await settle();
+ const root = await mount(); button(root, '立即注册').props.onClick(); await settle();
  expect(text(root)).toContain('注册，遇见同频的人');
  field(root, '请输入用户名').props['onUpdate:modelValue']('listener'); field(root, '10–128 位密码').props['onUpdate:modelValue']('password-123');
  const confirm = field(root, '请再次输入密码'); confirm.props['onUpdate:modelValue']('different-123'); await settle();

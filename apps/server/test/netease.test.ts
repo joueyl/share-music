@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Database } from '../src/database';
 import { NeteaseService, type MusicInvoker } from '../src/netease';
-import { adminAllowed, loginOriginAllowed } from '../src/netease.controller';
+import { adminAllowed, loginOriginAllowed, neteasePasswordSchema } from '../src/netease.controller';
+
+it('validates password login variants without accepting credential/network overrides',()=>{
+ expect(neteasePasswordSchema.parse({type:'phone',phone:' 13800138000 ',password:'test'})).toEqual({type:'phone',phone:'13800138000',countrycode:'86',password:'test'});
+ for(const input of [{type:'email',email:'bad',password:'test'},{type:'phone',phone:'abc',password:'test'},{type:'phone',phone:'13800138000',countrycode:'+86',password:'test'},{type:'email',email:'test@example.com',password:''},{type:'email',email:'test@example.com',password:'test',cookie:'injected'}])expect(neteasePasswordSchema.safeParse(input).success).toBe(false);
+});
 
 function fixture() {
  const db = new Database(':memory:'); let now=10000, code=801, cookie='MUSIC_U=first; __csrf=test';
@@ -118,4 +123,46 @@ it('does not trust protocol headers from arbitrary peers or accept cross-site/nu
  for(const origin of ['null','https://evil.example.com','https://music.example.com.evil:8443','https://user:pass@music.example.com:8443','https://music.example.com:8443/path'])expect(loginOriginAllowed(originReq(origin),'https://music.example.com:8443')).toBe(false);
  const req=originReq('https://music.example.com:8443');req.headers['sec-fetch-site']='cross-site';expect(loginOriginAllowed(req,'https://music.example.com:8443')).toBe(false);
  expect(loginOriginAllowed(originReq(undefined),'')).toBe(true);
+});
+
+it('logs in with phone/email passwords, replaces stored credentials and returns only status',async()=>{
+ const f=fixture();try{
+  f.db.setSetting('netease.cookie','MUSIC_U=old');
+  for(const input of [{type:'phone',phone:'13800138000',countrycode:'86',password:'test-password'},{type:'email',email:'test@example.com',password:'test-password'}] as const){
+   f.api.mockResolvedValueOnce({body:{code:200,cookie:'MUSIC_U=new; __csrf=test'}});
+   expect(await f.service.passwordLogin(input)).toEqual({code:200});
+   expect(f.api.mock.calls.at(-1)?.[0]).toBe(input.type==='phone'?'login_cellphone':'login');
+   expect(f.api.mock.calls.at(-1)?.[1]).toMatchObject({password:'test-password',...(input.type==='phone'?{phone:input.phone,countrycode:'86'}:{email:input.email})});
+   expect(f.api.mock.calls.at(-1)?.[1]).not.toHaveProperty('type');
+   expect(f.db.getSetting('netease.cookie')).toBe('MUSIC_U=new; __csrf=test');
+  }
+ }finally{f.db.close();}
+});
+it('does not replace saved credentials on rejected, malformed or unavailable password logins',async()=>{
+ const f=fixture();try{
+  f.db.setSetting('netease.cookie','MUSIC_U=old');
+  const input={type:'email',email:'test@example.com',password:'test-password'} as const;
+  for(const [result,error] of [[{code:502},'INVALID_CREDENTIALS'],[{code:405},'NETEASE_LOGIN_REJECTED'],[{code:200,cookie:'invalid'},'NETEASE_INVALID_RESPONSE']] as const){
+   f.api.mockResolvedValueOnce({body:result});await expect(f.service.passwordLogin(input)).rejects.toThrow(error);
+   expect(f.db.getSetting('netease.cookie')).toBe('MUSIC_U=old');
+  }
+  f.api.mockRejectedValueOnce(new Error('private upstream response'));
+  await expect(f.service.passwordLogin(input)).rejects.toThrow(/^NETEASE_UNAVAILABLE$/);
+  expect(f.db.getSetting('netease.cookie')).toBe('MUSIC_U=old');
+  for(const method of ['login','login_cellphone'])await expect(f.service.call(method,{})).rejects.toThrow('NETEASE_METHOD_NOT_ALLOWED');
+ }finally{f.db.close();}
+});
+it('invalidates in-flight QR and password results when a newer login starts',async()=>{
+ const f=fixture();try{
+  const qr=await f.service.begin();let finishQR!: (value:any)=>void;
+  f.api.mockImplementationOnce(()=>new Promise(r=>finishQR=r));const poll=f.service.check(qr.sessionId);
+  f.api.mockResolvedValueOnce({body:{code:200,cookie:'MUSIC_U=password'}});
+  await f.service.passwordLogin({type:'phone',phone:'13800138000',countrycode:'86',password:'test'});
+  finishQR({body:{code:803,cookie:'MUSIC_U=stale-qr'}});await expect(poll).rejects.toThrow('NETEASE_LOGIN_REPLACED');
+  let finishPassword!: (value:any)=>void;
+  f.api.mockImplementationOnce(()=>new Promise(r=>finishPassword=r));const pending=f.service.passwordLogin({type:'email',email:'test@example.com',password:'test'});
+  await f.service.begin();finishPassword({body:{code:200,cookie:'MUSIC_U=stale-password'}});
+  await expect(pending).rejects.toThrow('NETEASE_LOGIN_REPLACED');
+  expect(f.db.getSetting('netease.cookie')).toBe('MUSIC_U=password');
+ }finally{f.db.close();}
 });

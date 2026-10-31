@@ -82,6 +82,27 @@ pub fn update(snapshot: Snapshot) {
         }
     });
 }
+pub fn update_artwork(artwork: super::artwork::ArtworkFrame) {
+    #[cfg(target_os = "windows")]
+    RUNTIME.with(|slot| {
+        let Ok(mut slot) = slot.try_borrow_mut() else {
+            return;
+        };
+        if let Some(runtime) = slot.as_mut() {
+            let matches = runtime
+                .snapshot
+                .lock()
+                .is_ok_and(|state| artwork.matches(&state));
+            if matches {
+                if let Some(taskbar) = runtime.taskbar.as_mut() {
+                    taskbar.set_artwork(artwork);
+                }
+            }
+        }
+    });
+    #[cfg(not(target_os = "windows"))]
+    let _ = artwork;
+}
 pub fn shutdown() {
     RUNTIME.with(|slot| {
         slot.borrow_mut().take();
@@ -96,9 +117,24 @@ fn refresh_taskbar() {
         if let Some(runtime) = slot.as_mut() {
             if let Some(taskbar) = runtime.taskbar.as_mut() {
                 taskbar.created();
-                if let Ok(state) = runtime.snapshot.lock() {
+                let state = runtime.snapshot.lock().ok().map(|state| state.clone());
+                if let Some(state) = state {
                     taskbar.update(&state);
                 }
+            }
+        }
+    });
+}
+#[cfg(target_os = "windows")]
+fn sync_taskbar() {
+    RUNTIME.with(|slot| {
+        let Ok(mut slot) = slot.try_borrow_mut() else {
+            return;
+        };
+        if let Some(runtime) = slot.as_mut() {
+            let state = runtime.snapshot.lock().ok().map(|state| state.clone());
+            if let (Some(taskbar), Some(state)) = (runtime.taskbar.as_mut(), state) {
+                taskbar.update(&state);
             }
         }
     });

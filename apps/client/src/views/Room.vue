@@ -205,6 +205,7 @@ async function invite() {
               </div>
             </div>
           </template>
+          <span v-if="app.room.pending || app.media.status !== 'playing'" class="stage-audio-status" role="status">{{ app.room.pending?'正在准备同步…':app.media.detail||'等待音乐开始' }}</span>
         </section>
         <!-- 相似推荐已按需求隐藏 -->
         <!-- <SimilarRecommendations :key="app.room.id" /> -->

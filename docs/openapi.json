@@ -3,7 +3,7 @@
   "info": {
     "title": "同频 TONE API",
     "version": "0.2.2-mysql",
-    "description": "MySQL-backed server. Registration and login use username and password only. WebSocket protocol is documented separately in docs/API.md and docs/PROTOCOL.md. Music is stored as direct provider URLs and expiry timestamps; no OSS upload. See docs/API.md for bounded refresh, 100 MiB integrity verification and local-file limitations."
+    "description": "MySQL-backed server. Registration and login use username and password only. WebSocket protocol is documented separately in docs/API.md and docs/PROTOCOL.md. Music is stored as direct provider URLs and expiry timestamps. See docs/API.md for bounded refresh, 100 MiB bounded downloads and client-side MD5 verification."
   },
   "servers": [
     {
@@ -1246,7 +1246,7 @@
                 "properties": {
                   "hash": {
                     "type": "string",
-                    "pattern": "^[a-f0-9]{64}$"
+                    "pattern": "^(?:[a-f0-9]{32}|[a-f0-9]{64})$"
                   },
                   "requestId": {
                     "type": "string",
@@ -1412,10 +1412,22 @@
                     "url": {
                       "type": "string",
                       "format": "uri"
+                    },
+                    "contentHash": {
+                      "type": "string",
+                      "pattern": "^[a-f0-9]{32}$",
+                      "description": "Provider MD5 paired with this URL"
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "maximum": 104857600
                     }
                   },
                   "required": [
-                    "url"
+                    "url",
+                    "contentHash",
+                    "sizeBytes"
                   ],
                   "additionalProperties": false
                 }
@@ -1504,7 +1516,7 @@
               ],
               "default": "0"
             },
-            "description": "Force refresh after an early link failure; callers retry at most once."
+            "description": "Force refresh after download failure or MD5/size mismatch; return fresh URL and matching checksum/size; callers retry at most once."
           }
         ]
       }
@@ -1723,7 +1735,7 @@
     },
     "/api/rooms/{id}/music/{trackId}/audio": {
       "get": {
-        "summary": "经过成员身份与哈希检查的原始音频",
+        "summary": "经过成员身份检查的原始音频，由前端校验 MD5",
         "operationId": "get_api_rooms_id_music_trackId_audio",
         "tags": [
           "歌曲"
@@ -2017,7 +2029,7 @@
     },
     "/loginServe": {
       "get": {
-        "summary": "管理员网易云扫码登录（独立 Basic 鉴权）",
+        "summary": "管理员网易云登录：二维码、手机号或邮箱（独立 Basic 鉴权）",
         "operationId": "get_loginServe",
         "tags": [
           "管理"
@@ -2335,6 +2347,166 @@
           }
         }
       }
+    },
+    "/loginServe/password": {
+      "post": {
+        "summary": "管理员网易云手机号/邮箱密码登录",
+        "operationId": "post_loginServe_password",
+        "tags": [
+          "管理"
+        ],
+        "security": [
+          {
+            "adminBasic": []
+          }
+        ],
+        "description": "Same-origin POST; 5 attempts per source per minute and 10 globally. Only confirmed login saves the global server cookie. Password is not persisted. Upstream security challenges require QR login.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "phone"
+                        ]
+                      },
+                      "password": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "writeOnly": true
+                      },
+                      "phone": {
+                        "type": "string",
+                        "pattern": "^\\d{5,20}$"
+                      },
+                      "countrycode": {
+                        "type": "string",
+                        "pattern": "^\\d{1,4}$",
+                        "default": "86"
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "phone",
+                      "password"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "email"
+                        ]
+                      },
+                      "password": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "writeOnly": true
+                      },
+                      "email": {
+                        "type": "string",
+                        "format": "email",
+                        "maxLength": 254
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "email",
+                      "password"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "凭据已保存，不返回 Cookie/token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "integer",
+                      "enum": [
+                        200
+                      ]
+                    }
+                  },
+                  "required": [
+                    "code"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2508,7 +2680,7 @@
           },
           "contentHash": {
             "type": "string",
-            "pattern": "^[a-f0-9]{64}$"
+            "pattern": "^(?:[a-f0-9]{32}|[a-f0-9]{64})$"
           },
           "sourceUrl": {
             "type": "string",
@@ -2529,7 +2701,6 @@
           "name",
           "durationMs",
           "sizeBytes",
-          "spec",
           "lossless",
           "bitrateBps",
           "contentHash"
@@ -2602,7 +2773,7 @@
           },
           "contentHash": {
             "type": "string",
-            "pattern": "^[a-f0-9]{64}$"
+            "pattern": "^(?:[a-f0-9]{32}|[a-f0-9]{64})$"
           },
           "providerId": {
             "type": "string",
@@ -2630,7 +2801,6 @@
           "name",
           "durationMs",
           "sizeBytes",
-          "spec",
           "lossless",
           "bitrateBps",
           "contentHash",
@@ -2872,7 +3042,7 @@
               "properties": {
                 "id": {
                   "type": "string",
-                  "description": "SHA-256, not queue UUID"
+                  "description": "Provider MD5 (32 hex); existing SHA-256 (64 hex) accepted; not queue UUID"
                 },
                 "name": {
                   "type": "string"
