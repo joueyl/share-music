@@ -108,7 +108,7 @@ function add(){searchAfterClose=true;close();}
  .queue-scroll::-webkit-scrollbar-track{background:transparent;margin-block:6px}
  .queue-scroll::-webkit-scrollbar-thumb{background:var(--queue-scroll-thumb);border:2px solid transparent;border-radius:999px;background-clip:padding-box;min-height:32px}
  .queue-scroll::-webkit-scrollbar-thumb:hover{background-color:#7899c3}
- .queue-scroll::-webkit-scrollbar-thumb:active{background-color:#4f80db}
+ .queue-scroll::-webkit-scrollbar-thumb:active{background-color:#5dbb00}
  .queue-scroll::-webkit-scrollbar-button{display:none;width:0;height:0}
  .queue-scroll::-webkit-scrollbar-corner{background:transparent}
 }
@@ -119,7 +119,7 @@ function add(){searchAfterClose=true;close();}
 .queue-row{min-height:54px;padding:6px 4px;gap:8px;border:1px solid transparent}
 .queue-row .album-art{width:36px;height:36px}
 .queue-track small{margin-top:4px}
-.queue-row.is-playing{background:#eaf1fc}
+.queue-row.is-playing{background:#eef8e5}
 .queue-row.is-playing .queue-track strong,.queue-playing-icon{color:var(--accent)}
 .queue-playing-icon{margin:0 8px}
 .queue-drag-handle{display:grid;place-items:center;width:26px;min-width:26px;height:36px;padding:0;background:transparent;color:#9cacbf;touch-action:none;cursor:grab;user-select:none}

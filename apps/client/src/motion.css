@@ -53,3 +53,13 @@ input[type=checkbox]:not(:disabled):active{transform:scale(.9)}
 .drawer-leave-active{pointer-events:none}
 @media(max-width:600px){.drawer-enter-from>.queue-drawer,.drawer-leave-to>.queue-drawer{transform:translateY(24px)}}
 @media(prefers-reduced-motion:reduce){.drawer-enter-from>.queue-drawer,.drawer-leave-to>.queue-drawer{transform:none}}
+
+/* Room immersive slide transitions (Apple Music / NetEase style) */
+.room-slide-up-enter-active { transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s ease; z-index: 25; }
+.room-slide-up-enter-from { transform: translateY(100%); opacity: 0.92; }
+.room-slide-up-leave-active { transition: opacity 0.2s ease, transform 0.25s ease; }
+.room-slide-up-leave-to { opacity: 0; transform: scale(0.97); }
+.room-slide-down-enter-active { transition: opacity 0.25s ease, transform 0.25s ease; }
+.room-slide-down-enter-from { opacity: 0; transform: scale(0.97); }
+.room-slide-down-leave-active { transition: transform 0.35s cubic-bezier(0.3, 0, 0.8, 0.15), opacity 0.2s ease; z-index: 25; }
+.room-slide-down-leave-to { transform: translateY(100%); opacity: 0.9; }

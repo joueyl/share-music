@@ -49,7 +49,7 @@ mod desktop {
         // Tauri retains the icon in its resource table for the application's lifetime.
         TrayIconBuilder::with_id("music-share-tray")
             .icon(icon)
-            .tooltip("共鸣 Music Share · 右键退出")
+            .tooltip("同频 · TONE")
             .menu(&menu)
             .show_menu_on_left_click(false)
             .on_menu_event(|app, event| match event.id.as_ref() {
