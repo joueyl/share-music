@@ -105,7 +105,7 @@ mod desktop {
     }
     #[tauri::command]
     fn media_capabilities() -> Value {
-        json!({"native":false,"capture":false,"reason":"HTML Audio · Windows WebView2 · WebSocket 同步"})
+        json!({"native":false,"capture":false,"platform":std::env::consts::OS,"arch":std::env::consts::ARCH,"reason":"HTML Audio · 系统 WebView · WebSocket 同步"})
     }
     // Authentication and control sockets belong exclusively to the WebView now.
     #[tauri::command]

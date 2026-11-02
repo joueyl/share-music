@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { configureRuntimeProfile, getRuntimeProfile } from './runtime-profile';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { apiResponse } from './api-response';
 import { CloudPlayer } from './cloud-player';
@@ -194,10 +195,13 @@ export async function importFile(): Promise<TrackMetadata> {
  throw new Error('本地文件云上传已停用，请从音乐搜索或音乐库添加歌曲');
 }
 export async function setVolume(volume: number) { if (audio) audio.volume=volume; }
-export async function capabilities(): Promise<{ native: boolean; reason: string; capture: boolean }> { return desktop ? invoke('media_capabilities') : { native: false, capture: false, reason: '音乐直链播放与 WebSocket 同步' }; }
+export async function capabilities(): Promise<{ native: boolean; reason: string; capture: boolean }> {
+ const cap=desktop?await invoke<{native:boolean;reason:string;capture:boolean;platform?:string;arch?:string}>('media_capabilities'):{native:false,capture:false,reason:'音乐直链播放与 WebSocket 同步',platform:undefined,arch:undefined};
+ configureRuntimeProfile(cap.platform,cap.arch);return cap;
+}
 
 let audio = typeof Audio === 'undefined' ? null : new Audio();
-export function createPlaybackWaveform() { return audio ? new AudioWaveform(() => audio) : null; }
+export function createPlaybackWaveform() { return audio&&getRuntimeProfile().audioAnalysis ? new AudioWaveform(() => audio) : null; }
 function replacePlaybackAudio(previous: HTMLAudioElement) {
   const next = new Audio(); next.volume = previous.volume; next.muted = previous.muted; next.playbackRate = previous.playbackRate;
   releaseWaveformAudio(previous); previous.removeAttribute('src'); previous.load();

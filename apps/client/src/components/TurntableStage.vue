@@ -2,11 +2,13 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as THREE from 'three';
 import { useCachedActivity } from '../useCachedActivity';
+import { createStageFrameLimiter, getRuntimeProfile } from '../runtime-profile';
 import { createStageArtworkLoader } from '../stage-artwork';
 import { loadStageArtwork } from '../bridge';
-import { createStageViewport, STAGE_RENDERER_OPTIONS } from '../stage-viewport';
+import { createStageViewport, stageRendererOptions } from '../stage-viewport';
 import { createStagePostprocessing } from '../stage-postprocessing';
 import { createStageEnvironment } from '../stage-environment';
+import { applyPlinthFinish } from '../stage-materials';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RotateCcw } from 'lucide-vue-next';
@@ -178,9 +180,7 @@ function updateMaterials() {
   const pColor = TURNTABLE_PLINTH_COLORS[stageTheme.turntable.plinthColor] || TURNTABLE_PLINTH_COLORS.white;
   if (plinthMesh && plinthMesh.material) {
     const mat = plinthMesh.material as THREE.MeshStandardMaterial;
-    mat.color.set(pColor.color);
-    mat.roughness = pColor.roughness;
-    mat.needsUpdate = true;
+    applyPlinthFinish(mat,pColor);
   }
 }
 
@@ -254,7 +254,7 @@ onMounted(() => {
   camera = new THREE.PerspectiveCamera(35, w / h, 0.1, 100);
 
   // Renderer: 100% transparent background to blend seamlessly with room
-  renderer = new THREE.WebGLRenderer(STAGE_RENDERER_OPTIONS);
+  renderer = new THREE.WebGLRenderer(stageRendererOptions());
   renderer.setClearColor(0x000000, 0);
   renderer.toneMappingExposure = 1.12;
   renderer.shadowMap.enabled = true;
@@ -282,8 +282,8 @@ onMounted(() => {
   const keyLight = new THREE.DirectionalLight(0xfffefb, 1.85);
   keyLight.position.set(-2.5, 4.6, 2.8);
   keyLight.castShadow = true;
-  keyLight.shadow.mapSize.width = 2048;
-  keyLight.shadow.mapSize.height = 2048;
+  keyLight.shadow.mapSize.width = getRuntimeProfile().shadowSize;
+  keyLight.shadow.mapSize.height = getRuntimeProfile().shadowSize;
   keyLight.shadow.bias = -0.0001;
   keyLight.shadow.radius = 3;
   scene.add(keyLight);
@@ -402,10 +402,12 @@ onMounted(() => {
 
   // Animation Loop
   const clock = new THREE.Clock();
+  const frameLimiter=createStageFrameLimiter();
 
   function animate() {
     animId=0;if(!stageActive.value)return;
     animId = requestAnimationFrame(animate);
+    if(!frameLimiter.ready(performance.now()))return;
     viewport.sync();
     const delta = Math.min(clock.getDelta(), 0.05);
 
@@ -457,7 +459,7 @@ onMounted(() => {
   }
 
   pauseStage=()=>{cancelAnimationFrame(animId);animId=0;clock.stop();};
-  resumeStage=()=>{if(animId||!stageActive.value)return;const elapsed=clock.elapsedTime;clock.start();clock.elapsedTime=elapsed;viewport.sync();updateCameraFraming();drawDynamicLabel();animate();};
+  resumeStage=()=>{if(animId||!stageActive.value)return;const elapsed=clock.elapsedTime;clock.start();clock.elapsedTime=elapsed;frameLimiter.reset();viewport.sync();updateCameraFraming();drawDynamicLabel();animate();};
   resumeStage();
 
   onUnmounted(() => {

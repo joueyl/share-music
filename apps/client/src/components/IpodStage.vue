@@ -2,9 +2,10 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as THREE from 'three';
 import { useCachedActivity } from '../useCachedActivity';
+import { createStageFrameLimiter, getRuntimeProfile } from '../runtime-profile';
 import { createStageArtworkLoader } from '../stage-artwork';
 import { loadStageArtwork } from '../bridge';
-import { createStageViewport, STAGE_RENDERER_OPTIONS } from '../stage-viewport';
+import { createStageViewport, stageRendererOptions } from '../stage-viewport';
 import { createStagePostprocessing } from '../stage-postprocessing';
 import { createStageEnvironment } from '../stage-environment';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -441,7 +442,7 @@ onMounted(() => {
   // 相机距离优化为 2.78：保持 iPod 优雅完整呈现，同时放大屏幕显示比例，显著提高屏幕文字物理像素
   camera.position.set(0, 0.01, 2.78);
 
-  renderer = new THREE.WebGLRenderer(STAGE_RENDERER_OPTIONS);
+  renderer = new THREE.WebGLRenderer(stageRendererOptions());
   renderer.toneMappingExposure = 1.15;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
@@ -469,8 +470,8 @@ onMounted(() => {
   const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
   keyLight.position.set(-2.5, 4.0, 3.0);
   keyLight.castShadow = true;
-  keyLight.shadow.mapSize.width = 2048;
-  keyLight.shadow.mapSize.height = 2048;
+  keyLight.shadow.mapSize.width = getRuntimeProfile().shadowSize;
+  keyLight.shadow.mapSize.height = getRuntimeProfile().shadowSize;
   keyLight.shadow.bias = -0.0001;
   scene.add(keyLight);
 
@@ -596,10 +597,12 @@ onMounted(() => {
 
   // 渲染循环
   const clock = new THREE.Clock();
+  const frameLimiter=createStageFrameLimiter();
 
   function animate() {
     animId=0;if(!stageActive.value)return;
     animId = requestAnimationFrame(animate);
+    if(!frameLimiter.ready(performance.now()))return;
     viewport.sync();
     const delta = Math.min(clock.getDelta(), 0.05);
     const elapsedTime = clock.elapsedTime;
@@ -649,7 +652,7 @@ onMounted(() => {
   pauseStage=()=>{cancelAnimationFrame(animId);animId=0;clearInterval(progressTimer);progressTimer=0;clock.stop();};
   resumeStage=()=>{
     if(animId||!stageActive.value)return;
-    const elapsed=clock.elapsedTime;clock.start();clock.elapsedTime=elapsed;
+    const elapsed=clock.elapsedTime;clock.start();clock.elapsedTime=elapsed;frameLimiter.reset();
     viewport.sync();drawLiveScreen();animate();
     progressTimer=window.setInterval(()=>{if(stageActive.value&&app.room?.playback.playState==='playing')drawLiveScreen();},250);
   };

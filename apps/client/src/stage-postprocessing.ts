@@ -1,5 +1,6 @@
 import { HalfFloatType, NoBlending, NoToneMapping, ShaderMaterial, Uniform, UnsignedByteType } from 'three';
 import type { Camera, Scene, WebGLRenderer } from 'three';
+import { getRuntimeProfile } from './runtime-profile';
 import { BlendFunction, Effect, EffectComposer, EffectPass, RenderPass, ShaderPass, SMAAEffect, SMAAPreset, ToneMappingEffect, ToneMappingMode } from 'postprocessing';
 
 // MSAA resolves coverage into premultiplied linear RGB. Nonlinear transforms
@@ -31,6 +32,7 @@ function createAlphaOutputPass() {
 
 /** Shared transparent pipeline for both 3D stages; Three.js still owns the scene. */
 export function createStagePostprocessing(renderer: WebGLRenderer, scene: Scene, camera: Camera) {
+ const profile=getRuntimeProfile();
  renderer.toneMapping = NoToneMapping;
  // Preserve HDR highlights before tone mapping where the WebView supports it.
  const frameBufferType = renderer.extensions.has('EXT_color_buffer_float') ? HalfFloatType : UnsignedByteType;
@@ -41,7 +43,7 @@ export function createStagePostprocessing(renderer: WebGLRenderer, scene: Scene,
  const colorSamples = Array.from(gl.getInternalformatParameter(gl.RENDERBUFFER,
   frameBufferType === HalfFloatType ? gl.RGBA16F : gl.RGBA8, gl.SAMPLES) as Int32Array | null ?? []);
  const depthSamples = Array.from(gl.getInternalformatParameter(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, gl.SAMPLES) as Int32Array | null ?? []);
- const multisampling = Math.max(0, ...colorSamples.filter(samples => samples <= renderer.capabilities.maxSamples && depthSamples.includes(samples)));
+ const multisampling = Math.max(0, ...colorSamples.filter(samples => samples <= Math.min(renderer.capabilities.maxSamples,profile.maxSamples) && depthSamples.includes(samples)));
  const composer = new EffectComposer(renderer, { frameBufferType, multisampling });
  composer.addPass(new RenderPass(scene, camera));
  composer.addPass(new EffectPass(camera,
@@ -49,7 +51,8 @@ export function createStagePostprocessing(renderer: WebGLRenderer, scene: Scene,
   new ToneMappingEffect({ mode: ToneMappingMode.ACES_FILMIC }),
   new Effect('StagePremultiply', premultiply, { blendFunction: BlendFunction.SRC }),
  ));
- composer.addPass(new EffectPass(camera, new SMAAEffect({ preset: SMAAPreset.ULTRA })));
+ composer.addPass(new EffectPass(camera, new SMAAEffect({ preset: profile.name==='audio-priority'?SMAAPreset.HIGH:SMAAPreset.ULTRA })));
+ renderer.domElement?.setAttribute('data-stage-pipeline',`postprocessing-aces-smaa:${profile.name}:${multisampling}x-msaa`);
  // SMAA filters premultiplied color and alpha together; only the final pass
  // encodes sRGB, then restores premultiplication for browser compositing.
  composer.addPass(createAlphaOutputPass());

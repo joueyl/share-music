@@ -2,6 +2,7 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { Camera, HalfFloatType, NoBlending, NoToneMapping, Scene, UnsignedByteType } from 'three';
 import type { WebGLRenderer } from 'three';
 import { createStagePostprocessing } from '../src/stage-postprocessing';
+import { configureRuntimeProfile } from '../src/runtime-profile';
 
 const state = vi.hoisted(() => ({
  options: {} as Record<string, unknown>, passes: [] as any[],
@@ -22,9 +23,9 @@ vi.mock('postprocessing', () => ({
  ShaderPass: class { constructor(public fullscreenMaterial: any) {} },
  ToneMappingEffect: class { constructor(public options: unknown) {} },
  SMAAEffect: class { constructor(public options: unknown) {} },
- ToneMappingMode: { ACES_FILMIC: 'aces' }, SMAAPreset: { ULTRA: 'ultra' }, BlendFunction: { SRC: 'src' },
+ ToneMappingMode: { ACES_FILMIC: 'aces' }, SMAAPreset: { ULTRA: 'ultra',HIGH:'high' }, BlendFunction: { SRC: 'src' },
 }));
-beforeEach(() => { state.passes = []; vi.clearAllMocks(); });
+beforeEach(() => { configureRuntimeProfile('windows','x86_64');state.passes = []; vi.clearAllMocks(); });
 function fixture(hdr = true, colorSamples: number[] | null = [8, 4, 2], depthSamples = [8, 4, 2], maxSamples = 8) {
  const gl = {
   RENDERBUFFER: 1, RGBA16F: 2, RGBA8: 3, DEPTH_COMPONENT24: 4, SAMPLES: 5,
@@ -45,6 +46,10 @@ it('uses maximum supported MSAA and ULTRA SMAA without duplicate tone mapping', 
  expect(state.passes[1].effects[1].options).toEqual({ mode: 'aces' });
  expect(state.passes[2].effects[0].options).toEqual({ preset: 'ultra' });
  expect(renderer.getContext().getInternalformatParameter).toHaveBeenCalledWith(1, 2, 5);
+});
+it('keeps ACES/alpha processing enabled with HIGH SMAA and no MSAA on audio-priority Macs',()=>{
+ configureRuntimeProfile('macos','x86_64');fixture();expect(state.options.multisampling).toBe(0);
+ expect(state.passes[1].effects[1].options).toEqual({mode:'aces'});expect(state.passes[2].effects[0].options).toEqual({preset:'high'});expect(state.passes).toHaveLength(4);
 });
 it('falls back to byte buffers on WebViews without float color attachments', () => {
  const { renderer } = fixture(false);

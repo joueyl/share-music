@@ -2,6 +2,8 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { createPlaybackWaveform } from '../bridge';
 import { useCachedActivity } from '../useCachedActivity';
+import { getRuntimeProfile } from '../runtime-profile';
+const analysisAvailable=getRuntimeProfile().audioAnalysis;
 import type { WaveformState } from '../audio-waveform';
 import { spectrumLevels } from '../audio-waveform';
 
@@ -30,16 +32,16 @@ function draw() {
 }
 function tick(now: number) {
   frame = 0;
-  if (disposed || !pageActive.value || document.hidden || !props.playing) return;
+  if (disposed || !pageActive.value || !analysisAvailable || !reader || document.hidden || !props.playing) return;
   if (now - lastFrame >= (reduced?.matches ? 1000 : 1000 / 30)) { draw(); lastFrame = now; }
   if (!reduced?.matches || state.value === 'idle') frame = requestAnimationFrame(tick);
 }
 function restart() {
   cancelAnimationFrame(frame); frame = 0; clear();
-  if (!disposed && pageActive.value && !document.hidden && props.playing) { lastFrame = 0; frame = requestAnimationFrame(tick); }
+  if (!disposed && pageActive.value && analysisAvailable && !!reader && !document.hidden && props.playing) { lastFrame = 0; frame = requestAnimationFrame(tick); }
   else state.value = 'idle';
 }
-function wake() { if(!pageActive.value)return;restart();void reader?.resume().then(() => { if (!disposed) restart(); }); }
+function wake() { if(!pageActive.value||!analysisAvailable)return;restart();void reader?.resume().then(() => { if (!disposed) restart(); }); }
 watch(() => [props.playing, props.sourceId], () => { if (props.playing) wake(); else restart(); });
 onMounted(() => {
   reader = createPlaybackWaveform(); reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -63,6 +65,7 @@ onUnmounted(() => {
 </script>
 <template>
   <div class="room-waveform" aria-hidden="true"><canvas ref="canvas" /></div>
-  <p v-if="playing && state === 'gesture'" class="waveform-note">点击页面启用实时波形</p>
+  <p v-if="playing&&!analysisAvailable" class="waveform-note">当前 Mac 使用音频优先模式，暂停实时频谱以减少播放负载</p>
+  <p v-else-if="playing && state === 'gesture'" class="waveform-note">点击页面启用实时波形</p>
   <p v-else-if="playing && state === 'unavailable'" class="waveform-note">当前浏览器无法分析此音源，请检查音频权限并刷新页面；Web 端需使用支持音频读取接口的新服务端</p>
 </template>

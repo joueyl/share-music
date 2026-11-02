@@ -1,4 +1,5 @@
 import type { WebGLRendererParameters } from 'three';
+import { getRuntimeProfile } from './runtime-profile';
 
 // WebView2 can pause animation callbacks during native window moves. Keep the
 // last composed image available instead of exposing a discarded alpha buffer.
@@ -6,13 +7,15 @@ export const STAGE_RENDERER_OPTIONS: WebGLRendererParameters = {
  // Antialiasing is handled by postprocessing target MSAA plus the SMAA pass.
  antialias:false,alpha:true,premultipliedAlpha:true,powerPreference:'high-performance',preserveDrawingBuffer:true,
 };
+export function stageRendererOptions():WebGLRendererParameters{return {...STAGE_RENDERER_OPTIONS,preserveDrawingBuffer:getRuntimeProfile().preserveDrawingBuffer};}
 
 /** Two samples per native pixel axis (four times the pixels), GPU-size limited. */
 export const STAGE_SUPERSAMPLING = 2;
 export function stagePixelRatio(width:number,height:number,dpr:number,maxSize=4096){
  if(width<=0||height<=0)return 1;
  const nativeRatio=Number.isFinite(dpr)&&dpr>0?dpr:1;
- return Math.min(nativeRatio*STAGE_SUPERSAMPLING,maxSize/width,maxSize/height);
+ const profile=getRuntimeProfile();
+ return Math.min(nativeRatio*profile.supersampling,profile.maxPixelRatio,Math.sqrt(profile.pixelBudget/(width*height)),maxSize/width,maxSize/height);
 }
 
 /** Resize only immediately before rendering, never from an observer callback. */
