@@ -5,9 +5,10 @@ import { WsAdapter } from '@nestjs/platform-ws';
 import { json } from 'express';
 import { AppService } from './app.service';
 import { NeteaseController } from './netease.controller';
+import { QqController } from './qq.controller';
 import { ApiController } from './controller';
 import { RoomGateway } from './gateway';
-@Module({ controllers: [ApiController, NeteaseController], providers: [AppService, RoomGateway] })
+@Module({ controllers: [ApiController, NeteaseController, QqController], providers: [AppService, RoomGateway] })
 class AppModule {}
 async function main() {
   const app = await NestFactory.create(AppModule, { bodyParser: false });

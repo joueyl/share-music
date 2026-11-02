@@ -1,6 +1,6 @@
 # 同频 TONE 服务端 API
 
-更新：2026-10-29 · HTTP `/api` · WebSocket `/ws` · 协议版本 1。
+更新：2026-11-02 · HTTP `/api` · WebSocket `/ws` · 协议版本 1。
 
 ## 通用约定
 
@@ -125,11 +125,12 @@ MySQL 保存音乐来源 ID、直链、过期时间和元数据，音频文件�
 |---|---|
 | id / name | UUID；名称 1–200 字符 |
 | neteaseId | 新直链歌曲必有，1–20 位数字字符串；刷新不依赖旧链接 |
-| sourceUrl | 新直链歌曲必有，HTTPS 网易云音乐 CDN 单层子域地址，最长 8192；禁止公开或记录带令牌链接 |
+| sourceUrl | 新直链歌曲必有，HTTPS `*.music.126.net` 或 `*.stream.qqmusic.qq.com` 单层子域地址，最长 8192；禁止公开或记录带令牌链接 |
 | sourceExpiresAt | 过期时间，Unix 毫秒。优先使用上游 expi 秒数（最多 24 小时），缺失/无效则保守按 5 分钟 |
 | artists / album | 可选，最长 1000 / 500 |
 | coverUrl | 可选 HTTPS 封面或 null，最长 2048 |
 | durationMs | 1–86400000 |
+| qqId | QQ 音乐歌曲 MID，可选，1–80 位字母数字；与 neteaseId 分开保存 |
 | sizeBytes | 音频字节数；实际下载限制 100 MiB |
 | spec | 可选 `{sampleRate,bits,channels}`；直链 MP3 导入不读取音频推测规格，未取得时省略 |
 | lossless / bitrateBps | boolean；码率 1–20000000；当前在线导入仅支持完整 MP3 |
@@ -191,9 +192,9 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 ### GET /api/rooms/:id/music/:trackId/audio
 
 网页端返回 `application/octet-stream` 原始音频，`Cache-Control: private, no-store`。
-服务端代理当前网易云链接，遇到 HTTP 401/403/404/410 时最多刷新并重试一次；限制总大小、超时和重定向，读取前后检查成员身份，不计算音频哈希。前端按歌曲元数据校验大小与 MD5。
+服务端代理当前音源链接，遇到 HTTP 401/403/404/410 时最多刷新并重试一次；限制总大小、超时和重定向，读取前后检查成员身份，不计算音频哈希。前端按歌曲元数据校验大小与 MD5。
 单次最多 100 MiB，每用户每分钟 30 次，进程最多两个不同下载任务。所有重定向逐跳校验允许域名，不接受本机、私网或任意 URL。
-需要管理员网易云登录状态仍有效；被下架、无权限或仅试听的歌曲不会因重试而绕过限制。
+需要对应音源的管理员登录状态仍有效；被下架、无权限或仅试听的歌曲不会因重试而绕过限制。
 
 ## 4. 网易云与管理
 
@@ -207,7 +208,7 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 
 | 方法 / 路径 | body / 返回 |
 |---|---|
-| GET /loginServe | HTML 管理页，支持二维码、手机号密码和邮箱密码登录 |
+| GET /loginServe | HTML 管理页，选择网易云（二维码、手机号/邮箱密码）或 QQ 音乐（扫码） |
 | POST /loginServe/qr | 返回 `{sessionId,image,expiresAt}` |
 | POST /loginServe/check | `{sessionId}`，返回 `{code:800/801/802/803}` |
 | POST /loginServe/password | 手机号：`{type:"phone",phone,countrycode?:"86",password}`；邮箱：`{type:"email",email,password}`。成功返回 `{code:200}` |
@@ -264,3 +265,38 @@ MySQL 保存账号、房间设置/房主/权限、歌曲直链/过期时间/来�
 失败码：`PLAYLIST_LINK_IS_ALBUM`（专辑链接，不是歌单）、`PLAYLIST_LINK_INVALID`（输入或目标不是受支持歌单）、`PLAYLIST_LINK_RESOLVE_FAILED`（超时/不可用/非 HTTP 重定向）、`PLAYLIST_LINK_REDIRECT_LIMIT`（循环/超出跳转限制）；其他鉴权和限流错误沿用通用格式。
 
 排查部署：新版解析接口在未认证时应返回 HTTP 401 JSON；若 POST 路径返回 HTTP 404，需更新服务端或检查 `/api/` 代理转发。前端对此单独显示“短链接解析接口不存在”，与上游 301/302 跳转失败分别反馈。
+
+
+## QQ 音乐接入
+
+QQ API 默认作为服务端依赖内置运行，无需外部地址；`QQ_MUSIC_API_URL` 为可选外部覆盖。配置与限制见 [QQ-MUSIC.md](QQ-MUSIC.md)，机器可读定义见 [openapi.json](openapi.json)。不改变普通用户的用户名密码登录。
+
+### 用户接口（Bearer 鉴权）
+
+- `GET /api/qq/search?keyword=歌曲&offset=0`：keyword 去空白后 1–60 字，offset 为 0–100000 的 20 的倍数，固定每页 20 条。返回 `{songs:[{id,name,artists,album,coverUrl,durationMs}],total}`，id 是歌曲 MID。使用公开匿名目录，不携带播放会话；同查询并发合并，成功结果缓存 15 秒，失败不缓存。
+- `GET /api/qq/lyrics/:mid`：返回 `{lrc:{lyric},tlyric:{lyric}}`；MID 为 1–80 位字母数字。
+- `POST /api/rooms/:id/music/qq`：严格请求 `{songId: MID,requestId: UUID}`，返回 `{ok:true,track}`，沿用房间权限、容量、幂等 ID、异步过期保护和数据库持久化。只导入完整 128K MP3，拒绝无权播放或明确试听结果。
+
+QQ 上游没有 MD5；首次导入或续链在服务端有界读取完整音频，计算 MD5 与实际大小，并校验上游声明大小（若有），不保存音频文件。客户端仍完整下载并校验 MD5/大小。链接与哈希成套更新，不关闭校验。仅允许既有网易云 CDN 或 QQ 的 HTTPS 单层 `*.stream.qqmusic.qq.com`，逐跳重新验证，100 MiB/60 秒限制不变。音乐库通过现有接口复用，qqId 保存在 track JSON，无数据库结构迁移。
+
+### 管理接口（沿用 Basic/本机鉴权、同源检查、限流和 no-store）
+
+| POST 路径 | 请求与返回 |
+|---|---|
+| /loginServe/qq/channels | 无请求字段；返回 `{channels:['qq','wechat','qqmusic']}` 的可用子集 |
+| /loginServe/qq/status | 返回 `{loggedIn:boolean}`，不返回用户凭据 |
+| /loginServe/qq/qr | `{channel:'qq'或'wechat'或'qqmusic'}`；返回 `{sessionId,image,expiresAt}` |
+| /loginServe/qq/check | `{sessionId:UUID}`；返回 `{code:800/801/802/803}` |
+| /loginServe/qq/cancel | `{sessionId:UUID}`；取消未完成二维码，不退出已保存账号 |
+
+状态 800 为失效、801 待扫码、802 待确认、803 成功。新登录验证成功后仅覆盖 QQ 会话；失败或过期结果保留旧凭据。QQ 会话保存在服务端 settings，向上游以 `X-QQ-Session` 请求头发送，不出现在 URL、客户端响应或日志中。不得公开上游服务来代替项目权限检查。QQ 搜索/歌词共享每用户每分钟 60 次限流，扫码创建每分钟最多 10 次，并受管理接口总限流约束。
+
+QQ 上游不可用或响应异常返回 HTTP 502（QQ_MUSIC_UNAVAILABLE / QQ_INVALID_RESPONSE），上游频率限制返回 429（QQ_MUSIC_RATE_LIMITED），QQ 管理会话失效返回 503（QQ_LOGIN_REQUIRED），不再统一映射为参数错误 400。搜索仅对临时网络/可重试网关故障自动重试一次，共享 20 秒总预算；不重试明确不可重试的业务拒绝、鉴权或频率限制。
+
+
+### QQ 搜索联想与舞台封面
+
+- `GET /api/qq/suggest?keyword=关键词`：Bearer 鉴权，keyword 去空白后 1–60 字，返回 `{suggestions:string[]}`，真实上游结果去重后最多 8 条。仅上游明确 `resource.not-found` 的 422 转为空列表，故障仍返回错误。与 QQ 搜索/歌词共享每用户每分钟 60 次限流。
+- `GET /api/rooms/:id/music/:trackId/cover/image`：Bearer 鉴权，只读取该房间歌曲已有或恢复的封面，不接受 URL 参数。下载前后校验在线成员身份；返回 JPEG/PNG/WebP/GIF 字节，`private, no-store`。每用户 60 次/分钟，全局 120 次/分钟，最多两个不同封面下载，相同 URL 合并；10 MiB、15 秒及最多 5 次请求，每次重定向重新检查 HTTPS 图片白名单、凭据、端口与 fragment，拒绝 SVG。失败不影响音乐播放。
+
+QQ 封面 CDN 无 CORS 许可时不能直接用于 Canvas/WebGL。舞台使用同源 Blob 图像：桌面从现有 Rust 图片下载接口取字节，Web 从上述受保护接口取字节；内嵌 Blob 封面直接复用，不重复下载音频。

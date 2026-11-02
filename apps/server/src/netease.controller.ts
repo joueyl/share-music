@@ -39,15 +39,17 @@ export function loginOriginAllowed(req:Pick<Request,'headers'|'socket'|'protocol
   const protocol=loopback&&(forwarded==='http'||forwarded==='https')?forwarded:req.protocol;
   return origin===normalizedOrigin(`${protocol}://${req.headers.host}`);
 }
+export function requireMusicAdmin(app:AppService,req:Request,res:Response){
+ res.setHeader('Cache-Control','no-store');
+ if(!adminAllowed(req)){res.setHeader('WWW-Authenticate','Basic realm="Music login", charset="UTF-8"');throw new DomainError('UNAUTHORIZED');}
+ if(req.method==='POST'&&!loginOriginAllowed(req))throw new DomainError('NETEASE_LOGIN_ORIGIN_FORBIDDEN');
+ app.limit(`netease-admin:${req.socket.remoteAddress}`,60,60000);
+}
 @Controller()
 export class NeteaseController {
   constructor(@Inject(AppService) private app: AppService) {}
   private admin(req: Request, res: Response) {
-    res.setHeader('Cache-Control', 'no-store');
-    if (!adminAllowed(req)) { res.setHeader('WWW-Authenticate', 'Basic realm="Music login", charset="UTF-8"'); throw new DomainError('UNAUTHORIZED'); }
-    // JSON POSTs must originate from this page, not a cross-origin form.
-    if (req.method === 'POST' && !loginOriginAllowed(req)) throw new DomainError('NETEASE_LOGIN_ORIGIN_FORBIDDEN');
-    this.app.limit(`netease-admin:${req.socket.remoteAddress}`, 60, 60000);
+    requireMusicAdmin(this.app,req,res);
   }
   @Get('loginServe') page(@Req() req: Request, @Res() res: Response) {
     try { this.admin(req, res); res.setHeader('Content-Security-Policy', "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"); res.setHeader('X-Content-Type-Options', 'nosniff'); res.setHeader('Referrer-Policy', 'no-referrer'); return res.type('html').send(loginPage); } catch (e) { httpError(e); }

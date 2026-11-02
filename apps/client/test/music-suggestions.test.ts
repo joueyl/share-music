@@ -29,3 +29,8 @@ it('reports suggestion outages without blocking normal search',async()=>{
 it('explains stale-server whitelist failures instead of hiding the dropdown',async()=>{
  const s=setup(vi.fn(async()=>{throw new Error('NETEASE_METHOD_NOT_ALLOWED');}));s.text.value='中文';await vi.advanceTimersByTimeAsync(300);expect(s.error.value).toContain('请重启服务端');s.text.value='English';expect(s.error.value).toBe('');
 });
+
+it('invalidates suggestions and aborts old-provider work when the selected source changes',async()=>{
+ const text=ref(''),enabled=ref(true),source=ref('netease');const signals:AbortSignal[]=[];const load=vi.fn(async(_term:string,signal?:AbortSignal)=>{signals.push(signal!);return [source.value];});
+ const s=scope.run(()=>useMusicSuggestions(text,enabled,load,source))!;text.value='晴';await vi.advanceTimersByTimeAsync(300);source.value='qq';expect(s.items.value).toEqual([]);expect(signals[0].aborted).toBe(true);await vi.advanceTimersByTimeAsync(300);expect(s.items.value).toEqual(['qq']);
+});

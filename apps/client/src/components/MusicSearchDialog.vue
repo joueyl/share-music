@@ -8,6 +8,7 @@ import { useApp } from '../store';
 import * as bridge from '../bridge';
 import AlbumArt from './AlbumArt.vue';
 const props=defineProps<{roomId?:string}>(), emit=defineEmits<{close:[];rooms:[term:string]}>(), app=useApp();
+const source=ref<'netease'|'qq'>('netease');
 const keywords=ref(''),songs=ref<bridge.MusicSearchItem[]>([]),total=ref(0),offset=ref(0),query=ref('');
 const searching=ref(false),searched=ref(false),adding=ref<string|null>(null),added=ref(new Set<string>()),message=ref('');
 const history=ref<string[]>([]),allBusy=ref(false);
@@ -20,7 +21,7 @@ const focused=ref(false),composing=ref(false),suggestionsSuppressed=ref(false);
 const failedCovers=ref(new Set<string>());
 watch(keywords,()=>{suggestionsSuppressed.value=false;},{flush:'sync'});
 const suggestEnabled=computed(()=>focused.value&&!suggestionsSuppressed.value&&!composing.value&&!adding.value&&!searching.value);
-const suggestions=useMusicSuggestions(keywords,suggestEnabled);
+const suggestions=useMusicSuggestions(keywords,suggestEnabled,(term,signal)=>bridge.suggestMusic(term,signal,source.value),source);
 const suggestionItems=suggestions.items,suggestionLoading=suggestions.loading,suggestionActive=suggestions.active,suggestionError=suggestions.error;
 const suggestionOpen=computed(()=>suggestEnabled.value&&(suggestionItems.value.length>0||suggestionLoading.value||!!suggestionError.value||suggestions.loaded.value));
 function keywordInput(event:Event){
@@ -40,13 +41,14 @@ function suggestionKeys(event:KeyboardEvent){
 const dialog=ref<HTMLElement|null>(null),input=ref<HTMLInputElement|null>(null);
 let generation=0,alive=true,previous:HTMLElement|null=null;
 const requestIds=new Map<string,string>();
+watch(source,()=>{generation++;songs.value=[];total.value=0;offset.value=0;query.value='';searched.value=false;searching.value=false;message.value='';requestIds.clear();added.value=new Set();},{flush:'sync'});
 const visible=ref(true);
 function close(){if(!adding.value&&!allBusy.value)visible.value=false;}
 function trap(event:KeyboardEvent){
  if(event.isComposing||composing.value)return;
  if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}
  if(event.key!=='Tab')return;
- const all=dialog.value?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled)');if(!all?.length)return;
+ const all=dialog.value?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled)');if(!all?.length)return;
  const first=all[0],last=all[all.length-1];
  if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
@@ -57,14 +59,14 @@ async function search(page=0){
  const term=page===0?keywords.value.trim():query.value;if(!term||adding.value||allBusy.value||composing.value)return;
  suggestionsSuppressed.value=true;suggestions.dismiss();
  const current=++generation;searching.value=true;message.value='';query.value=term;
- try{const result=await bridge.searchMusic(term,page);if(!alive||current!==generation)return;songs.value=result.songs;total.value=result.total;offset.value=page;searched.value=true;saveHistory(term);}
+ try{const result=await (source.value==='qq'?bridge.searchMusic(term,page,'qq'):bridge.searchMusic(term,page));if(!alive||current!==generation)return;songs.value=result.songs;total.value=result.total;offset.value=page;searched.value=true;saveHistory(term);}
  catch(e){if(alive&&current===generation){songs.value=[];app.error(e);message.value=app.notice;}}
  finally{if(alive&&current===generation)searching.value=false;}
 }
 async function add(song:bridge.MusicSearchItem){
  if(!props.roomId||app.room?.id!==props.roomId||adding.value||!app.permission.enqueue||!app.connected)return;
  adding.value=song.id;app.notice='';message.value='服务端正在获取并保存音乐链接，请稍候…';
- try{const requestId=requestIds.get(song.id)??crypto.randomUUID();requestIds.set(song.id,requestId);await bridge.addSearchedMusic(props.roomId,song.id,requestId,song.coverUrl);if(!alive)return;added.value=new Set([...added.value,song.id]);message.value='添加成功，音乐链接已保存并加入播放列表';app.notice=`添加成功：${song.name}`;}
+ try{const requestId=requestIds.get(song.id)??crypto.randomUUID();requestIds.set(song.id,requestId);await (source.value==='qq'?bridge.addSearchedMusic(props.roomId,song.id,requestId,song.coverUrl,'qq'):bridge.addSearchedMusic(props.roomId,song.id,requestId,song.coverUrl));if(!alive)return;added.value=new Set([...added.value,song.id]);message.value='添加成功，音乐链接已保存并加入播放列表';app.notice=`添加成功：${song.name}`;}
  catch(e){if(alive){app.error(e);message.value=app.notice;}}
  finally{if(alive)adding.value=null;}
 }
@@ -75,7 +77,8 @@ const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toSt
  <section ref="dialog" class="modal music-search-modal global-search-modal" role="dialog" aria-modal="true" aria-labelledby="music-search-title" :aria-busy="searching||!!adding||allBusy">
   <header class="global-search-header"><span class="search-symbol"><Search :size="22" /></span><h2 id="music-search-title">搜索音乐</h2><p>发现好音乐，随时添加到共享房间</p><kbd>Esc</kbd><button class="round-close" aria-label="关闭搜索音乐" :disabled="!!adding||allBusy" @click="close"><X :size="22" /></button></header>
   <div class="global-search-body"><div class="search-main"><span class="eyebrow">SEARCH MUSIC / 找一首此刻想听的歌</span><h1>好音乐，值得一起发现</h1>
-  <form class="music-search-form global-search-form" @submit.prevent="search(0)"><Search :size="20" /><label class="sr-only" for="music-keywords">歌曲、歌手或专辑</label><div class="music-autocomplete"><input id="music-keywords" ref="input" :value="keywords" @input="keywordInput" placeholder="搜索歌曲、歌手或专辑" maxlength="100" :disabled="!!adding||allBusy" role="combobox" aria-autocomplete="list" aria-controls="music-suggestions" :aria-expanded="suggestionOpen" :aria-activedescendant="suggestionOpen&&suggestionActive>=0?`music-suggestion-${suggestionActive}`:undefined" autocomplete="off" @focus="focused=true" @blur="focused=false" @compositionstart="composing=true" @compositionend="compositionEnd" @keydown="suggestionKeys" />
+  <label class="music-source-picker"><span class="music-source-label">音源平台</span><span class="music-source-control"><Disc3 class="music-source-icon" :size="17" aria-hidden="true" /><select v-model="source" class="tone-select music-source-select" aria-label="搜索音源" :disabled="!!adding||allBusy"><option value="netease">网易云音乐</option><option value="qq">QQ 音乐</option></select></span></label>
+  <form class="music-search-form global-search-form" @submit.prevent="search(0)"><Search :size="20" /><label class="sr-only" for="music-keywords">歌曲、歌手或专辑</label><div class="music-autocomplete"><input id="music-keywords" ref="input" :value="keywords" @input="keywordInput" placeholder="搜索歌曲、歌手或专辑" :maxlength="source==='qq'?60:100" :disabled="!!adding||allBusy" role="combobox" aria-autocomplete="list" aria-controls="music-suggestions" :aria-expanded="suggestionOpen" :aria-activedescendant="suggestionOpen&&suggestionActive>=0?`music-suggestion-${suggestionActive}`:undefined" autocomplete="off" @focus="focused=true" @blur="focused=false" @compositionstart="composing=true" @compositionend="compositionEnd" @keydown="suggestionKeys" />
    <div v-if="suggestionOpen" class="music-suggestions"><div v-if="suggestionLoading&&!suggestionItems.length" class="music-suggestion-loading loading-state" role="status">正在联想…</div><div v-if="suggestionError" class="music-suggestion-loading" role="status">{{ suggestionError }}</div><div v-else-if="!suggestionLoading&&!suggestionItems.length" class="music-suggestion-loading">暂无联想，按回车搜索</div><ul id="music-suggestions" role="listbox" aria-label="搜索联想"><li v-for="(term,index) in suggestionItems" :id="`music-suggestion-${index}`" :key="term" role="option" :aria-selected="suggestionActive===index" :class="{active:suggestionActive===index}" @mouseenter="suggestionActive=index" @mousedown.prevent @click="chooseSuggestion(term)"><Search :size="14" /><span>{{ term }}</span></li></ul></div></div><button v-if="keywords" type="button" class="icon-button" aria-label="清空关键词" :disabled="!!adding||allBusy" @click="keywords='' "><X :size="16" /></button><button class="primary" :aria-busy="searching" :disabled="searching||!!adding||allBusy||!keywords.trim()"><LoaderCircle v-if="searching" class="spinning" :size="16" />搜索</button></form>
    <div class="search-history"><Clock3 :size="16" /><span>最近搜索</span><button v-for="term in history.slice(0,4)" :key="term" :disabled="!!adding||allBusy" @click="chooseSuggestion(term)">{{ term }}</button><small v-if="!history.length">还没有搜索记录</small><button v-else class="history-clear" :disabled="!!adding||allBusy" @click="saveHistory()">清空</button></div>
    <div class="search-kind-tabs"><button class="selected">歌曲</button><button v-for="kind in ['歌手','专辑','歌单']" :key="kind" title="当前仅接入歌曲搜索，可在关键词中输入歌手或专辑名" disabled>{{ kind }}</button><span>搜索结果 · {{ total }} 首歌曲</span></div>
@@ -87,3 +90,17 @@ const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toSt
   <footer class="global-search-footer"><Headphones :size="17" />搜索不打断一起听，关闭后返回原来的页面<small>GLOBAL SEARCH / 同频</small></footer>
  </section></div></Transition></Teleport>
 </template>
+
+<style scoped>
+.music-source-picker{display:flex;flex-direction:row;align-items:center;gap:12px;margin:0 0 16px;font-size:12px;flex-shrink:0}
+.music-source-label{color:#798394;white-space:nowrap}
+.music-source-control{position:relative;display:inline-flex;min-width:0;max-width:100%}
+.music-source-icon{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#4f80db;pointer-events:none;z-index:1}
+.music-source-picker .music-source-select{width:184px;max-width:100%;min-height:44px;padding-left:39px;padding-right:36px;border-radius:14px;border-color:#d7e2f0;background-color:#ffffffd9;color:#344861;font-size:13px;font-weight:500;box-shadow:0 2px 8px #38527508}
+.music-source-picker .music-source-select:hover:not(:disabled){border-color:#a8c2e8;background-color:#fff;box-shadow:0 3px 12px #3852750d}
+.music-source-picker .music-source-select:focus-visible{outline:2px solid #4f80db;outline-offset:2px;border-color:#91afe0;box-shadow:0 0 0 4px #4f80db12}
+.music-source-picker .music-source-select:disabled{box-shadow:none}
+@supports(appearance:base-select){.music-source-picker .music-source-select{padding-right:14px}.music-source-select option::checkmark{color:#4f80db}}
+@media(pointer:coarse){.music-source-picker .music-source-select{font-size:16px}}
+@media(forced-colors:active){.music-source-icon{color:ButtonText}.music-source-picker .music-source-select{border-color:ButtonText;color:ButtonText;background-color:Canvas;box-shadow:none}}
+</style>

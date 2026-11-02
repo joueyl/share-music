@@ -37,7 +37,7 @@ const sortedOnline = computed(() => {
 });
 
 watch(
-  () => [app.room?.id, track.value?.id, track.value?.contentHash],
+  [() => app.room?.id, () => track.value?.id, () => track.value?.contentHash],
   async (_, __, onCleanup) => {
     let active = true;
     onCleanup(() => {

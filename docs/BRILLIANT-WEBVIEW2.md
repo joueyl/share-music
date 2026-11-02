@@ -19,7 +19,7 @@ Brilliant 项目：brilliant-cloud://witty-jaguar/share-music。
 - POST /api/rooms：名称、描述、氛围、可见范围。
 - GET /api/rooms/resolve/:code：12 位房间码解析后 WebSocket join。
 - PUT /api/rooms/:id/settings：完整设置和 expectedStateVersion；冲突提示用户，不无限重试。
-- 网易云搜索 / music/uploaded：搜索点歌和共享音乐库，requestId 幂等。
+- 网易云 / QQ 音乐搜索与 music/uploaded：搜索点歌和共享音乐库，requestId 幂等。
 - /music/:trackId 与 refresh=1：返回直链与配套 MD5/大小，客户端遇到下载失败或校验不一致时自动强刷并重试一次。
 - /music/:trackId/audio：浏览器 Bearer 鉴权代理；前端计算 MD5 并比对接口值、长度后创建 Blob。
 
@@ -29,7 +29,7 @@ CloudPlayer 唯一控制 HTMLAudioElement。桌面由系统 WebView（Windows �
 
 ready 必须等待目标位置 seek 完成并 buffered；服务器提交后依据共享时间轴播放/暂停/纠偏。退出房间、切歌或过时下载会清理或释放 Blob。本地音量不改变房间音量。Windows 系统媒体按键继续调用房间指令，不创建原生播放器。Windows 任务栏悬停缩略图显示当前封面，优先复用内嵌图片，保留控制按钮；暂停保留封面，切歌清旧，停止、断线和离房恢复普通窗口预览，加载失败使用默认唱片图。封面由独立隐藏的任务栏预览代理提供，Peek 委托真实主窗口，Alt+Tab 保留主窗口真实画面，不使用封面替代。代理不出现在 Alt+Tab，点击/关闭转交主窗口，隐藏到托盘注销代理；注册或位图失败回退系统窗口预览。
 
-真实播放需服务端、在线房间成员与有效网易云音源；测试中的模拟界面不代表真实联调成功。
+真实播放需服务端、在线房间成员与对应音源的有效登录与完整歌曲权限；测试中的模拟界面不代表真实联调成功。
 
 
 ## 全页还原清单（2026-10-29）

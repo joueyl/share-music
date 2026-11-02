@@ -35,8 +35,9 @@ const messages: Record<string, string> = {
   SAVED_LOGIN_WRITE_FAILED: '登录成功，但无法保存密码，下次启动请手动登录',
   SAVED_LOGIN_DELETE_FAILED: '无法清除系统保存的密码，请重试退出登录',
   NETEASE_LOGIN_REQUIRED: '服务端网易云账号未登录，请管理员访问 /loginServe 扫码', NETEASE_UNAVAILABLE: '网易云服务暂不可用，请稍后重试',
+  QQ_MUSIC_NOT_CONFIGURED: '服务端 QQ 音乐服务尚未启用，请管理员更新依赖并重启', QQ_MUSIC_UNAVAILABLE: 'QQ 音乐上游暂不可用，请稍后重试', QQ_MUSIC_RATE_LIMITED:'QQ 音乐上游请求过于频繁，请稍后再试', QQ_INVALID_RESPONSE:'QQ 音乐返回数据异常，未完成操作', QQ_LOGIN_REQUIRED:'服务端 QQ 音乐登录已过期，请管理员访问 /loginServe 扫码',
   MUSIC_NOT_AVAILABLE: '当前账号无法获取这首歌曲的完整音源', MUSIC_TRIAL_ONLY: '这首歌曲仅能试听，不能添加完整音源', MUSIC_AUDIO_UNSUPPORTED: '音源不是受支持的 MP3，暂无法添加',
-  MUSIC_SOURCE_INVALID: '网易云返回的音源地址无效，已阻止下载', MUSIC_DOWNLOAD_FAILED: '服务端下载音乐失败，请稍后重试', MUSIC_TOO_LARGE: '音乐超过 100MB 限制', MUSIC_IMPORT_BUSY: '服务端正在处理其他音乐，请稍后重试', MUSIC_IMPORT_FAILED: '添加未完成，请重试',
+  MUSIC_SOURCE_INVALID: '音源地址或校验元数据无效，已阻止下载', MUSIC_DOWNLOAD_FAILED: '服务端下载音乐失败，请稍后重试', MUSIC_TOO_LARGE: '音乐超过 100MB 限制', MUSIC_IMPORT_BUSY: '服务端正在处理其他音乐，请稍后重试', MUSIC_IMPORT_FAILED: '添加未完成，请重试',
 
   FORBIDDEN: '没有此操作权限', HOST_ONLY: '仅房主可操作', ROOM_FULL: '房间已满，最多 8 人', STATE_CONFLICT: '房间状态已更新，请重新操作',
   PLAYBACK_TRANSITION_PENDING: '正在准备播放，请稍候', FILE_ONLY: '直播不能暂停或拖动进度', LIVE_ONLY: '当前音源不是系统推流', STALE_SOURCE: '音源已切换，请重新操作', PROVIDER_OFFLINE: '音源提供者已离线',

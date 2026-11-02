@@ -17,6 +17,7 @@
     "@nestjs/platform-express": "^11.1.0",
     "@nestjs/platform-ws": "^11.1.0",
     "@nestjs/websockets": "^11.1.0",
+    "@yakult-green-tea/qq-music-api": "3.3.5",
     "express": "^5.2.1",
     "mysql2": "^3.24.6",
     "NeteaseCloudMusicApi": "^4.32.0",

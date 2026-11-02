@@ -2029,7 +2029,7 @@
     },
     "/loginServe": {
       "get": {
-        "summary": "管理员网易云登录：二维码、手机号或邮箱（独立 Basic 鉴权）",
+        "summary": "网易云 / QQ 音乐服务端登录管理页",
         "operationId": "get_loginServe",
         "tags": [
           "管理"
@@ -2507,6 +2507,686 @@
           }
         }
       }
+    },
+    "/api/rooms/{id}/music/qq": {
+      "post": {
+        "summary": "从 QQ 音乐导入完整 128K MP3，按原队列权限及幂等 ID 入队",
+        "operationId": "post_qq_music_import",
+        "tags": [
+          "歌曲"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "track": {
+                      "$ref": "#/components/schemas/TrackMetadata"
+                    }
+                  },
+                  "required": [
+                    "ok",
+                    "track"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "songId",
+                  "requestId"
+                ],
+                "properties": {
+                  "songId": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9]{1,80}$"
+                  },
+                  "requestId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/loginServe/qq/channels": {
+      "post": {
+        "summary": "查询当前部署支持的 QQ 扫码通道",
+        "operationId": "post__loginServe_qq_channels",
+        "tags": [
+          "QQ 音乐"
+        ],
+        "security": [
+          {
+            "adminBasic": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Invalid parameters, unsupported channel or replaced/expired QR attempt"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Project or QQ upstream rate limit; no automatic retry"
+          },
+          "201": {
+            "description": "Success; provider credentials are never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "QQ upstream unavailable or invalid response"
+          },
+          "503": {
+            "description": "QQ administrator session expired; project user session remains valid"
+          }
+        }
+      }
+    },
+    "/loginServe/qq/status": {
+      "post": {
+        "summary": "查询服务端 QQ 会话是否有效",
+        "operationId": "post__loginServe_qq_status",
+        "tags": [
+          "QQ 音乐"
+        ],
+        "security": [
+          {
+            "adminBasic": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Invalid parameters, unsupported channel or replaced/expired QR attempt"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Project or QQ upstream rate limit; no automatic retry"
+          },
+          "201": {
+            "description": "Success; provider credentials are never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "QQ upstream unavailable or invalid response"
+          },
+          "503": {
+            "description": "QQ administrator session expired; project user session remains valid"
+          }
+        }
+      }
+    },
+    "/loginServe/qq/qr": {
+      "post": {
+        "summary": "开始 QQ 音乐扫码登录；仅返回本地 sessionId、二维码和有效期",
+        "operationId": "post__loginServe_qq_qr",
+        "tags": [
+          "QQ 音乐"
+        ],
+        "security": [
+          {
+            "adminBasic": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Invalid parameters, unsupported channel or replaced/expired QR attempt"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Project or QQ upstream rate limit; no automatic retry"
+          },
+          "201": {
+            "description": "Success; provider credentials are never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "QQ upstream unavailable or invalid response"
+          },
+          "503": {
+            "description": "QQ administrator session expired; project user session remains valid"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "channel"
+                ],
+                "properties": {
+                  "channel": {
+                    "type": "string",
+                    "enum": [
+                      "qq",
+                      "wechat",
+                      "qqmusic"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/loginServe/qq/check": {
+      "post": {
+        "summary": "检查/取消指定 QQ 二维码，不返回会话 token",
+        "operationId": "post__loginServe_qq_check",
+        "tags": [
+          "QQ 音乐"
+        ],
+        "security": [
+          {
+            "adminBasic": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Invalid parameters, unsupported channel or replaced/expired QR attempt"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Project or QQ upstream rate limit; no automatic retry"
+          },
+          "201": {
+            "description": "Success; provider credentials are never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "QQ upstream unavailable or invalid response"
+          },
+          "503": {
+            "description": "QQ administrator session expired; project user session remains valid"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sessionId"
+                ],
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/loginServe/qq/cancel": {
+      "post": {
+        "summary": "检查/取消指定 QQ 二维码，不返回会话 token",
+        "operationId": "post__loginServe_qq_cancel",
+        "tags": [
+          "QQ 音乐"
+        ],
+        "security": [
+          {
+            "adminBasic": []
+          }
+        ],
+        "responses": {
+          "400": {
+            "description": "Invalid parameters, unsupported channel or replaced/expired QR attempt"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Project or QQ upstream rate limit; no automatic retry"
+          },
+          "201": {
+            "description": "Success; provider credentials are never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "QQ upstream unavailable or invalid response"
+          },
+          "503": {
+            "description": "QQ administrator session expired; project user session remains valid"
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "sessionId"
+                ],
+                "properties": {
+                  "sessionId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/qq/search": {
+      "get": {
+        "summary": "搜索 QQ 歌曲，20 首一页；上游失败不伪装空列表",
+        "operationId": "get__api_qq_search",
+        "tags": [
+          "QQ 音乐"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success; provider credentials are never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters, unsupported channel or replaced/expired QR attempt"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Project or QQ upstream rate limit; no automatic retry"
+          },
+          "502": {
+            "description": "QQ upstream unavailable or invalid response"
+          },
+          "503": {
+            "description": "QQ administrator session expired; project user session remains valid"
+          }
+        },
+        "parameters": [
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100000,
+              "multipleOf": 20,
+              "default": 0
+            }
+          }
+        ],
+        "description": "公开匿名目录，不携带播放会话。相同查询并发合并，成功结果缓存15秒；临时故障最多重试一次，20秒总预算。鉴权、限流及明确不可重试的业务拒绝不重试，失败不伪装为空结果。"
+      }
+    },
+    "/api/qq/lyrics/{mid}": {
+      "get": {
+        "summary": "QQ 歌词，返回 lrc/tlyric；不改变歌词视觉和时序组件",
+        "operationId": "get__api_qq_lyrics_mid",
+        "tags": [
+          "QQ 音乐"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success; provider credentials are never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters, unsupported channel or replaced/expired QR attempt"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Project or QQ upstream rate limit; no automatic retry"
+          },
+          "502": {
+            "description": "QQ upstream unavailable or invalid response"
+          },
+          "503": {
+            "description": "QQ administrator session expired; project user session remains valid"
+          }
+        },
+        "parameters": [
+          {
+            "name": "mid",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9]{1,80}$"
+            }
+          }
+        ]
+      }
+    },
+    "/api/qq/suggest": {
+      "get": {
+        "summary": "QQ 真实搜索联想，最多8条",
+        "operationId": "get__api_qq_suggest",
+        "tags": [
+          "QQ 音乐"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success; provider credentials are never returned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid parameters, unsupported channel or replaced/expired QR attempt"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Project or QQ upstream rate limit; no automatic retry"
+          },
+          "502": {
+            "description": "QQ upstream unavailable or invalid response"
+          },
+          "503": {
+            "description": "QQ administrator session expired; project user session remains valid"
+          }
+        },
+        "parameters": [
+          {
+            "name": "keyword",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 60
+            }
+          }
+        ],
+        "description": "公开匿名联想，keyword为1–60字符；明确无匹配返回空建议，上游故障不伪装为空列表。"
+      }
+    },
+    "/api/rooms/{id}/music/{trackId}/cover/image": {
+      "get": {
+        "summary": "读取房间歌曲的受限封面图片字节，供Canvas贴图",
+        "operationId": "get__api_rooms_id_music_trackId_cover_image",
+        "tags": [
+          "歌曲"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成员鉴权、10MiB/15秒、HTTPS图片白名单、private no-store",
+            "content": {
+              "image/jpeg": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/png": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/webp": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              },
+              "image/gif": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "trackId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -2686,7 +3366,7 @@
             "type": "string",
             "format": "uri",
             "maxLength": 8192,
-            "pattern": "^https://[a-zA-Z0-9-]+\\.music\\.126\\.net/",
+            "pattern": "^https://[a-zA-Z0-9-]+\\.(?:music\\.126\\.net|stream\\.qqmusic\\.qq\\.com)/",
             "description": "Original provider URL. Do not log or publish tokens."
           },
           "sourceExpiresAt": {
@@ -2694,6 +3374,11 @@
             "format": "int64",
             "minimum": 0,
             "description": "Unix milliseconds; refreshed before expiry"
+          },
+          "qqId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]{1,80}$",
+            "description": "QQ music song MID; distinct from NetEase numeric ID."
           }
         },
         "required": [
@@ -2786,7 +3471,7 @@
             "type": "string",
             "format": "uri",
             "maxLength": 8192,
-            "pattern": "^https://[a-zA-Z0-9-]+\\.music\\.126\\.net/",
+            "pattern": "^https://[a-zA-Z0-9-]+\\.(?:music\\.126\\.net|stream\\.qqmusic\\.qq\\.com)/",
             "description": "Original provider URL. Do not log or publish tokens."
           },
           "sourceExpiresAt": {
@@ -2794,6 +3479,11 @@
             "format": "int64",
             "minimum": 0,
             "description": "Unix milliseconds; refreshed before expiry"
+          },
+          "qqId": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9]{1,80}$",
+            "description": "QQ music song MID; distinct from NetEase numeric ID."
           }
         },
         "required": [

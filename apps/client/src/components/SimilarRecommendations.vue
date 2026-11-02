@@ -18,6 +18,7 @@ async function load(){
   songs.value=[];status.value='';added.value=new Set();loading.value=false;
   if(!roomId||!current){status.value='播放一首歌，发现更多相似旋律';return;}
   if(!app.connected){status.value='连接恢复后加载相似推荐';return;}
+  if(current.qqId){status.value='QQ 音乐相似推荐暂未接入';return;}
   loading.value=true;
   try{
     const id=current.neteaseId??(await bridge.trackMetadata(roomId,current.id)).neteaseId;

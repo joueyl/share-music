@@ -6,7 +6,7 @@
 
 Tauri 2 + Vue 3 + TypeScript + Pinia + Vue Router 客户端，HTML Audio 播放，NestJS 控制服务。Windows 使用 WebView2 内置音频解码；Rust 仅承担缓存、系统媒体控制、凭据与更新等桌面能力。
 
-当前客户端实现多人房间、音乐搜索与音乐库、统一播放时间轴、歌词、聊天和独立权限。歌曲通过服务端授权的网易云直链接入，来源、过期时间和元数据保存在 MySQL。
+当前客户端实现多人房间、音乐搜索与音乐库、统一播放时间轴、歌词、聊天和独立权限。歌曲通过服务端授权的网易云或 QQ 音乐直链接入，来源、过期时间和元数据保存在 MySQL。
 
 ## 快速启动
 
@@ -67,7 +67,7 @@ npm run desktop
 - Linux：通过用户会话 D-Bus 的 MPRIS 接入 GNOME/KDE 等桌面媒体控件及 `playerctl`，服务名为 `org.mpris.MediaPlayer2.com.musicshare.desktop.instance_<进程号>`。可用 `playerctl -l` 找到实际名称，再用 `playerctl --player=<名称> play-pause` 验证。Linux 没有统一的 Windows 式缩略图按钮接口，是否在任务栏悬停时显示按钮由桌面/面板实现决定；需要可用的桌面 D-Bus 会话。
 - 系统动作与应用内按钮使用同一条房间命令通道，不会只暂停本机造成不同步。无权限、断线、准备切歌或已离房时不执行控制，Windows 缩略图按钮也会禁用；事件携带房间、音轨及播放 epoch，忽略过期事件。离房或退出登录后状态清空，退出进程时卸载 SDK 事件和窗口钩子。SDK 不可用不会阻止应用内播放。
 
-封面缩略图使用 [Windows DWM 自定义缩略图接口](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmseticonicthumbnail)，在独立代理上应用，并通过 [SetTabProperties](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-itaskbarlist4-settabproperties) 的 `STPF_USEAPPPEEKALWAYS` 将 Peek 委托给真实主窗口。主窗口不强制使用封面位图，不改变系统媒体面板封面。网络封面仅从 HTTPS 网易云图片域读取，最多 10 MiB / 15 秒，过期异步结果不会覆盖新歌曲。
+封面缩略图使用 [Windows DWM 自定义缩略图接口](https://learn.microsoft.com/en-us/windows/win32/api/dwmapi/nf-dwmapi-dwmseticonicthumbnail)，在独立代理上应用，并通过 [SetTabProperties](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-itaskbarlist4-settabproperties) 的 `STPF_USEAPPPEEKALWAYS` 将 Peek 委托给真实主窗口。主窗口不强制使用封面位图，不改变系统媒体面板封面。网络封面仅从 HTTPS 网易云图片域或 `y.gtimg.cn` 读取，最多 10 MiB / 15 秒，过期异步结果不会覆盖新歌曲。
 
 此功能包含原生 SDK 代码，须重新构建并重启桌面客户端，网页刷新或只替换前端资源不足以生效。Windows 原生构建及控制通道测试不替代 Linux 桌面的实机验收。SDK 说明：[Windows 任务栏缩略图工具栏](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-itaskbarlist3-thumbbaraddbuttons)、[MPRIS 规范](https://specifications.freedesktop.org/mpris/latest/Player_Interface.html)。
 
@@ -109,15 +109,15 @@ Windows 可勾选“记住密码并自动登录”，凭据保存到当前 Windo
 
 ## 播放与同步
 
-CloudPlayer 控制唯一 HTML Audio 实例。后端从网易云接口读取 MD5 和文件大小，导入和续链不下载音频；前端下载完整音频并计算 MD5、比对接口值及大小，桌面使用本地磁盘缓存，浏览器使用鉴权音频接口创建 Blob。歌词、频谱和内嵌封面基于当前歌曲。
+CloudPlayer 控制唯一 HTML Audio 实例。后端从网易云接口读取 MD5 和文件大小；QQ 音乐上游缺少 MD5，导入和续链在服务端限量读取音频计算 MD5/大小，不持久化文件；前端下载完整音频并计算 MD5、比对接口值及大小，桌面使用本地磁盘缓存，浏览器使用鉴权音频接口创建 Blob。歌词、频谱和内嵌封面基于当前歌曲。
 
-音源准备等待目标位置 seek 完成且 buffered，再向服务端报告 ready；服务端提交后按共享时间轴播放、暂停和纠偏。客户端校验不一致时自动获取新直链和对应 MD5、大小并重新下载校验一次，成功后继续播放；再次失败才提示错误。MD5 仅用于文件一致性检查，不替代 HTTPS、来源校验或身份认证。本地音量仅影响本机。真实播放需要有效网易云音源、服务端及在线房间成员，编解码能力依赖系统 WebView。
+音源准备等待目标位置 seek 完成且 buffered，再向服务端报告 ready；服务端提交后按共享时间轴播放、暂停和纠偏。客户端校验不一致时自动获取新直链和对应 MD5、大小并重新下载校验一次，成功后继续播放；再次失败才提示错误。MD5 仅用于文件一致性检查，不替代 HTTPS、来源校验或身份认证。本地音量仅影响本机。真实播放需要对应音源的有效登录和完整歌曲权限、服务端及在线房间成员，编解码能力依赖系统 WebView。
 
 ## 服务部署
 
 复制 `apps/server/.env.example` 为 `apps/server/.env`，配置 MySQL `DATABASE_URL`、独立随机 `TOKEN_SECRET` 和实际前端 `ALLOWED_ORIGINS`。生产使用 MySQL 8.0+，连接失败时启动失败，不回退到 SQLite。开发时未设置 TOKEN_SECRET 会生成临时密钥，重启后原会话失效。
 
-公网管理 `/loginServe` 需设置 `NETEASE_ADMIN_TOKEN` 与实际访问的 `NETEASE_LOGIN_ORIGIN`，通过二维码、手机号或邮箱密码登录网易云；凭据仅保存在服务端。详情见 [网易云管理登录](docs/NETEASE.md)。
+公网管理 `/loginServe` 需设置 `NETEASE_ADMIN_TOKEN` 与实际访问的 `NETEASE_LOGIN_ORIGIN`，可切换网易云（二维码、手机号或邮箱密码）与 QQ 音乐（扫码），凭据仅保存在服务端。QQ Music API 已作为固定版本服务端依赖安装，首次使用时在服务端自动启动，无需单独部署；`QQ_MUSIC_API_URL` 仅用于可选外部服务，支持 128K MP3 搜索、入队、歌词、封面及音乐库复用，不包含 QQ 歌单/相似推荐。详情见 [网易云管理登录](docs/NETEASE.md)、[QQ 音乐接入](docs/QQ-MUSIC.md)。
 
 ```sh
 npm run build

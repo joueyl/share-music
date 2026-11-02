@@ -62,6 +62,14 @@ export async function notifyChat(payload:import('./chat-alerts').ChatAlertPayloa
 export async function clearChatAttention() { if(desktop)await invoke('clear_chat_attention'); }
 export const taskbarArtworkAvailable=desktop&&typeof navigator!=='undefined'&&/Windows/i.test(navigator.userAgent);
 export async function loadSystemArtwork(url:string) { return invoke<ArrayBuffer|number[]>('load_system_artwork',{url}); }
+export async function loadStageArtwork(roomId:string,trackId:string,url:string):Promise<Blob>{
+ let safe=normalizeAlbumCover(url);if(!safe)throw new Error('COVER_IMAGE_INVALID');
+ const imageUrl=new URL(safe);if(['.music.126.net','.music.163.com'].some(suffix=>imageUrl.hostname.endsWith(suffix))){imageUrl.searchParams.set('param','1024y1024');safe=imageUrl.href;}
+ if(desktop){const bytes=new Uint8Array(await loadSystemArtwork(safe));if(!bytes.length||bytes.length>10*1024*1024)throw new Error('COVER_IMAGE_TOO_LARGE');return new Blob([bytes]);}
+ const response=await fetch(base+`/api/rooms/${encodeURIComponent(roomId)}/music/${encodeURIComponent(trackId)}/cover/image`,{headers:{Authorization:`Bearer ${token}`},signal:AbortSignal.timeout(15000),cache:'no-store'});
+ if(!response.ok)throw new Error('COVER_IMAGE_UNAVAILABLE');
+ const blob=await response.blob();if(!blob.size||blob.size>10*1024*1024||!/^image\/(jpeg|png|webp|gif)$/.test(blob.type))throw new Error('COVER_IMAGE_INVALID');return blob;
+}
 export async function updateTaskbarArtwork(artwork:ArtworkFrame) { if(desktop)await invoke('update_taskbar_artwork',{artwork}); }
 export async function updateSystemMedia(state:SystemMediaState) { if(desktop)await invoke('update_system_media',{snapshot:state}); }
 export async function login(serverUrl: string, name: string, password: string, register: boolean): Promise<{ user: { id: string; name: string } }> {
@@ -237,15 +245,16 @@ export async function uploadedMusic(keywords='',offset=0,signal?:AbortSignal):Pr
 function albumCover(value: unknown): string {
  return normalizeAlbumCover(value)??'';
 }
-export async function searchMusic(keywords: string, offset = 0): Promise<{ songs: MusicSearchItem[]; total: number }> {
+export async function searchMusic(keywords: string, offset = 0, source:'netease'|'qq'='netease'): Promise<{ songs: MusicSearchItem[]; total: number }> {
+ if(source==='qq')return browserRequest('/qq/search?'+new URLSearchParams({keyword:keywords.trim(),offset:String(offset)}));
  const query = new URLSearchParams({keywords:keywords.trim(),type:'1',limit:'20',offset:String(offset)});
  const data = await browserRequest('/netease/cloudsearch?' + query);
  if(data.code!==200) throw new Error(data.code===301?'NETEASE_LOGIN_REQUIRED':'NETEASE_UNAVAILABLE');
  const songs = (data.result?.songs ?? []).map((s:any)=>({id:String(s.id),name:String(s.name??''),artists:(s.ar??s.artists??[]).map((a:any)=>a.name).join(' / '),album:String(s.al?.name??s.album?.name??''),coverUrl:albumCover(s.al?.picUrl??s.album?.picUrl),durationMs:Number(s.dt??s.duration??0)}));
  return {songs,total:Number(data.result?.songCount??songs.length)};
 }
-export async function addSearchedMusic(roomId:string,songId:string,requestId:string,coverUrl?:string) {
- const result = await browserRequest(`/rooms/${roomId}/music/netease`,{songId,requestId});
+export async function addSearchedMusic(roomId:string,songId:string,requestId:string,coverUrl?:string,source:'netease'|'qq'='netease') {
+ const result = await browserRequest(`/rooms/${roomId}/music/${source}`,{songId,requestId});
  if(!result.ok || !result.track?.sourceUrl)throw new Error('MUSIC_IMPORT_FAILED');
  rememberTrackArtwork(base,result.track.contentHash,albumCover(result.track.coverUrl)||coverUrl);
  return result.track as TrackMetadata;
@@ -259,8 +268,9 @@ export async function loadTrackCover(roomId:string,track:TrackMetadata):Promise<
  }catch{return '';}// Older servers may lack the backfill endpoint; never interrupt playback.
 }
 
-export async function suggestMusic(keywords:string,signal?:AbortSignal):Promise<string[]> {
+export async function suggestMusic(keywords:string,signal?:AbortSignal,source:'netease'|'qq'='netease'):Promise<string[]> {
  const term=keywords.trim();if(!term)return [];
+ if(source==='qq'){const data=await browserRequest('/qq/suggest?'+new URLSearchParams({keyword:term}),undefined,signal);return [...new Set<string>((Array.isArray(data.suggestions)?data.suggestions:[]).filter((s:unknown):s is string=>typeof s==='string'&&!!s.trim()&&s.length<=60).map((s:string)=>s.trim()))].slice(0,8);}
  const query=new URLSearchParams({keywords:term,type:'mobile'});
  const data=await browserRequest('/netease/search_suggest?'+query,undefined,signal);
  if(data.code!==200)throw new Error('NETEASE_UNAVAILABLE');
@@ -308,3 +318,5 @@ export async function songLyrics(id:string,signal?:AbortSignal) {
   return checkMusicResult(await browserRequest('/netease/lyric_new?'+new URLSearchParams({id}),undefined,signal));
 }
 export async function playMusic(roomId:string,trackId:string,requestId:string) { return browserRequest(`/rooms/${roomId}/music/play`,{trackId,requestId}); }
+
+export async function qqLyrics(id:string,signal?:AbortSignal){return browserRequest('/qq/lyrics/'+encodeURIComponent(id),undefined,signal);}

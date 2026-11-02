@@ -16,7 +16,7 @@ const clientModules = path.resolve(here, 'apps/client/node_modules');
 // externalized 的包会改从 vitest 自身位置解析，于是找不到 vue / pinia 等。
 // 按实际安装位置解析，同时兼容 pnpm 隔离依赖和 npm workspace 提升依赖。
 // 正则用 lookahead，vue 不会误吞 vue-router。
-const CLIENT_DEPS = ['@music-share/shared', '@vue/compiler-sfc', 'lucide-vue-next', 'music-metadata', 'pinia', 'three', 'vue-router', 'vue'];
+const CLIENT_DEPS = ['@music-share/shared', '@vue/compiler-sfc', 'lucide-vue-next', 'music-metadata', 'pinia', 'postprocessing', 'three', 'vue-router', 'vue'];
 const clientDepAlias = CLIENT_DEPS.map(name => ({
   find: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/|$)`),
   replacement: [clientModules, path.resolve(here, 'node_modules')]

@@ -3,6 +3,7 @@ import { randomBytes } from 'node:crypto';
 import type { ChatMessage, RoomSnapshot } from '../../../packages/shared/src';
 import { MusicImport } from './music-import';
 import { NeteaseService } from './netease';
+import { QqMusicService } from './qq';
 import { Auth } from './auth';
 import { Database, type DatabaseStore } from './database';
 import { MySqlDatabase, mysqlPool } from './mysql';
@@ -23,6 +24,7 @@ function configuredDatabase(): DatabaseStore {
 export class AppService implements OnModuleDestroy, OnModuleInit {
   readonly database = configuredDatabase();
   readonly netease = new NeteaseService(this.database);
+  readonly qq = new QqMusicService(this.database);
   readonly auth: Auth;
   readonly capacity = new Capacity();
   readonly turn = new PublicTurn();
@@ -52,7 +54,7 @@ export class AppService implements OnModuleDestroy, OnModuleInit {
     this.turn.stun(); // Fail fast on invalid STUN configuration.
     this.auth = new Auth(this.database, secret);
     this.engine = new RoomEngine(r => this.persist(r), r => { void this.flush().then(()=>this.subscribers.forEach(fn=>fn(r))).catch(()=>{}); }, Date.now, (key,hash)=>this.musicImport?.registered(key,hash)??false, message => { void this.flush().then(()=>this.activitySubscribers.forEach(fn=>fn(message))).catch(()=>{}); });
-    this.musicImport = new MusicImport(this.engine, this.netease, fetch, this.database);
+    this.musicImport = new MusicImport(this.engine, this.netease, fetch, this.database, Date.now, this.qq);
   }
   async onModuleInit() {
     if(this.database instanceof MySqlDatabase) {
@@ -67,5 +69,5 @@ export class AppService implements OnModuleDestroy, OnModuleInit {
     if (++record.count > maximum) throw new DomainError('RATE_LIMITED');
     if (this.attempts.size > 10000) for (const [k, v] of this.attempts) if (now - v.since > windowMs) this.attempts.delete(k);
   }
-  async onModuleDestroy() { clearInterval(this.ticker); try {await this.flush();} finally {await this.database.close();} }
+  async onModuleDestroy() { clearInterval(this.ticker); try {await this.flush();} finally {try{await this.qq.close();}finally{await this.database.close();}} }
 }

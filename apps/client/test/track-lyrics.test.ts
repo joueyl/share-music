@@ -1,10 +1,12 @@
 import { expect, it, vi } from 'vitest';
-import { createRenderer, nextTick, reactive } from 'vue';
+import { createRenderer, nextTick, reactive, ref, h, KeepAlive, defineComponent, onMounted, onUnmounted } from 'vue';
 import TrackLyrics from '../src/components/TrackLyrics.vue';
+import CachedPlaybackPage from '../src/components/CachedPlaybackPage.vue';
+import { useCachedActivity } from '../src/useCachedActivity';
 
-const fixture=vi.hoisted(()=>({app:null as any,lyrics:vi.fn(),metadata:vi.fn()}));
+const fixture=vi.hoisted(()=>({app:null as any,lyrics:vi.fn(),qqLyrics:vi.fn(),metadata:vi.fn()}));
 vi.mock('../src/store',()=>({useApp:()=>fixture.app}));
-vi.mock('../src/bridge',()=>({songLyrics:fixture.lyrics,trackMetadata:fixture.metadata}));
+vi.mock('../src/bridge',()=>({songLyrics:fixture.lyrics,qqLyrics:fixture.qqLyrics,trackMetadata:fixture.metadata}));
 
 // A minimal host exercises the real component's watches and rendered text without a browser.
 function node(type:string,text=''):any {
@@ -21,6 +23,32 @@ const renderer=createRenderer<any,any>({
 });
 const settle=async()=>{for(let i=0;i<6;i++){await Promise.resolve();await nextTick();}};
 const find=(n:any,type:string):any=>n.type===type?n:n.children.map((child:any)=>find(child,type)).find(Boolean);
+
+it('retains real lyrics and model instances across navigation, pauses hidden activity and evicts on session/room reset',async()=>{
+ fixture.app=reactive({connected:true,progress:1200,room:{id:'room',playback:{sourceId:'one'},playlist:[{id:'one',neteaseId:'123'},{id:'two',neteaseId:'456'}]}});
+ fixture.lyrics.mockReset().mockResolvedValue({lrc:{lyric:'[00:01]缓存歌词'}});
+ const mounted=vi.fn(),unmounted=vi.fn(),resume=vi.fn(),pause=vi.fn();
+ const Model=defineComponent({setup(){onMounted(mounted);onUnmounted(unmounted);useCachedActivity(resume,pause);return ()=>h('div','model');}});
+ const View=defineComponent({setup:()=>()=>h('section',[h(Model),h(TrackLyrics)])});
+ const page=ref('room'),scope=ref('user/room'),authenticated=ref(true);
+ const Root=defineComponent({setup:()=>()=>authenticated.value?h(KeepAlive,{key:scope.value,include:'CachedPlaybackPage',max:1},{default:()=>page.value==='room'?h(CachedPlaybackPage,{key:'/room/one',view:View}):h('div','lobby')}):h('div','auth')});
+ const app=renderer.createApp(Root);app.mount(node('root'));
+ try{
+  await settle();expect(mounted).toHaveBeenCalledTimes(1);expect(fixture.lyrics).toHaveBeenCalledTimes(1);
+  page.value='lobby';await settle();expect(pause).toHaveBeenCalledTimes(1);expect(unmounted).not.toHaveBeenCalled();
+  fixture.app.room.playback.sourceId='two';await settle();expect(fixture.lyrics).toHaveBeenCalledTimes(2);
+  page.value='room';await settle();expect(mounted).toHaveBeenCalledTimes(1);expect(fixture.lyrics).toHaveBeenCalledTimes(2);expect(resume).toHaveBeenCalledTimes(2);
+  scope.value='user/another-room';await settle();expect(unmounted).toHaveBeenCalledTimes(1);expect(mounted).toHaveBeenCalledTimes(2);
+  authenticated.value=false;await settle();expect(unmounted).toHaveBeenCalledTimes(2);
+ }finally{app.unmount();}
+});
+
+it('loads QQ lyrics by MID without issuing a NetEase lyrics request',async()=>{
+ fixture.app=reactive({connected:true,progress:1200,room:{id:'room',playback:{sourceId:'qq'},playlist:[{id:'qq',qqId:'001ABC'}]}});
+ fixture.lyrics.mockReset();fixture.qqLyrics.mockReset().mockResolvedValue({lrc:{lyric:'[00:01]QQ歌词'}});
+ const root=node('root'),app=renderer.createApp(TrackLyrics);app.mount(root);
+ try{await settle();expect(fixture.qqLyrics).toHaveBeenCalledWith('001ABC',expect.any(AbortSignal));expect(fixture.lyrics).not.toHaveBeenCalled();expect(find(root,'span').text).toBe('QQ歌词');}finally{app.unmount();}
+});
 
 it('keeps loaded lyrics across same-song snapshots and line gaps, but reloads on song changes',async()=>{
  fixture.app=reactive({connected:true,progress:1200,room:{id:'room',playback:{sourceId:'one'},playlist:[{id:'one',neteaseId:'123'},{id:'two',neteaseId:'456'}]}});

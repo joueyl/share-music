@@ -140,3 +140,13 @@ it('returns fresh URL and MD5 from the authenticated refresh endpoint and rechec
  await expect(f.service.playbackSource(f.room.id,f.user,track.id,true)).rejects.toThrow('NOT_IN_ROOM');
  expect(f.request).not.toHaveBeenCalled();
 });
+
+it('checks room membership before and after a stage cover download and coalesces image requests',async()=>{
+ const f=fixture(),track=await f.service.add(f.room.id,f.user,'123',randomUUID());
+ let finish!:(r:Response)=>void;f.request.mockImplementation(()=>new Promise(r=>finish=r));
+ const first=f.service.coverImage(f.room.id,f.user,track.id),second=f.service.coverImage(f.room.id,f.user,track.id);
+ for(let i=0;i<12;i++)await Promise.resolve();expect(f.request).toHaveBeenCalledTimes(1);
+ finish(new Response(new Uint8Array([1,2]),{headers:{'content-type':'image/jpeg'}}));expect((await first).bytes.length).toBe(2);await second;
+ const late=f.service.coverImage(f.room.id,f.user,track.id);for(let i=0;i<12;i++)await Promise.resolve();f.engine.leave(f.room.id,f.user);
+ finish(new Response(new Uint8Array([1,2]),{headers:{'content-type':'image/jpeg'}}));await expect(late).rejects.toThrow('NOT_IN_ROOM');
+});

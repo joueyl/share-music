@@ -50,10 +50,10 @@ export interface StageThemeState {
 }
 
 export const TURNTABLE_VINYL_EDITIONS = {
-  silver: { name: '白金银 (原版)', color: '#d8dedb', metalness: 0.88, roughness: 0.22 },
-  black: { name: '经典黑胶', color: '#141615', metalness: 0.15, roughness: 0.28 },
-  gold: { name: '典藏香槟金', color: '#ecd588', metalness: 0.90, roughness: 0.20 },
-  emerald: { name: '墨玉翡翠绿', color: '#244f3d', metalness: 0.55, roughness: 0.25 }
+  silver: { name: '白金银 (原版)', color: '#d8dedb', metalness: 0.88, roughness: 0.42, envMapIntensity: 0.45 },
+  black: { name: '经典黑胶', color: '#141615', metalness: 0.15, roughness: 0.38, envMapIntensity: 0.45 },
+  gold: { name: '典藏香槟金', color: '#ecd588', metalness: 0.90, roughness: 0.40, envMapIntensity: 0.45 },
+  emerald: { name: '墨玉翡翠绿', color: '#244f3d', metalness: 0.55, roughness: 0.42, envMapIntensity: 0.45 }
 };
 
 export const TURNTABLE_PLINTH_COLORS = {

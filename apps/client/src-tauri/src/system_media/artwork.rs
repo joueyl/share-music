@@ -63,10 +63,11 @@ pub fn cover_url(value: &str) -> Result<url::Url, String> {
         || url.password().is_some()
         || url.port().is_some_and(|p| p != 443)
         || url.fragment().is_some()
-        || ![".music.126.net", ".music.163.com"].iter().any(|suffix| {
-            host.strip_suffix(suffix)
-                .is_some_and(|label| !label.is_empty())
-        })
+        || !(host == "y.gtimg.cn"
+            || [".music.126.net", ".music.163.com"].iter().any(|suffix| {
+                host.strip_suffix(suffix)
+                    .is_some_and(|label| !label.is_empty())
+            }))
     {
         return Err("SYSTEM_ARTWORK_URL_INVALID".into());
     }
@@ -187,7 +188,10 @@ mod tests {
     fn artwork_downloads_are_restricted_to_https_provider_images() {
         assert!(cover_url("https://p1.music.126.net/cover.jpg").is_ok());
         assert!(cover_url("https://p2.music.163.com/cover.png").is_ok());
+        assert!(cover_url("https://y.gtimg.cn/music/cover.jpg").is_ok());
         for url in [
+            "https://y.gtimg.cn.evil.test/a",
+            "https://other.gtimg.cn/a",
             "http://p1.music.126.net/a",
             "https://127.0.0.1/a",
             "https://p1.music.126.net.evil.test/a",

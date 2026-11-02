@@ -12,3 +12,8 @@ it('styles native permission selects without replacing their semantics',()=>{
  expect(css).toContain('max-height:min(320px,calc(100dvh - 32px))');expect(css).toContain('option:checked');
  expect(css).toContain('pointer:coarse');expect(css).toContain('prefers-reduced-motion:reduce');expect(css).toContain('forced-colors:active');
 });
+
+it('reuses the accessible shared native select for the music source picker',()=>{
+ const source=read('../src/components/MusicSearchDialog.vue');
+ expect(source).toContain('class="tone-select music-source-select"');expect(source).toContain('aria-label="搜索音源"');expect(source).toContain('音源平台');expect(source).toContain('pointer-events:none');expect(source).toContain('min-height:44px');expect(source).toContain('.music-source-select:focus-visible');expect(source).toContain('@media(forced-colors:active)');
+});

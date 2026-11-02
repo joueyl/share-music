@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as THREE from 'three';
+import { useCachedActivity } from '../useCachedActivity';
+import { createStageArtworkLoader } from '../stage-artwork';
+import { loadStageArtwork } from '../bridge';
 import { createStageViewport, STAGE_RENDERER_OPTIONS } from '../stage-viewport';
+import { createStagePostprocessing } from '../stage-postprocessing';
+import { createStageEnvironment } from '../stage-environment';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RotateCcw } from 'lucide-vue-next';
@@ -56,6 +61,8 @@ let labelTexture: THREE.CanvasTexture;
 let currentCoverImage: HTMLImageElement | null = null;
 
 let animId: number = 0;
+let resumeStage=()=>{},pauseStage=()=>{};
+const stageActive=useCachedActivity(()=>resumeStage(),()=>pauseStage());
 
 // Default camera framing state for reset
 let defaultCamPos = new THREE.Vector3(0, 4.2, 0.85);
@@ -64,7 +71,7 @@ let userHasInteracted = false;
 
 // Draw Ultra HD Dynamic Vinyl Label
 function drawDynamicLabel() {
-  if (!labelCtx) return;
+  if (!stageActive.value || !labelCtx) return;
   const s = LABEL_SIZE;
   const cx = s / 2;
   const cy = s / 2;
@@ -141,64 +148,9 @@ function drawDynamicLabel() {
   }
 }
 
-// Convert low-res thumbnail URLs (e.g. 130y130) to Ultra HD (1024y1024)
-function upgradeToHdCoverUrl(rawUrl?: string): string {
-  if (!rawUrl) return '';
-  try {
-    // If it's a NetEase music CDN image with ?param=...
-    if (rawUrl.includes('music.126.net') || rawUrl.includes('music.163.com')) {
-      const baseUrl = rawUrl.split('?')[0];
-      return `${baseUrl}?param=1024y1024`;
-    }
-  } catch (e) {
-    // fallback to original
-  }
-  return rawUrl;
-}
-
-function loadAlbumCover(url?: string) {
-  if (!url) {
-    currentCoverImage = null;
-    drawDynamicLabel();
-    return;
-  }
-
-  const hdUrl = upgradeToHdCoverUrl(url);
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.onload = () => {
-    currentCoverImage = img;
-    drawDynamicLabel();
-  };
-  img.onerror = () => {
-    // fallback to original url if HD param failed
-    if (hdUrl !== url) {
-      const fallbackImg = new Image();
-      fallbackImg.crossOrigin = 'anonymous';
-      fallbackImg.onload = () => {
-        currentCoverImage = fallbackImg;
-        drawDynamicLabel();
-      };
-      fallbackImg.onerror = () => {
-        currentCoverImage = null;
-        drawDynamicLabel();
-      };
-      fallbackImg.src = url;
-    } else {
-      currentCoverImage = null;
-      drawDynamicLabel();
-    }
-  };
-  img.src = hdUrl;
-}
-
-watch(
-  () => props.coverUrl,
-  (newUrl) => {
-    loadAlbumCover(newUrl);
-  },
-  { immediate: true }
-);
+const coverLoader=createStageArtworkLoader(url=>loadStageArtwork(app.room?.id??'',props.track?.id??'',url),image=>{currentCoverImage=image;drawDynamicLabel();});
+watch([()=>props.coverUrl,()=>props.track?.id,()=>app.room?.id],()=>{void coverLoader.set(props.coverUrl,JSON.stringify([app.room?.id,props.track?.id]));},{immediate:true});
+onUnmounted(()=>coverLoader.dispose());
 
 watch(
   () => props.track?.id,
@@ -215,6 +167,11 @@ function updateMaterials() {
     mat.color.set(vEdition.color);
     mat.metalness = vEdition.metalness;
     mat.roughness = vEdition.roughness;
+    // The GLB's dark roughness channel multiplies this by ~0.32, turning even
+    // satin presets into a mirror. Keep its groove normals/metalness map, but
+    // use the explicit finish roughness instead of that glossy multiplier.
+    mat.roughnessMap = null;
+    mat.envMapIntensity = vEdition.envMapIntensity;
     mat.needsUpdate = true;
   }
 
@@ -299,12 +256,12 @@ onMounted(() => {
   // Renderer: 100% transparent background to blend seamlessly with room
   renderer = new THREE.WebGLRenderer(STAGE_RENDERER_OPTIONS);
   renderer.setClearColor(0x000000, 0);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   container.appendChild(renderer.domElement);
+  const environment = createStageEnvironment(renderer, scene);
 
   // OrbitControls: Allows user to freely drag, rotate 360°, inspect, and zoom!
   controls = new OrbitControls(camera, renderer.domElement);
@@ -439,12 +396,17 @@ onMounted(() => {
     updateCameraFraming();
   });
 
-  const viewport = createStageViewport(renderer, container, updateCameraFraming);
+  const postprocessing = createStagePostprocessing(renderer, scene, camera);
+  const viewport = createStageViewport(renderer, container, (w, h) => {
+    postprocessing.setSize(w, h);
+    updateCameraFraming();
+  });
 
   // Animation Loop
   const clock = new THREE.Clock();
 
   function animate() {
+    animId=0;if(!stageActive.value)return;
     animId = requestAnimationFrame(animate);
     viewport.sync();
     const delta = Math.min(clock.getDelta(), 0.05);
@@ -493,14 +455,18 @@ onMounted(() => {
       controls.update();
     }
 
-    renderer.render(scene, camera);
+    postprocessing.render(delta);
   }
 
-  animate();
+  pauseStage=()=>{cancelAnimationFrame(animId);animId=0;clock.stop();};
+  resumeStage=()=>{if(animId||!stageActive.value)return;const elapsed=clock.elapsedTime;clock.start();clock.elapsedTime=elapsed;viewport.sync();updateCameraFraming();drawDynamicLabel();animate();};
+  resumeStage();
 
   onUnmounted(() => {
     cancelAnimationFrame(animId);
     viewport.dispose();
+    postprocessing.dispose();
+    environment.dispose();
     if (controls) {
       controls.dispose();
     }

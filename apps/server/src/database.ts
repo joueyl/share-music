@@ -71,17 +71,17 @@ export class Database {
   saveMusicDetail(scope:string,source:string,song:unknown) { this.db.prepare('INSERT INTO music_details(scope,source,song) VALUES(?,?,?) ON CONFLICT(scope,source) DO UPDATE SET song=excluded.song').run(scope,source,JSON.stringify(song)); }
   getMusicDetail(scope:string,source:string):unknown { const row=this.db.prepare('SELECT song FROM music_details WHERE scope=? AND source=?').get(scope,source) as {song:string}|undefined; return row?JSON.parse(row.song):undefined; }
   findMusicByHash(hash:string): {source:string;track:TrackMetadata}|undefined {
-    const row=this.db.prepare("SELECT source,track FROM music_sources WHERE json_extract(track,'$.contentHash')=? AND source LIKE 'netease:standard:%' ORDER BY (scope='netease') DESC,rowid DESC LIMIT 1").get(hash) as {source:string;track:string}|undefined;
+    const row=this.db.prepare("SELECT source,track FROM music_sources WHERE json_extract(track,'$.contentHash')=? AND (source LIKE 'netease:standard:%' OR source LIKE 'qq:128:%') ORDER BY (scope='netease') DESC,rowid DESC LIMIT 1").get(hash) as {source:string;track:string}|undefined;
     return row?{source:row.source,track:JSON.parse(row.track)}:undefined;
   }
   musicLibrary(query:string,offset:number,limit:number) {
-    const rows=this.db.prepare("SELECT source,track FROM music_sources WHERE source LIKE 'netease:standard:%' ORDER BY (scope='netease') DESC,rowid DESC").all();
+    const rows=this.db.prepare("SELECT source,track FROM music_sources WHERE (source LIKE 'netease:standard:%' OR source LIKE 'qq:128:%') ORDER BY (scope='netease') DESC,rowid DESC").all();
     const seen=new Set<string>();const songs=[];
     for(const row of rows){
       const track=JSON.parse(String(row.track)),key=String(track.contentHash||row.source);if(seen.has(key))continue;seen.add(key);
       const neteaseId=/^netease:standard:(\d{1,20})$/.exec(String(row.source))?.[1];
       if(!(String(track.name??'')+' '+String(track.artists??'')+' '+String(track.album??'')).toLowerCase().includes(query.toLowerCase()))continue;
-      songs.push({id:String(track.contentHash??''),name:String(track.name??'未知音乐'),artists:String(track.artists??''),album:String(track.album??''),coverUrl:track.coverUrl??'',durationMs:track.durationMs??null,sizeBytes:track.sizeBytes??null,canAdd:!!neteaseId,neteaseId});
+      songs.push({id:String(track.contentHash??''),name:String(track.name??'未知音乐'),artists:String(track.artists??''),album:String(track.album??''),coverUrl:track.coverUrl??'',durationMs:track.durationMs??null,sizeBytes:track.sizeBytes??null,canAdd:!!neteaseId||!!track.qqId,neteaseId,...(track.qqId?{qqId:track.qqId}:{})});
     }
     return {total:songs.length,songs:songs.slice(offset,offset+limit)};
   }

@@ -7,6 +7,7 @@ import { useApp } from './store';
 import { ui, openSearch, resetUi } from './ui';
 import * as bridge from './bridge';
 import AuthPage from './components/AuthPage.vue';
+import CachedPlaybackPage from './components/CachedPlaybackPage.vue';
 import SplashScreen from './components/SplashScreen.vue';
 import GlobalPlayer from './components/GlobalPlayer.vue';
 import QueueDrawer from './components/QueueDrawer.vue';
@@ -25,6 +26,7 @@ const isMaximized = ref(false);
 const app = useApp(), router = useRouter(), route = useRoute();
 
 const inRoom = computed(() => !!route.path.startsWith('/room/'));
+const playbackCacheKey=computed(()=>JSON.stringify([app.user?.id,app.room?.id??(inRoom.value?route.params.id:null)]));
 const transitionName = ref('page');
 
 router.beforeEach((to, from) => {
@@ -267,9 +269,10 @@ function onHeaderMouseDown(e: MouseEvent) {
       <AuthPage v-if="!app.user" @version="versionOpen = true" />
       <router-view v-else v-slot="{ Component, route }">
         <Transition :name="transitionName" mode="out-in" appear>
-          <div :key="route.path" class="route-page" :class="{ 'in-room-page': inRoom }">
-            <component :is="Component" />
-          </div>
+          <KeepAlive :key="playbackCacheKey" include="CachedPlaybackPage" :max="1">
+            <CachedPlaybackPage v-if="route.path.startsWith('/room/')" :key="route.path" :view="Component" />
+            <div v-else :key="route.path" class="route-page"><component :is="Component" /></div>
+          </KeepAlive>
         </Transition>
       </router-view>
     </main>
@@ -297,6 +300,11 @@ function onHeaderMouseDown(e: MouseEvent) {
   border-radius: 0;
   box-shadow: none;
 }
+
+/* Auth owns one viewport. Scroll only when the real form cannot fit (small
+   windows, registration, large text); never discard inputs below the shell. */
+.shell.auth-shell { height: 100dvh; min-height: 0; }
+.shell.auth-shell .main { padding: 0; overflow: auto; }
 
 .shell .tone-navigation,
 .shell :deep(.tone-navigation) {
@@ -435,7 +443,6 @@ function onHeaderMouseDown(e: MouseEvent) {
 }
 
 .shell.in-room-shell .main {
-  padding-top: 52px;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }

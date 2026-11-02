@@ -1,10 +1,10 @@
 import { onScopeDispose, ref, watch, type Ref } from 'vue';
 import { suggestMusic } from './bridge';
-export function useMusicSuggestions(keywords:Ref<string>,enabled:Ref<boolean>,load=suggestMusic) {
+export function useMusicSuggestions(keywords:Ref<string>,enabled:Ref<boolean>,load=suggestMusic,source?:Ref<string>) {
  const items=ref<string[]>([]),loading=ref(false),active=ref(-1),error=ref(''),loaded=ref(false);
  let generation=0,timer:ReturnType<typeof setTimeout>|undefined,controller:AbortController|undefined;
  function dismiss(){generation++;clearTimeout(timer);controller?.abort();items.value=[];loading.value=false;active.value=-1;error.value='';loaded.value=false;}
- watch([keywords,enabled],([text,allowed])=>{
+ watch(()=>[keywords.value,enabled.value,source?.value] as const,([text,allowed])=>{
   dismiss();const term=text.trim();if(!allowed||!term)return;
   const current=generation;
   timer=setTimeout(async()=>{

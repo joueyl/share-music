@@ -5,3 +5,4 @@
 **/*.sqlite*
 native/build
 .git
+**/.qq-music

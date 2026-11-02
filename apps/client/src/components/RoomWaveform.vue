@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { createPlaybackWaveform } from '../bridge';
+import { useCachedActivity } from '../useCachedActivity';
 import type { WaveformState } from '../audio-waveform';
 import { spectrumLevels } from '../audio-waveform';
 
@@ -9,6 +10,7 @@ const canvas = ref<HTMLCanvasElement | null>(null), state = ref<WaveformState>('
 let reader: ReturnType<typeof createPlaybackWaveform> = null, observer: ResizeObserver | null = null;
 let frame = 0, lastFrame = 0, width = 0, height = 0, disposed = false;
 let reduced: MediaQueryList | null = null;
+const pageActive=useCachedActivity(()=>wake(),()=>{cancelAnimationFrame(frame);frame=0;});
 function clear() { const c = canvas.value; if (c) c.getContext('2d')?.clearRect(0, 0, c.width, c.height); }
 function draw() {
   const context = canvas.value?.getContext('2d'); if (!context || !reader) return;
@@ -28,16 +30,16 @@ function draw() {
 }
 function tick(now: number) {
   frame = 0;
-  if (disposed || document.hidden || !props.playing) return;
+  if (disposed || !pageActive.value || document.hidden || !props.playing) return;
   if (now - lastFrame >= (reduced?.matches ? 1000 : 1000 / 30)) { draw(); lastFrame = now; }
   if (!reduced?.matches || state.value === 'idle') frame = requestAnimationFrame(tick);
 }
 function restart() {
   cancelAnimationFrame(frame); frame = 0; clear();
-  if (!disposed && !document.hidden && props.playing) { lastFrame = 0; frame = requestAnimationFrame(tick); }
+  if (!disposed && pageActive.value && !document.hidden && props.playing) { lastFrame = 0; frame = requestAnimationFrame(tick); }
   else state.value = 'idle';
 }
-function wake() { restart();void reader?.resume().then(() => { if (!disposed) restart(); }); }
+function wake() { if(!pageActive.value)return;restart();void reader?.resume().then(() => { if (!disposed) restart(); }); }
 watch(() => [props.playing, props.sourceId], () => { if (props.playing) wake(); else restart(); });
 onMounted(() => {
   reader = createPlaybackWaveform(); reduced = matchMedia('(prefers-reduced-motion: reduce)');

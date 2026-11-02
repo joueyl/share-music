@@ -36,3 +36,6 @@ HTTP 路径 `GET /api/netease/:method`（查询参数）或 `POST /api/netease/:
 优先在服务器设置 `NETEASE_LOGIN_ORIGIN` 为浏览器实际访问的 Origin，例如 `https://music.example.com:8443`，不要包含 `/loginServe`、查询参数或片段。管理密码 `NETEASE_ADMIN_TOKEN` 保持配置。正常进程重启后生效；Docker Compose 的 env_file 改动需要重新创建 API 容器（`docker compose -f deploy/compose.yml up -d --build --force-recreate api`，在项目根目录执行），仅 restart 不更新容器环境变量。
 
 Nginx `/loginServe` 转发需覆盖 `Host $http_host` 和 `X-Forwarded-Proto $scheme`，保留外部端口且不允许客户端伪造协议。新代码仅接受直接连接的回环代理传来的单一 http/https 协议头，不全局启用 trust proxy；Docker 网桥或其他代理需显式配置上述 Origin。配置错误仍拒绝跨站来源，并显示专用错误 `NETEASE_LOGIN_ORIGIN_FORBIDDEN`，不会关闭管理认证或放开所有来源。
+
+
+`/loginServe` 也可切换 QQ 音乐扫码，两种音源会话独立；网易云原有配置和操作不变。QQ 部署与范围见 [QQ-MUSIC.md](QQ-MUSIC.md)。

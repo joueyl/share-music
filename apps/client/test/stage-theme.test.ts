@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   stageTheme,
@@ -6,6 +7,7 @@ import {
   hexToRgbTriplet,
   lumiereCssVars,
   IPOD_PRESETS,
+  TURNTABLE_VINYL_EDITIONS,
   LUMIERE_PRESETS
 } from '../src/stage-theme';
 
@@ -151,4 +153,16 @@ describe('lumiere theme config', () => {
     expect(fresh.stageTheme.ipod.preset).toBe('u2');
     expect(fresh.stageTheme.turntable.vinylEdition).toBe('black');
   });
+});
+
+it('uses restrained satin vinyl reflections without reducing the silver/gold metalness',()=>{
+ expect(TURNTABLE_VINYL_EDITIONS.silver).toMatchObject({color:'#d8dedb',metalness:0.88,roughness:0.42,envMapIntensity:0.45});
+ expect(TURNTABLE_VINYL_EDITIONS.gold.metalness).toBe(0.90);
+ for(const finish of Object.values(TURNTABLE_VINYL_EDITIONS)){expect(finish.roughness).toBeGreaterThanOrEqual(0.38);expect(finish.envMapIntensity).toBe(0.45);}
+});
+
+it('applies satin roughness to the vinyl mesh without the GLB glossy multiplier',()=>{
+ const source=readFileSync(new URL('../src/components/TurntableStage.vue',import.meta.url),'utf8');
+ const vinyl=source.slice(source.indexOf('if (vinylMesh && vinylMesh.material)'),source.indexOf('const pColor ='));
+ expect(vinyl).toContain('mat.roughnessMap = null');expect(vinyl).toContain('mat.envMapIntensity = vEdition.envMapIntensity');expect(vinyl).not.toContain('normalMap = null');expect(vinyl).not.toContain('metalnessMap = null');
 });

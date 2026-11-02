@@ -18,3 +18,4 @@ downloaded-artifacts/
 *.key
 
 .claude/
+.qq-music/

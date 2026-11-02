@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { positionAt } from '@music-share/shared';
 import { useApp } from '../store';
+import { useCachedActivity } from '../useCachedActivity';
 import { stageTheme } from '../stage-theme';
 import { nowMs, subscribeLyricClock } from '../lyrics/lyricClock';
 import { glowPhaseAt, type GlowPhase, type GlowWordModel } from '../lyrics/glowWordTiming';
@@ -26,7 +27,10 @@ function syncPhase() {
   if (next !== phase.value) phase.value = next;
 }
 
-onMounted(() => { stopClock = subscribeLyricClock(syncPhase); });
+function startClock(){if(pageActive.value&&!stopClock){syncPhase();stopClock=subscribeLyricClock(syncPhase);}}
+function pauseClock(){stopClock?.();stopClock=undefined;}
+const pageActive=useCachedActivity(startClock,pauseClock);
+onMounted(startClock);
 onUnmounted(() => stopClock?.());
 
 const wordVars = computed(() => {

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { roomSettingsSchema } from '../../../packages/shared/src';
 it('documents every HTTP route and resolves all local OpenAPI references',()=>{
   const doc=JSON.parse(readFileSync('docs/openapi.json','utf8'));
-  for(const [file,prefix] of [['controller.ts','/api/'],['netease.controller.ts','/']]) {
+  for(const [file,prefix] of [['controller.ts','/api/'],['netease.controller.ts','/'],['qq.controller.ts','/']]) {
     const source=readFileSync('apps/server/src/'+file,'utf8');
     for(const match of source.matchAll(/@(Get|Post|Put)\('([^']+)'\)/g)) {
       const path=(prefix+match[2]).replace(/:([A-Za-z]+)/g,'{$1}');

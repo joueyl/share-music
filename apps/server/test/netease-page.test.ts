@@ -9,6 +9,7 @@ function page() {
   return elements.get(id);
  };
  const tabs=['qr','phone','email'].map(mode=>Object.assign(element('tab-'+mode),{dataset:{mode}}));
+ element('channel').options=['qq','wechat','qqmusic'].map(value=>({value,disabled:false}));element('channel').value='qq';
  const pending:{path:string;data:any;resolve:(value:any)=>void}[]=[];
  const fetch=vi.fn((path:string,options:any)=>new Promise(resolve=>pending.push({path,data:JSON.parse(options.body),resolve})));
  const timers:any[]=[];
@@ -25,6 +26,25 @@ it('switches login methods, disables irrelevant required fields and ignores stal
  expect(p.pending).toHaveLength(1);expect(p.element('qr').hidden).toBe(true);
  p.element('password').value='secret';p.tabs[2].onclick();
  expect(p.element('password').value).toBe('');expect(p.element('phone').disabled).toBe(true);expect(p.element('countrycode').disabled).toBe(true);expect(p.element('email').disabled).toBe(false);
+});
+it('switches the management provider to supported QQ channels and never exposes a session token',async()=>{
+ const p=page();p.element('provider').value='qq';p.element('provider').onchange();
+ expect(p.element('netease-methods').hidden).toBe(true);expect(p.element('account-form').hidden).toBe(true);
+ expect(p.pending[1].path).toBe('/loginServe/qq/channels');
+ await p.respond(1,{channels:['qq','wechat']});
+ expect(p.pending[2]).toMatchObject({path:'/loginServe/qq/qr',data:{channel:'qq'}});
+ expect(p.element('channel').options[2].disabled).toBe(true);
+ await p.respond(2,{image:'data:image/jpeg;base64,AA==',sessionId:'qq-session'});
+ expect(p.pending[3]).toMatchObject({path:'/loginServe/qq/check',data:{sessionId:'qq-session'}});
+ await p.respond(3,{code:803});expect(p.element('status').textContent).toContain('登录成功');
+ await p.respond(0,{image:'stale-image',sessionId:'stale'});expect(p.element('qr').src).not.toBe('stale-image');
+});
+it('cancels an active QQ QR when switching back to NetEase',async()=>{
+ const p=page();p.element('provider').value='qq';p.element('provider').onchange();
+ await p.respond(1,{channels:['qq']});await p.respond(2,{image:'data:image/png;base64,AA==',sessionId:'qq-session'});
+ p.element('provider').value='netease';p.element('provider').onchange();
+ expect(p.pending.some(call=>call.path==='/loginServe/qq/cancel'&&call.data.sessionId==='qq-session')).toBe(true);
+ await p.respond(3,{code:803});expect(p.element('status').textContent).not.toContain('登录成功');
 });
 it('submits phone/email login once, shows real status and clears passwords on success and failure',async()=>{
  const p=page();p.tabs[1].onclick();

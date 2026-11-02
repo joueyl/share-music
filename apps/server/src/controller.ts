@@ -6,10 +6,11 @@ import { permissionsSchema, roomSettingsSchema } from '../../../packages/shared/
 import { AppService } from './app.service';
 import { DomainError } from './engine';
 import { resolvePlaylistShareLink } from './playlist-link';
+import { qqMid } from './qq';
 const loginSchema = z.object({ name: z.string().trim().min(2).max(40), password: z.string().min(10).max(128), register: z.boolean().default(false) }).strict();
 export function httpError(error: unknown): never {
   if (error instanceof z.ZodError) throw new HttpException({ error: 'INVALID_REQUEST', issues: error.issues.map(i => ({ path: i.path, message: i.message })) }, 400);
-  if (error instanceof DomainError) throw new HttpException({ error: error.code }, error.code === 'LOCAL_UPLOAD_NOT_SUPPORTED' ? 410 : error.code === 'DATABASE_UNAVAILABLE' ? 503 : error.code === 'UNAUTHORIZED' || error.code === 'INVALID_CREDENTIALS' ? 401 : error.code === 'RATE_LIMITED' ? 429 : error.code === 'HOST_ONLY' || error.code === 'FORBIDDEN' || error.code === 'NETEASE_LOGIN_ORIGIN_FORBIDDEN' ? 403 : 400);
+  if (error instanceof DomainError) throw new HttpException({ error: error.code }, error.code === 'LOCAL_UPLOAD_NOT_SUPPORTED' ? 410 : error.code === 'DATABASE_UNAVAILABLE' || error.code === 'QQ_LOGIN_REQUIRED' ? 503 : error.code === 'QQ_MUSIC_UNAVAILABLE' || error.code === 'QQ_INVALID_RESPONSE' || error.code === 'COVER_IMAGE_UNAVAILABLE' ? 502 : error.code === 'UNAUTHORIZED' || error.code === 'INVALID_CREDENTIALS' ? 401 : error.code === 'RATE_LIMITED' || error.code === 'QQ_MUSIC_RATE_LIMITED' ? 429 : error.code === 'HOST_ONLY' || error.code === 'FORBIDDEN' || error.code === 'NETEASE_LOGIN_ORIGIN_FORBIDDEN' ? 403 : 400);
   throw error;
 }
 @Controller('api')
@@ -35,6 +36,12 @@ export class ApiController {
       const track=await this.app.musicImport.add(z.string().uuid().parse(id),user.id,songId,requestId);
       await this.app.flush();return {ok:true,track};
     } catch(e) {httpError(e);}
+  }
+  @Post('rooms/:id/music/qq') async addQq(@Param('id') id:string,@Body() body:unknown,@Headers('authorization') header?:string){
+    try{const user=await this.user(header);this.app.limit(`music-import:${user.id}`,200,600000);
+      const {songId,requestId}=z.object({songId:z.string().regex(qqMid),requestId:z.string().uuid()}).strict().parse(body);
+      const track=await this.app.musicImport.addQq(z.string().uuid().parse(id),user.id,songId,requestId);await this.app.flush();return {ok:true,track};
+    }catch(e){httpError(e);}
   }
   @Post('rooms/:id/music/uploaded') async addUploaded(@Param('id') id:string,@Body() body:unknown,@Headers('authorization') header?:string) {
     try{
@@ -69,6 +76,12 @@ export class ApiController {
     try {
       const user=await this.user(header);this.app.limit(`music-cover:${user.id}`,30,60000);
       return {coverUrl:await this.app.musicImport.cover(z.string().uuid().parse(id),user.id,z.string().uuid().parse(trackId))};
+    }catch(e){httpError(e);}
+  }
+  @Get('rooms/:id/music/:trackId/cover/image') @Header('Cache-Control','private, no-store') async coverImage(@Param('id') id:string,@Param('trackId') trackId:string,@Headers('authorization') header?:string){
+    try{const user=await this.user(header);this.app.limit(`cover-image:${user.id}`,60,60000);this.app.limit('cover-image:global',120,60000);
+      const image=await this.app.musicImport.coverImage(z.string().uuid().parse(id),user.id,z.string().uuid().parse(trackId));
+      return new StreamableFile(image.bytes,{type:image.type,length:image.bytes.length});
     }catch(e){httpError(e);}
   }
   @Get('rooms/:id/music/:trackId/audio') @Header('Cache-Control','private, no-store') async browserAudio(@Param('id') id:string,@Param('trackId') trackId:string,@Headers('authorization') header?:string) {

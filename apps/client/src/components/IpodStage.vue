@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as THREE from 'three';
+import { useCachedActivity } from '../useCachedActivity';
+import { createStageArtworkLoader } from '../stage-artwork';
+import { loadStageArtwork } from '../bridge';
 import { createStageViewport, STAGE_RENDERER_OPTIONS } from '../stage-viewport';
+import { createStagePostprocessing } from '../stage-postprocessing';
+import { createStageEnvironment } from '../stage-environment';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { RotateCcw } from 'lucide-vue-next';
@@ -43,6 +48,8 @@ let wheelCanvasTexture: THREE.CanvasTexture;
 
 let currentCoverImg: HTMLImageElement | null = null;
 let animId: number = 0;
+let resumeStage=()=>{},pauseStage=()=>{};
+const stageActive=useCachedActivity(()=>resumeStage(),()=>pauseStage());
 let progressTimer: number = 0;
 
 let targetRotX = 0; // 默认 0 垂直端正立起，绝不倾斜
@@ -167,7 +174,7 @@ function drawLiveWheel() {
 
 // 动态绘制 1024x680 标准视网膜活体屏幕（高对比度，消除超高频缩小模糊）
 function drawLiveScreen() {
-  if (!screenCtx) return;
+  if (!stageActive.value || !screenCtx) return;
   screenCtx.clearRect(0, 0, SCREEN_W, SCREEN_H);
 
   // 1. 经典拟物底色
@@ -362,24 +369,9 @@ function drawLiveScreen() {
   }
 }
 
-function loadCoverImage(url?: string) {
-  if (!url) {
-    currentCoverImg = null;
-    drawLiveScreen();
-    return;
-  }
-  const img = new Image();
-  img.crossOrigin = 'anonymous';
-  img.onload = () => {
-    currentCoverImg = img;
-    drawLiveScreen();
-  };
-  img.onerror = () => {
-    currentCoverImg = null;
-    drawLiveScreen();
-  };
-  img.src = url;
-}
+const coverLoader=createStageArtworkLoader(url=>loadStageArtwork(app.room?.id??'',props.track?.id??'',url),image=>{currentCoverImg=image;drawLiveScreen();});
+watch([()=>props.coverUrl,()=>props.track?.id,()=>app.room?.id],()=>{void coverLoader.set(props.coverUrl,JSON.stringify([app.room?.id,props.track?.id]));},{immediate:true});
+onUnmounted(()=>coverLoader.dispose());
 
 function updateThemeMaterials() {
   if (frontCaseMesh) {
@@ -404,7 +396,6 @@ watch(
   updateThemeMaterials
 );
 
-watch(() => props.coverUrl, (url) => loadCoverImage(url), { immediate: true });
 watch(() => [props.track?.id, props.track?.name, app.room?.playback.playState], () => drawLiveScreen());
 
 // 纯展示：未主动自由旋转且开启了视差开关时，支持鼠标平滑微动
@@ -451,12 +442,12 @@ onMounted(() => {
   camera.position.set(0, 0.01, 2.78);
 
   renderer = new THREE.WebGLRenderer(STAGE_RENDERER_OPTIONS);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.15;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   container.appendChild(renderer.domElement);
+  const environment = createStageEnvironment(renderer, scene);
 
   // OrbitControls: 允许用户自由拖拽 360° 全方位把玩、旋转、缩放 iPod 机身
   controls = new OrbitControls(camera, renderer.domElement);
@@ -596,7 +587,9 @@ onMounted(() => {
     updateThemeMaterials();
   });
 
+  const postprocessing = createStagePostprocessing(renderer, scene, camera);
   const viewport = createStageViewport(renderer, container, (w, h) => {
+    postprocessing.setSize(w, h);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
   });
@@ -605,9 +598,11 @@ onMounted(() => {
   const clock = new THREE.Clock();
 
   function animate() {
+    animId=0;if(!stageActive.value)return;
     animId = requestAnimationFrame(animate);
     viewport.sync();
-    const elapsedTime = clock.getElapsedTime();
+    const delta = Math.min(clock.getDelta(), 0.05);
+    const elapsedTime = clock.elapsedTime;
 
     if (ipodGroup) {
       const isPlaying = app.room?.playback.playState === 'playing';
@@ -648,21 +643,24 @@ onMounted(() => {
       controls.update();
     }
 
-    renderer.render(scene, camera);
+    postprocessing.render(delta);
   }
 
-  animate();
-
-  progressTimer = window.setInterval(() => {
-    if (app.room?.playback.playState === 'playing') {
-      drawLiveScreen();
-    }
-  }, 250);
+  pauseStage=()=>{cancelAnimationFrame(animId);animId=0;clearInterval(progressTimer);progressTimer=0;clock.stop();};
+  resumeStage=()=>{
+    if(animId||!stageActive.value)return;
+    const elapsed=clock.elapsedTime;clock.start();clock.elapsedTime=elapsed;
+    viewport.sync();drawLiveScreen();animate();
+    progressTimer=window.setInterval(()=>{if(stageActive.value&&app.room?.playback.playState==='playing')drawLiveScreen();},250);
+  };
+  resumeStage();
 
   onUnmounted(() => {
     cancelAnimationFrame(animId);
     clearInterval(progressTimer);
     viewport.dispose();
+    postprocessing.dispose();
+    environment.dispose();
     if (controls) {
       controls.dispose();
     }

@@ -4,18 +4,20 @@ import { MessageCircle, X } from 'lucide-vue-next';
 import { useApp } from '../store';
 import { subscribe } from '../bridge';
 import RoomChat from './RoomChat.vue';
+import { useCachedActivity } from '../useCachedActivity';
 
 const app=useApp(),emit=defineEmits<{floating:[value:boolean]}>();
 const floating=ref(false),open=ref(false),unread=ref(0),trigger=ref<HTMLButtonElement|null>(null);
 const panel=ref<ComponentPublicInstance|null>(null),id=useId();
-const active=computed(()=>!floating.value||open.value);
+const pageActive=useCachedActivity();
+const active=computed(()=>pageActive.value&&(!floating.value||open.value));
 const label=computed(()=>unread.value?`打开聊天，${unread.value} 条新消息`:'打开聊天');
 let alive=true,detach=()=>{},unsubscribe=()=>{};
 const seen=new Set<string>();
 function remember(value:string){seen.add(value);if(seen.size>200)seen.delete(seen.values().next().value!);}
 watch(()=>app.room?.id,()=>{unread.value=0;open.value=false;seen.clear();for(const m of app.chatMessages)remember(m.id);},{immediate:true});
 async function show(){open.value=true;unread.value=0;await nextTick();panel.value?.$el.querySelector?.('[data-chat-close]')?.focus();}
-async function close(){open.value=false;await nextTick();if(floating.value)trigger.value?.focus();}
+async function close(){open.value=false;await nextTick();if(pageActive.value&&floating.value)trigger.value?.focus();}
 function escape(event:KeyboardEvent){if(event.isComposing||!floating.value||!open.value)return;event.preventDefault();event.stopPropagation();void close();}
 onMounted(()=>{
  const media=window.matchMedia('(max-width: 1100px), (max-height: 639px)');
@@ -40,7 +42,7 @@ onUnmounted(()=>{alive=false;detach();unsubscribe();});
 <template>
  <!-- Keep the single chat instance and draft; the shell's shared modal inert still applies. -->
  <Teleport to=".shell" :disabled="!floating">
-  <button v-if="floating" v-show="!open" ref="trigger" class="floating-chat-trigger" :aria-label="label" :aria-controls="id" :aria-expanded="open" @click="show">
+  <button v-if="pageActive&&floating" v-show="!open" ref="trigger" class="floating-chat-trigger" :aria-label="label" :aria-controls="id" :aria-expanded="open" @click="show">
    <MessageCircle :size="22" /><span>聊天</span>
    <span v-if="unread" class="floating-chat-badge" aria-hidden="true">{{ unread>99?'99+':unread }}</span>
    <span class="sr-only" role="status" aria-live="polite">{{ unread?`${unread} 条新消息`:'' }}</span>

@@ -1,14 +1,16 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DomainError, RoomEngine } from './engine';
 import type { TrackMetadata } from '../../../packages/shared/src';
-import { normalizeAlbumCover, trackSchema } from '../../../packages/shared/src';
+import { musicAudioHost, normalizeAlbumCover, trackSchema } from '../../../packages/shared/src';
 import { NeteaseService } from './netease';
 import type { DatabaseStore } from './database';
+import { qqMid, type QqMusicService } from './qq';
+import { downloadCoverImage } from './cover-image';
 const MAX = 100 * 1024 * 1024;
 export function musicDownloadUrl(input: string): URL {
   if(typeof input!=='string'||input.length>8192)throw new DomainError('MUSIC_SOURCE_INVALID');
   let url: URL; try { url = new URL(input); } catch { throw new DomainError('MUSIC_SOURCE_INVALID'); }
-  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port || url.hash || !/^[a-z0-9-]+\.music\.126\.net$/i.test(url.hostname)) throw new DomainError('MUSIC_SOURCE_INVALID');
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port || url.hash || !musicAudioHost(url.hostname)) throw new DomainError('MUSIC_SOURCE_INVALID');
   url.protocol = 'https:'; return url;
 }
 export async function downloadMusic(input: string, request: typeof fetch = fetch): Promise<Buffer> {
@@ -48,13 +50,14 @@ export class MusicImport {
   private jobs=new Map<string,Job>();private active=0;
   private sources=new Map<string,Promise<TrackMetadata>>();
   private reads=new Map<string,Promise<Buffer>>();
+  private coverReads=new Map<string,ReturnType<typeof downloadCoverImage>>();
   private registeredSources=new Set<string>();
-  constructor(private engine:RoomEngine,private netease:Pick<NeteaseService,'call'>,private request:typeof fetch=fetch,private db?:DatabaseStore,private now=Date.now) {}
+  constructor(private engine:RoomEngine,private netease:Pick<NeteaseService,'call'>,private request:typeof fetch=fetch,private db?:DatabaseStore,private now=Date.now,private qq?:Pick<QqMusicService,'audio'>) {}
   private remember(url:string,hash:string){this.registeredSources.add(hash+':'+url);if(this.registeredSources.size>10000)this.registeredSources.delete(this.registeredSources.values().next().value!);}
   registered(url:string,hash:string){return this.registeredSources.has(hash+':'+url);}
   async authorize(track:TrackMetadata) {
     if(!track.sourceUrl)return;
-    const saved=track.neteaseId?await this.db?.getMusicSource('netease',`netease:standard:${track.neteaseId}`):undefined;
+    const saved=track.qqId?await this.db?.getMusicSource('qq',`qq:128:${track.qqId}`):track.neteaseId?await this.db?.getMusicSource('netease',`netease:standard:${track.neteaseId}`):undefined;
     if(saved?.sourceUrl===track.sourceUrl&&saved.contentHash===track.contentHash&&saved.sizeBytes===track.sizeBytes)this.remember(track.sourceUrl!,track.contentHash);
   }
   private memberTrack(roomId:string,userId:string,trackId:string) {
@@ -66,13 +69,20 @@ export class MusicImport {
     const track=this.memberTrack(roomId,userId,trackId),saved=await this.db?.findMusicByHash(track.contentHash);
     this.memberTrack(roomId,userId,trackId);
     const neteaseId=track.neteaseId??/^netease:standard:(\d{1,20})$/.exec(saved?.source??'')?.[1];
-    return {...track,...(neteaseId?{neteaseId}:{}),...(saved?{artists:track.artists||saved.track.artists,album:track.album||saved.track.album,coverUrl:track.coverUrl||saved.track.coverUrl}:{})};
+    const qqId=track.qqId??/^qq:128:([A-Za-z0-9]{1,80})$/.exec(saved?.source??'')?.[1];
+    return {...track,...(neteaseId?{neteaseId}:{}),...(qqId?{qqId}:{}),...(saved?{artists:track.artists||saved.track.artists,album:track.album||saved.track.album,coverUrl:track.coverUrl||saved.track.coverUrl}:{})};
   }
   async cover(roomId:string,userId:string,trackId:string):Promise<string|null> {
     const track=await this.metadata(roomId,userId,trackId),current=normalizeAlbumCover(track.coverUrl);if(current)return current;
     if(!track.neteaseId)return null;
     const detail=await this.netease.call('song_detail',{ids:track.neteaseId});this.memberTrack(roomId,userId,trackId);
     return songCover(detail.songs?.find((s:any)=>String(s.id)===track.neteaseId));
+  }
+  async coverImage(roomId:string,userId:string,trackId:string){
+    const url=await this.cover(roomId,userId,trackId);if(!url)throw new DomainError('COVER_IMAGE_UNAVAILABLE');
+    let job=this.coverReads.get(url);
+    if(!job){if(this.coverReads.size>=2)throw new DomainError('COVER_IMAGE_UNAVAILABLE');job=downloadCoverImage(url,this.request).finally(()=>this.coverReads.delete(url));this.coverReads.set(url,job);}
+    const image=await job;this.memberTrack(roomId,userId,trackId);return image;
   }
   private room(roomId:string,userId:string) {
     const room=this.engine.snapshot(roomId),member=room.members.find(m=>m.id===userId&&m.online);
@@ -83,9 +93,14 @@ export class MusicImport {
   add(roomId:string,userId:string,songId:string,requestId:string):Promise<TrackMetadata> {
     return this.enqueueJob(roomId,userId,songId,requestId,async()=>this.enqueue(roomId,userId,await this.importSong(songId),requestId));
   }
+  addQq(roomId:string,userId:string,mid:string,requestId:string):Promise<TrackMetadata>{
+    return this.enqueueJob(roomId,userId,'qq:'+mid,requestId,async()=>this.enqueue(roomId,userId,await this.importQqSong(mid),requestId));
+  }
   addUploaded(roomId:string,userId:string,hash:string,requestId:string):Promise<TrackMetadata> {
     return this.enqueueJob(roomId,userId,`library:${hash}`,requestId,async()=>{
       const saved=await this.db?.findMusicByHash(hash),songId=/^netease:standard:(\d{1,20})$/.exec(saved?.source??'')?.[1];
+      const qqId=/^qq:128:([A-Za-z0-9]{1,80})$/.exec(saved?.source??'')?.[1];
+      if(qqId)return this.enqueue(roomId,userId,await this.importQqSong(qqId),requestId);
       if(!songId)throw new DomainError('TRACK_NOT_FOUND');
       return this.enqueue(roomId,userId,await this.importSong(songId),requestId);
     });
@@ -134,8 +149,33 @@ export class MusicImport {
     await this.db?.saveMusicDetail('netease',sourceId,song);await this.db?.saveMusicSource('netease',sourceId,complete);
     this.remember(sourceUrl,complete.contentHash);return complete;
   }
+  importQqSong(mid:string,force=false):Promise<TrackMetadata>{
+    if(!qqMid.test(mid))return Promise.reject(new DomainError('INVALID_REQUEST'));
+    const key='qq:'+mid+(force?':refresh':':cached'),prior=this.sources.get(key);if(prior)return prior;
+    if(this.sources.size>=2)return Promise.reject(new DomainError('MUSIC_IMPORT_BUSY'));
+    const job=this.qqAsset(mid,force).finally(()=>this.sources.delete(key));this.sources.set(key,job);return job;
+  }
+  private async qqAsset(mid:string,force:boolean):Promise<TrackMetadata>{
+    if(!this.qq)throw new DomainError('QQ_MUSIC_NOT_CONFIGURED');
+    const sourceId=`qq:128:${mid}`,cached=await this.db?.getMusicSource('qq',sourceId);
+    if(!force&&cached?.sourceUrl&&(cached.sourceExpiresAt??0)>this.now()+30000){
+      const track=trackSchema.parse(cached);musicDownloadUrl(track.sourceUrl!);this.remember(track.sourceUrl!,track.contentHash);return track;
+    }
+    const {song,url,detail}=await this.qq.audio(mid),sourceUrl=musicDownloadUrl(url).href;
+    // QQ's documented vkey response has no checksum. Hash a bounded download;
+    // never invent a digest or weaken the existing client integrity checks.
+    const bytes=await downloadMusic(sourceUrl,this.request),declared=detail?.file?.size_128mp3;
+    if(Number.isSafeInteger(declared)&&declared>0&&declared!==bytes.length)throw new DomainError('MUSIC_SOURCE_INVALID');
+    const track=trackSchema.parse({id:cached?.id??randomUUID(),name:song.name.slice(0,200),artists:song.artists.slice(0,1000),album:song.album.slice(0,500),coverUrl:normalizeAlbumCover(song.coverUrl),
+      durationMs:song.durationMs,sizeBytes:bytes.length,lossless:false,bitrateBps:Math.max(1,Math.min(20000000,Math.round(bytes.length*8000/song.durationMs))),
+      contentHash:createHash('md5').update(bytes).digest('hex'),sourceUrl,sourceExpiresAt:this.now()+300000,qqId:mid});
+    await this.db?.saveMusicDetail('qq',sourceId,detail);await this.db?.saveMusicSource('qq',sourceId,track);
+    this.remember(sourceUrl,track.contentHash);return track;
+  }
   private async resolve(track:TrackMetadata,force=false):Promise<TrackMetadata> {
-    const saved=track.neteaseId?undefined:await this.db?.findMusicByHash(track.contentHash);
+    const saved=track.neteaseId||track.qqId?undefined:await this.db?.findMusicByHash(track.contentHash);
+    const qqId=track.qqId??/^qq:128:([A-Za-z0-9]{1,80})$/.exec(saved?.source??'')?.[1];
+    if(qqId)return this.importQqSong(qqId,force);
     const songId=track.neteaseId??/^netease:standard:(\d{1,20})$/.exec(saved?.source??'')?.[1];
     if(!songId)throw new DomainError('MUSIC_SOURCE_UNREFRESHABLE');
     const current=await this.importSong(songId,force);

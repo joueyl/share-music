@@ -4,9 +4,14 @@ pub fn validate_url(value: &str) -> Result<url::Url, String> {
     let url = url::Url::parse(value).map_err(|_| "PLAYBACK_AUDIO_URL_INVALID")?;
     let host = url.host_str().unwrap_or_default();
     if url.scheme() != "https"
-        || !host.strip_suffix(".music.126.net").is_some_and(|label| {
-            !label.is_empty() && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-        })
+        || ![".music.126.net", ".stream.qqmusic.qq.com"]
+            .iter()
+            .any(|suffix| {
+                host.strip_suffix(suffix).is_some_and(|label| {
+                    !label.is_empty()
+                        && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+                })
+            })
         || !url.username().is_empty()
         || url.password().is_some()
         || url.port().is_some_and(|port| port != 443)
@@ -76,9 +81,12 @@ pub async fn download(http: &reqwest::Client, value: &str) -> Result<Vec<u8>, St
 mod tests {
     use super::*;
     #[test]
-    fn accepts_only_https_netease_music_links() {
+    fn accepts_only_https_provider_music_links() {
         assert!(validate_url("https://m801.music.126.net/audio.mp3?token=test").is_ok());
+        assert!(validate_url("https://isure.stream.qqmusic.qq.com/audio.mp3").is_ok());
         for value in [
+            "https://isure.stream.qqmusic.qq.com.evil.test/audio.mp3",
+            "https://a.b.stream.qqmusic.qq.com/audio.mp3",
             "http://m801.music.126.net/audio.mp3",
             "https://127.0.0.1/audio.mp3",
             "https://m801.music.126.net.evil.test/audio.mp3",

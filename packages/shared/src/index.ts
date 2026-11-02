@@ -13,12 +13,16 @@ export type PermissionKey = keyof Permissions;
 export type Quality = 'lossless' | 'source' | 'opus';
 export const audioSpecSchema = z.object({ sampleRate: z.number().int().positive().max(192000), bits: z.number().int().positive().max(32), channels: z.number().int().min(1).max(8) }).strict();
 export type AudioSpec = z.infer<typeof audioSpecSchema>;
+export function musicAudioHost(host:string):boolean {
+ return /^[a-z0-9-]+\.music\.126\.net$/i.test(host)||/^[a-z0-9-]+\.stream\.qqmusic\.qq\.com$/i.test(host);
+}
 export const trackSchema = z.object({
   sourceUrl: z.string().max(8192).url().startsWith('https://').refine(value => {
-    try {const url=new URL(value);return /^[a-z0-9-]+\.music\.126\.net$/i.test(url.hostname)&&!url.username&&!url.password&&!url.port&&!url.hash;}catch{return false;}
+    try {const url=new URL(value);return musicAudioHost(url.hostname)&&!url.username&&!url.password&&!url.port&&!url.hash;}catch{return false;}
   }).optional(),
   sourceExpiresAt: z.number().int().nonnegative().optional(),
   neteaseId: z.string().regex(/^\d{1,20}$/).optional(),
+  qqId: z.string().regex(/^[A-Za-z0-9]{1,80}$/).optional(),
   artists: z.string().max(1000).optional(), album: z.string().max(500).optional(),
   ossUrl: z.string().max(2048).url().startsWith('https://').optional(),
   coverUrl: z.string().max(2048).url().startsWith('https://').nullable().optional(),
@@ -35,7 +39,7 @@ export function normalizeAlbumCover(value: unknown): string | null {
   try {
     const url = new URL(value);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.port ||
-      !['.music.126.net', '.music.163.com'].some(domain => url.hostname.endsWith(domain))) return null;
+      !(url.hostname==='y.gtimg.cn'||['.music.126.net', '.music.163.com'].some(domain => url.hostname.endsWith(domain)))) return null;
     url.protocol = 'https:';
     return url.href.length <= 2048 ? url.href : null;
   } catch { return null; }

@@ -71,15 +71,15 @@ export class MySqlDatabase implements DatabaseStore {
       return {id:row.hash as string,name:track.name||detail?.name||String(row.oss_key).split('/').at(-1)||'未知音乐',...info,coverUrl:info.coverUrl??'',canAdd:trackSchema.safeParse({...track,...info}).success,durationMs:track.durationMs??null,sizeBytes:track.sizeBytes??null};})};
   }
   async findMusicByHash(hash:string):Promise<{source:string;track:TrackMetadata}|undefined> {
-    const row=(await this.rows("SELECT source,track_json FROM songs WHERE content_hash=? AND source LIKE 'netease:standard:%' AND track_json IS NOT NULL ORDER BY (scope='netease') DESC,sequence DESC LIMIT 1",[hash]))[0];
+    const row=(await this.rows("SELECT source,track_json FROM songs WHERE content_hash=? AND (source LIKE 'netease:standard:%' OR source LIKE 'qq:128:%') AND track_json IS NOT NULL ORDER BY (scope='netease') DESC,sequence DESC LIMIT 1",[hash]))[0];
     return row?{source:row.source,track:json(row.track_json)}:undefined;
   }
   async musicLibrary(query:string,offset:number,limit:number) {
-    const cte=`WITH ranked AS (SELECT source,track_json,name,artists,album,content_hash,cover_url,duration_ms,size_bytes,sequence,ROW_NUMBER() OVER(PARTITION BY COALESCE(NULLIF(content_hash,''),source) ORDER BY (scope='netease') DESC,sequence DESC) AS ranking FROM songs WHERE source LIKE 'netease:standard:%' AND track_json IS NOT NULL)`;
+    const cte=`WITH ranked AS (SELECT source,track_json,name,artists,album,content_hash,cover_url,duration_ms,size_bytes,sequence,ROW_NUMBER() OVER(PARTITION BY COALESCE(NULLIF(content_hash,''),source) ORDER BY (scope='netease') DESC,sequence DESC) AS ranking FROM songs WHERE (source LIKE 'netease:standard:%' OR source LIKE 'qq:128:%') AND track_json IS NOT NULL)`;
     const where="FROM ranked WHERE ranking=1 AND LOCATE(LOWER(?),LOWER(CONCAT(name,' ',artists,' ',album)))>0";
     const total=Number((await this.rows(`${cte} SELECT COUNT(*) AS total ${where}`,[query]))[0].total);
     const rows=await this.rows(`${cte} SELECT * ${where} ORDER BY sequence DESC LIMIT ? OFFSET ?`,[query,limit,offset]);
-    return {total,songs:rows.map(r=>{const track=json(r.track_json),neteaseId=/^netease:standard:(\d{1,20})$/.exec(r.source)?.[1];return {id:String(r.content_hash??''),name:r.name,artists:r.artists,album:r.album,coverUrl:r.cover_url??'',durationMs:r.duration_ms??null,sizeBytes:r.size_bytes===null?null:Number(r.size_bytes),canAdd:!!neteaseId,neteaseId};})};
+    return {total,songs:rows.map(r=>{const track=json(r.track_json),neteaseId=/^netease:standard:(\d{1,20})$/.exec(r.source)?.[1];return {id:String(r.content_hash??''),name:r.name,artists:r.artists,album:r.album,coverUrl:r.cover_url??'',durationMs:r.duration_ms??null,sizeBytes:r.size_bytes===null?null:Number(r.size_bytes),canAdd:!!neteaseId||!!track.qqId,neteaseId,...(track.qqId?{qqId:track.qqId}:{})};})};
   }
   async getSetting(key:string) { return (await this.rows('SELECT value FROM settings WHERE setting_key=?',[key]))[0]?.value as string|undefined; }
   async setSetting(key:string,value:string) { await this.run('INSERT INTO settings(setting_key,value) VALUES(?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)',[key,value]); }

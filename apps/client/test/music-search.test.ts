@@ -8,6 +8,20 @@ async function session(){
  const request=vi.fn(async()=>new Response(JSON.stringify({token:'project-token',user:{id:'user',name:'tester'}})));
  vi.stubGlobal('fetch',request);const bridge=await import('../src/bridge');await bridge.login('http://localhost:3000','tester','test-password',false);return {bridge,request};
 }
+it('routes QQ search, adds and lyrics through authenticated project endpoints',async()=>{
+ const {bridge,request}=await session();const song={id:'001ABC',name:'QQ歌曲',artists:'歌手',album:'专辑',coverUrl:'https://y.gtimg.cn/cover.jpg',durationMs:120000};
+ request.mockResolvedValueOnce(new Response(JSON.stringify({songs:[song],total:21})));
+ expect(await bridge.searchMusic(' QQ歌曲 ',20,'qq')).toEqual({songs:[song],total:21});
+ let [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];
+ expect(new URL(url).pathname).toBe('/api/qq/search');expect(new URL(url).searchParams.get('keyword')).toBe('QQ歌曲');expect(new URL(url).searchParams.get('offset')).toBe('20');
+ expect(options.headers).toMatchObject({Authorization:'Bearer project-token'});
+ request.mockResolvedValueOnce(new Response(JSON.stringify({ok:true,track:{id:'track',qqId:song.id,sourceUrl:'https://ws.stream.qqmusic.qq.com/song.mp3',contentHash:'a'.repeat(32),coverUrl:song.coverUrl}})));
+ const track=await bridge.addSearchedMusic('room',song.id,'request-id',song.coverUrl,'qq');
+ [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];expect(new URL(url).pathname).toBe('/api/rooms/room/music/qq');expect(JSON.parse(String(options.body))).toEqual({songId:song.id,requestId:'request-id'});expect(track.qqId).toBe(song.id);expect(bridge.playingTrackCover(track)).toBe(song.coverUrl);
+ const signal=new AbortController().signal;request.mockResolvedValueOnce(new Response(JSON.stringify({lrc:{lyric:'[00:01]歌词'}})));
+ expect(await bridge.qqLyrics(song.id,signal)).toEqual({lrc:{lyric:'[00:01]歌词'}});
+ [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];expect(new URL(url).pathname).toBe('/api/qq/lyrics/001ABC');expect(options.signal).toBe(signal);expect(options.headers).toMatchObject({Authorization:'Bearer project-token'});
+});
 it('resolves only short shares through the authenticated backend while parsing full links locally',async()=>{
  const {bridge,request}=await session();const initial=request.mock.calls.length;
  expect(await bridge.resolvePlaylistLink('https://music.163.com/#/playlist?id=123')).toEqual({id:'123'});expect(request).toHaveBeenCalledTimes(initial);
@@ -90,4 +104,12 @@ it('backfills currently playing legacy artwork and tolerates old servers without
  expect(request.mock.calls.at(-1)?.[0]).toBe('http://localhost:3000/api/rooms/room/music/legacy/cover');
  request.mockResolvedValueOnce(new Response(JSON.stringify({error:'TRACK_NOT_FOUND'}),{status:404}));
  expect(await bridge.loadTrackCover('room',{...track,contentHash:'e'.repeat(64)})).toBe('');
+});
+
+it('loads QQ suggestions and origin-clean stage cover bytes through authenticated endpoints',async()=>{
+ const {bridge,request}=await session();const signal=new AbortController().signal;
+ request.mockResolvedValueOnce(Response.json({suggestions:[' 晴天 ','晴天','晴天现场']}));expect(await bridge.suggestMusic('晴',signal,'qq')).toEqual(['晴天','晴天现场']);
+ let [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];expect(new URL(url).pathname).toBe('/api/qq/suggest');expect(options.signal).toBe(signal);
+ request.mockResolvedValueOnce(new Response(new Uint8Array([1,2,3]),{headers:{'content-type':'image/jpeg'}}));expect((await bridge.loadStageArtwork('room','track','https://y.gtimg.cn/a.jpg')).size).toBe(3);
+ [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];expect(new URL(url).pathname).toBe('/api/rooms/room/music/track/cover/image');expect(options.headers).toEqual({Authorization:'Bearer project-token'});expect(url).not.toContain('gtimg');
 });

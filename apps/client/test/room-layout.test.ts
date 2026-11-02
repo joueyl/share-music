@@ -23,7 +23,7 @@ it('keeps narrow and short rooms scrollable with space for the fixed transport a
 });
 it('wraps long untimed lyrics, bounds word spacing, and scrolls long lines without scaling the page',()=>{
  const css=styles('components/TrackLyrics.vue'),template=read('components/TrackLyrics.vue');
- expect(css).toMatch(/\.lumiere-stage\s*\{[^}]*overflow: auto/s);
+ expect(css).toMatch(/\.lumiere-stage\s*\{[^}]*overflow: hidden/s);
  expect(css).toContain('align-items: safe center');
  expect(css).toContain('max-width: calc(100% - 1em)');
  expect(css).toContain('overflow-wrap: anywhere');
