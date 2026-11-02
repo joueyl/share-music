@@ -371,11 +371,9 @@ onMounted(() => {
           vinylMesh = mesh;
         } else if (mesh.name.includes('Center_Label')) {
           centerLabelMesh = mesh;
-          mesh.material = new THREE.MeshStandardMaterial({
-            map: labelTexture,
-            roughness: 0.28,
-            metalness: 0.0
-          });
+          // Album art is printed artwork, not part of the reflective record finish.
+          mesh.receiveShadow = false;
+          mesh.material = new THREE.MeshBasicMaterial({ map: labelTexture });
         } else if (mesh.name.includes('Plinth')) {
           plinthMesh = mesh;
         }

@@ -166,3 +166,9 @@ it('applies satin roughness to the vinyl mesh without the GLB glossy multiplier'
  const vinyl=source.slice(source.indexOf('if (vinylMesh && vinylMesh.material)'),source.indexOf('const pColor ='));
  expect(vinyl).toContain('mat.roughnessMap = null');expect(vinyl).toContain('mat.envMapIntensity = vEdition.envMapIntensity');expect(vinyl).not.toContain('normalMap = null');expect(vinyl).not.toContain('metalnessMap = null');
 });
+
+it('keeps the record album label unlit and separate from the reflective vinyl finish',()=>{
+ const source=readFileSync(new URL('../src/components/TurntableStage.vue',import.meta.url),'utf8');
+ const label=source.slice(source.indexOf("else if (mesh.name.includes('Center_Label'))"),source.indexOf("else if (mesh.name.includes('Plinth'))"));
+ expect(label).toContain('new THREE.MeshBasicMaterial({ map: labelTexture })');expect(label).toContain('mesh.receiveShadow = false');expect(label).not.toContain('MeshStandardMaterial');expect(label).not.toContain('envMap');
+});
