@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { createStageViewport, STAGE_RENDERER_OPTIONS, stagePixelRatio } from '../src/stage-viewport';
+import { configureRuntimeProfile } from '../src/runtime-profile';
 let resize:()=>void,disconnect:ReturnType<typeof vi.fn>;
 beforeEach(()=>{
+ // These cases specify the high-quality profile, independently of the runner OS.
+ // Mac audio-priority limits are asserted separately in runtime-profile.test.ts.
+ configureRuntimeProfile('windows','x86_64');
  disconnect=vi.fn();vi.stubGlobal('window',{devicePixelRatio:1});
  vi.stubGlobal('ResizeObserver',class{constructor(callback:()=>void){resize=callback;}observe(){}disconnect=disconnect;});
 });
