@@ -1,7 +1,9 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import type { ChatMessage, RoomSnapshot } from '../../../packages/shared/src';
+import { MusicFavorites } from './music-favorites';
 import { MusicImport } from './music-import';
+import { NeteaseAccountTasks } from './netease-tasks';
 import { NeteaseService } from './netease';
 import { QqMusicService } from './qq';
 import { Auth } from './auth';
@@ -24,6 +26,8 @@ function configuredDatabase(): DatabaseStore {
 export class AppService implements OnModuleDestroy, OnModuleInit {
   readonly database = configuredDatabase();
   readonly netease = new NeteaseService(this.database);
+  readonly musicFavorites = new MusicFavorites(this.database,this.netease);
+  readonly neteaseTasks = new NeteaseAccountTasks(this.netease,this.database);
   readonly qq = new QqMusicService(this.database);
   readonly auth: Auth;
   readonly capacity = new Capacity();
@@ -53,7 +57,7 @@ export class AppService implements OnModuleDestroy, OnModuleInit {
     }
     this.turn.stun(); // Fail fast on invalid STUN configuration.
     this.auth = new Auth(this.database, secret);
-    this.engine = new RoomEngine(r => this.persist(r), r => { void this.flush().then(()=>this.subscribers.forEach(fn=>fn(r))).catch(()=>{}); }, Date.now, (key,hash)=>this.musicImport?.registered(key,hash)??false, message => { void this.flush().then(()=>this.activitySubscribers.forEach(fn=>fn(message))).catch(()=>{}); });
+    this.engine = new RoomEngine(r => this.persist(r), r => { void this.flush().then(()=>this.subscribers.forEach(fn=>fn(r))).catch(()=>{}); }, Date.now, (key,hash)=>this.musicImport?.registered(key,hash)??false, message => { void this.flush().then(()=>this.activitySubscribers.forEach(fn=>fn(message))).catch(()=>{}); }, track => this.neteaseTasks.enqueueScrobble(track));
     this.musicImport = new MusicImport(this.engine, this.netease, fetch, this.database, Date.now, this.qq);
   }
   async onModuleInit() {
@@ -61,6 +65,7 @@ export class AppService implements OnModuleDestroy, OnModuleInit {
       await this.database.initialize();
     }
     const records = await this.database.rooms(); this.engine.restore(records); this.engine.restoreOverrides(records);
+    this.neteaseTasks.start();
     this.ticker = setInterval(() => { if(!this.persistenceFailed)this.engine.tick(); }, 50); this.ticker.unref();
   }
   limit(key: string, maximum: number, windowMs: number) {
@@ -69,5 +74,5 @@ export class AppService implements OnModuleDestroy, OnModuleInit {
     if (++record.count > maximum) throw new DomainError('RATE_LIMITED');
     if (this.attempts.size > 10000) for (const [k, v] of this.attempts) if (now - v.since > windowMs) this.attempts.delete(k);
   }
-  async onModuleDestroy() { clearInterval(this.ticker); try {await this.flush();} finally {try{await this.qq.close();}finally{await this.database.close();}} }
+  async onModuleDestroy() { clearInterval(this.ticker); await this.neteaseTasks.stop(); try {await this.flush();} finally {try{await this.qq.close();}finally{await this.database.close();}} }
 }

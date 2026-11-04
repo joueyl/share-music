@@ -6,7 +6,7 @@ import { CloudPlayer } from './cloud-player';
 import { AudioWaveform, releaseWaveformAudio } from './audio-waveform';
 import { loadPlaybackSource } from './playback-source';
 import { rememberTrackArtwork, trackArtwork } from './track-artwork';
-import { normalizeAlbumCover, parsePlaylistLink, isPlaylistShortLink, playlistReference } from '@music-share/shared';
+import { normalizeAlbumCover, parseMusicReference, type MusicReference, type MusicCollection, parsePlaylistLink, isPlaylistShortLink, playlistReference } from '@music-share/shared';
 import type { SystemMediaState } from './system-media';
 import type { ArtworkFrame } from './system-artwork';
 import { listen } from '@tauri-apps/api/event';
@@ -295,7 +295,7 @@ export async function similarMusic(id:string,signal?:AbortSignal):Promise<MusicS
     seen.add(song.id);return true;
   });
 }
-export type MusicPlaylist={id:string;name:string;coverUrl:string;trackCount:number;creatorId:string};
+export type MusicPlaylist={id:string;name:string;coverUrl:string;trackCount:number;creatorId:string;description?:string};
 function playlistItem(p:any):MusicPlaylist { return {id:String(p.id),name:String(p.name??''),coverUrl:albumCover(p.coverImgUrl),trackCount:Number(p.trackCount??0),creatorId:String(p.creator?.userId??'')}; }
 export async function resolvePlaylistLink(input:string):Promise<{id:string}> {
   try{return {id:parsePlaylistLink(input).id};}catch(error){
@@ -308,14 +308,38 @@ export async function resolvePlaylistLink(input:string):Promise<{id:string}> {
   return {id:result.id};
 }
 export async function playlistDetail(id:string):Promise<MusicPlaylist> {
-  const data=checkMusicResult(await browserRequest('/netease/playlist_detail?'+new URLSearchParams({id})));return playlistItem(data.playlist);
+  const data=checkMusicResult(await browserRequest('/netease/playlist_detail?'+new URLSearchParams({id})));
+ if(!data.playlist||String(data.playlist.id)!==id||typeof data.playlist.name!=='string')throw new Error('NETEASE_INVALID_RESPONSE');
+ return {...playlistItem(data.playlist),description:String(data.playlist.description??'').slice(0,2000)};
 }
 export async function userPlaylists(uid:string,offset=0):Promise<{playlists:MusicPlaylist[];more:boolean}> {
   const data=checkMusicResult(await browserRequest('/netease/user_playlist?'+new URLSearchParams({uid,offset:String(offset),limit:'30'})));
-  return {playlists:(data.playlist??[]).map(playlistItem),more:!!data.more};
+  if(!Array.isArray(data.playlist))throw new Error('NETEASE_INVALID_RESPONSE');
+ const playlists=data.playlist.map(playlistItem);if(playlists.some((item:MusicPlaylist)=>!/^\d{1,20}$/.test(item.id)))throw new Error('NETEASE_INVALID_RESPONSE');
+ return {playlists,more:!!data.more};
 }
 export async function playlistSongs(id:string,offset=0):Promise<MusicSearchItem[]> {
   const data=checkMusicResult(await browserRequest('/netease/playlist_track_all?'+new URLSearchParams({id,offset:String(offset),limit:'50'})));return (data.songs??[]).map(musicItem);
+}
+export type { MusicReference,MusicCollection };
+export async function resolveMusicLink(input:string):Promise<MusicReference>{
+ try{return parseMusicReference(input);}catch(error){if(!isPlaylistShortLink(input))throw error;}
+ let result:any;
+ try{result=await browserRequest('/music/reference/resolve',{input:playlistReference(input)});}
+ catch(error){if(error instanceof Error&&/HTTP 404/.test(error.message))throw new Error('MUSIC_LINK_ENDPOINT_UNAVAILABLE');throw error;}
+ if(!['user','playlist','album'].includes(result?.kind)||typeof result?.id!=='string'||!/^\d{1,20}$/.test(result.id))throw new Error('MUSIC_LINK_RESOLVE_FAILED');
+ return {kind:result.kind,id:result.id};
+}
+export async function albumDetail(id:string):Promise<{collection:MusicCollection;songs:MusicSearchItem[]}>{
+ const data=checkMusicResult(await browserRequest('/netease/album?'+new URLSearchParams({id}))),album=data.album;
+ if(!album||String(album.id)!==id||typeof album.name!=='string'||!Array.isArray(data.songs))throw new Error('NETEASE_INVALID_RESPONSE');
+ return {collection:{kind:'album',id,name:album.name,coverUrl:albumCover(album.picUrl),trackCount:data.songs.length,creatorId:'',description:String(album.description??'')},songs:data.songs.map(musicItem)};
+}
+export async function musicFavorites():Promise<MusicCollection[]>{
+ const data=await browserRequest('/music/favorites');if(!Array.isArray(data?.collections))throw new Error('MUSIC_FAVORITES_INVALID');return data.collections;
+}
+export async function setMusicFavorite(kind:MusicCollection['kind'],id:string,saved:boolean):Promise<MusicCollection[]>{
+ const data=await browserRequest('/music/favorites',{kind,id,saved},undefined,'PUT');if(!Array.isArray(data?.collections))throw new Error('MUSIC_FAVORITES_INVALID');return data.collections;
 }
 export async function trackMetadata(roomId:string,trackId:string):Promise<TrackMetadata> { return browserRequest(`/rooms/${roomId}/music/${trackId}/metadata`); }
 export async function songLyrics(id:string,signal?:AbortSignal) {

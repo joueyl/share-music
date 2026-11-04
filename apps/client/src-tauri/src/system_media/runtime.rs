@@ -58,7 +58,7 @@ pub fn initialize(app: tauri::AppHandle) {
     });
     RUNTIME.with(|slot| {
         *slot.borrow_mut() = Some(Runtime {
-            snapshot,
+            snapshot: snapshot.clone(),
             #[cfg(any(target_os = "windows", target_os = "linux"))]
             controls,
             #[cfg(any(target_os = "windows", target_os = "linux"))]
@@ -67,6 +67,8 @@ pub fn initialize(app: tauri::AppHandle) {
             taskbar,
         })
     });
+    #[cfg(target_os = "windows")]
+    schedule_taskbar_startup_recovery(app, Arc::downgrade(&snapshot));
     update(Snapshot {
         title: "共鸣 Music Share".into(),
         ..Default::default()
@@ -108,20 +110,57 @@ pub fn shutdown() {
         slot.borrow_mut().take();
     });
 }
+// Bounded recovery is independent of frontend progress updates: even an idle first launch
+// may race Explorer/COM or miss TaskbarButtonCreated while installing the window hooks.
 #[cfg(target_os = "windows")]
-fn refresh_taskbar() {
+fn schedule_taskbar_startup_recovery(
+    app: tauri::AppHandle,
+    expected: std::sync::Weak<Mutex<Snapshot>>,
+) {
+    tauri::async_runtime::spawn(async move {
+        for delay in [250, 500, 1000, 2000, 4000] {
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+            if expected.strong_count() == 0 {
+                break;
+            }
+            let expected = expected.clone();
+            let handle = app.clone();
+            if app
+                .run_on_main_thread(move || retry_taskbar_startup(&handle, &expected))
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+}
+#[cfg(target_os = "windows")]
+fn retry_taskbar_startup(app: &tauri::AppHandle, expected: &std::sync::Weak<Mutex<Snapshot>>) {
     RUNTIME.with(|slot| {
         let Ok(mut slot) = slot.try_borrow_mut() else {
             return;
         };
-        if let Some(runtime) = slot.as_mut() {
-            if let Some(taskbar) = runtime.taskbar.as_mut() {
-                taskbar.created();
-                let state = runtime.snapshot.lock().ok().map(|state| state.clone());
-                if let Some(state) = state {
-                    taskbar.update(&state);
-                }
-            }
+        let Some(runtime) = slot.as_mut() else {
+            return;
+        };
+        // Delayed callbacks from a replaced/shutdown session must not create a new toolbar.
+        if !expected
+            .upgrade()
+            .is_some_and(|state| Arc::ptr_eq(&state, &runtime.snapshot))
+        {
+            return;
+        }
+        if runtime.taskbar.is_none() {
+            runtime.taskbar = app
+                .get_webview_window("main")
+                .and_then(|window| window.hwnd().ok())
+                .and_then(|hwnd| {
+                    taskbar::Taskbar::new(hwnd.0, app.clone(), runtime.snapshot.clone()).ok()
+                });
+        }
+        let state = runtime.snapshot.lock().ok().map(|state| state.clone());
+        if let (Some(taskbar), Some(state)) = (runtime.taskbar.as_mut(), state) {
+            taskbar.retry_startup(&state);
         }
     });
 }

@@ -113,3 +113,20 @@ it('loads QQ suggestions and origin-clean stage cover bytes through authenticate
  request.mockResolvedValueOnce(new Response(new Uint8Array([1,2,3]),{headers:{'content-type':'image/jpeg'}}));expect((await bridge.loadStageArtwork('room','track','https://y.gtimg.cn/a.jpg')).size).toBe(3);
  [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];expect(new URL(url).pathname).toBe('/api/rooms/room/music/track/cover/image');expect(options.headers).toEqual({Authorization:'Bearer project-token'});expect(url).not.toContain('gtimg');
 });
+it('classifies new music links locally and resolves short links through the new authenticated endpoint',async()=>{
+ const {bridge,request}=await session();const count=request.mock.calls.length;
+ expect(await bridge.resolveMusicLink('https://music.163.com/#/user?id=274950922')).toEqual({kind:'user',id:'274950922'});
+ expect(await bridge.resolveMusicLink('https://music.163.com/#/album/38306/?userid=274950922')).toEqual({kind:'album',id:'38306'});expect(request).toHaveBeenCalledTimes(count);
+ request.mockResolvedValueOnce(Response.json({kind:'playlist',id:'804180248'}));
+ expect(await bridge.resolveMusicLink('分享 https://163cn.tv/Abc')).toEqual({kind:'playlist',id:'804180248'});
+ const [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];expect(new URL(url).pathname).toBe('/api/music/reference/resolve');expect(options.headers).toMatchObject({Authorization:'Bearer project-token'});expect(JSON.parse(String(options.body))).toEqual({input:'https://163cn.tv/Abc'});
+});
+it('loads real album details and persists favorites only through authenticated TONE APIs',async()=>{
+ const {bridge,request}=await session();request.mockResolvedValueOnce(Response.json({code:200,album:{id:38306,name:'专辑',picUrl:'http://p1.music.126.net/cover.jpg'},songs:[{id:123,name:'歌曲',ar:[{name:'歌手'}],al:{name:'专辑'},dt:120000}]}));
+ const album=await bridge.albumDetail('38306');expect(album.collection).toMatchObject({kind:'album',id:'38306',trackCount:1,coverUrl:'https://p1.music.126.net/cover.jpg'});expect(album.songs[0]).toMatchObject({id:'123',durationMs:120000});
+ request.mockResolvedValueOnce(Response.json({collections:[album.collection]}));expect(await bridge.setMusicFavorite('album','38306',true)).toEqual([album.collection]);
+ const [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];expect(new URL(url).pathname).toBe('/api/music/favorites');expect(options.method).toBe('PUT');expect(options.headers).toMatchObject({Authorization:'Bearer project-token'});expect(JSON.parse(String(options.body))).toEqual({kind:'album',id:'38306',saved:true});
+ request.mockResolvedValueOnce(Response.json({collections:[album.collection]}));expect(await bridge.musicFavorites()).toEqual([album.collection]);
+ request.mockResolvedValueOnce(Response.json({code:200,album:{id:1,name:'错误专辑'},songs:[]}));await expect(bridge.albumDetail('38306')).rejects.toThrow('NETEASE_INVALID_RESPONSE');
+ request.mockResolvedValueOnce(Response.json({ok:true}));await expect(bridge.musicFavorites()).rejects.toThrow('MUSIC_FAVORITES_INVALID');
+});

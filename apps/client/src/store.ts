@@ -3,7 +3,7 @@ import { createChatSound } from './chat-sound';
 import chatNotificationSound from './assets/chat-notification.wav?url';
 import { computed, onScopeDispose, ref, watch } from 'vue';
 import { defineStore } from 'pinia';
-import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, positionAt, type Action, type ChatMessage, type RoomSnapshot } from '@music-share/shared';
+import { ALL_PERMISSIONS, NO_PERMISSIONS, positionAt, type Action, type ChatMessage, type RoomSnapshot } from '@music-share/shared';
 import * as bridge from './bridge';
 import { saveLogin, loadSavedLogin, clearSavedLogin } from './saved-login';
 import { getServerUrl } from './server-config';
@@ -54,7 +54,7 @@ export const useApp = defineStore('app', () => {
   let acceptEvents = true, clockSynced = false;
   function requestClock() { void bridge.send({ type: 'clock', requestId: crypto.randomUUID(), clientSentAt: Date.now() }).catch(error); }
   let clockTimer: ReturnType<typeof setInterval> | undefined, initialized = false;
-  const permission = computed(() => !!room.value && !!user.value && room.value.hostId === user.value.id ? ALL_PERMISSIONS : room.value?.members.find(m => m.id === user.value?.id)?.permissions ?? DEFAULT_PERMISSIONS);
+  const permission = computed(() => !!room.value && !!user.value && room.value.hostId === user.value.id ? ALL_PERMISSIONS : room.value?.members.find(m => m.id === user.value?.id)?.permissions ?? NO_PERMISSIONS);
   const host = computed(() => !!room.value && room.value.hostId === user.value?.id);
   const progress = computed(() => room.value ? positionAt(room.value.playback, now.value + offset.value) : 0);
   let systemMediaActive=false,lastSystemMedia='';
@@ -88,7 +88,11 @@ export const useApp = defineStore('app', () => {
     const cap = await bridge.capabilities(); native.value = cap.native; nativeReason.value = cap.reason;
     await bridge.subscribe('connection', e => { if (!acceptEvents) return; connected.value = e.connected; if (e.connected) requestClock(); else clearActionFeedback(); });
     await bridge.subscribe('playback-cache-warning', e => { if (acceptEvents) error(e.error); });
-    await bridge.subscribe('media-status', e => { if (!acceptEvents) return; media.value = e; });
+    await bridge.subscribe('media-status', e => {
+      if (!acceptEvents) return;
+      if (e.status === 'error' && (media.value.status !== 'error' || media.value.detail !== e.detail)) notice.value = e.detail || '音乐播放失败，请重试';
+      media.value = e;
+    });
     await bridge.subscribe('system-media-control', (event:SystemMediaEvent) => {
       if(!acceptEvents)return;
       const action=systemMediaAction(event,room.value,user.value?.id??null,connected.value);

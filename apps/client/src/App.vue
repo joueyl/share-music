@@ -20,6 +20,9 @@ import ThemeCustomizerPopover from './components/ThemeCustomizerPopover.vue';
 import { APP_VERSION } from './version-info';
 import appLogo from './assets/logo.webp';
 
+const queueMounted=ref(ui.queue);
+watch(()=>ui.queue,open=>{if(open)queueMounted.value=true;});
+function queueClosed(){queueMounted.value=false;ui.queue=false;}
 const versionOpen = ref(false), accountOpen = ref(false);
 const splashDone = ref(false);
 const isMaximized = ref(false);
@@ -41,7 +44,7 @@ router.beforeEach((to, from) => {
 
 useAutoDismissNotice(toRef(app, 'notice'));
 watch(() => app.user?.id, () => { resetUi(); accountOpen.value = false; });
-watch(() => app.room?.id, () => { ui.queue = ui.settings = ui.members = ui.library = false; });
+watch(() => app.room?.id, () => { queueMounted.value=false;ui.queue = ui.settings = ui.members = ui.library = false; });
 
 watch(isMaximized, (val) => {
   if (val) {
@@ -117,7 +120,7 @@ function onHeaderMouseDown(e: MouseEvent) {
   <VersionHistoryDialog v-if="versionOpen" @close="versionOpen = false" />
   <MusicSearchDialog v-if="ui.search && app.user" :room-id="app.room?.id" @close="ui.search = false" @rooms="searchRooms" />
   <UploadedMusicDialog v-if="ui.library && app.room" :room-id="app.room.id" @close="ui.library = false" />
-  <QueueDrawer v-if="ui.queue && app.room" @close="ui.queue = false" />
+  <QueueDrawer v-if="queueMounted && app.room" :open="ui.queue" @close="queueClosed" />
   <RoomSettingsDialog v-if="ui.settings && app.host" @close="ui.settings = false" />
   <RoomMembersDialog v-if="ui.members && app.room" @close="ui.members = false" />
 
@@ -276,8 +279,9 @@ function onHeaderMouseDown(e: MouseEvent) {
         </Transition>
       </router-view>
     </main>
-    <GlobalPlayer v-if="app.user" />
   </div>
+  <!-- 播放器独立于 shell 的 inert 锁，仅列表开关在队列展开时可操作。 -->
+  <GlobalPlayer v-if="app.user" />
 </template>
 
 <style scoped>
@@ -290,7 +294,7 @@ function onHeaderMouseDown(e: MouseEvent) {
   flex-direction: column;
   overflow: hidden;
   transform: translateZ(0);
-  border-radius: 20px;
+  border-radius: var(--window-corner-radius, 20px);
   background: linear-gradient(125deg, #ddeeff, #f2f1ed 60%, #fff2df);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08), 0 16px 48px rgba(0, 0, 0, 0.16);
   transition: border-radius 0.18s ease;

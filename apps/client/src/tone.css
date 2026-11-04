@@ -3,8 +3,8 @@
 .chat-activity>svg{flex-shrink:0;margin-top:3px;color:#7897be}.chat-activity p{margin:0;min-width:0;overflow-wrap:anywhere;flex:1}.chat-activity strong{font-weight:500;color:#526b8c}.chat-activity time{flex-shrink:0;font-size:9px;opacity:.8;margin-top:2px;font-variant-numeric:tabular-nums}
 :root{--accent:#5dbb00;--muted:#798394;--border:#dfe6ee;--surface:#ffffffb3;color:#283448;background:transparent!important}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent!important}
-#app{width:100%;height:100%;overflow:hidden;border-radius:20px;background:transparent!important;transition:border-radius .18s ease}
-#app.is-maximized{border-radius:0}
+#app{--window-corner-radius:20px;width:100%;height:100%;overflow:hidden;border-radius:var(--window-corner-radius);background:transparent!important;transition:border-radius .18s ease}
+#app.is-maximized{--window-corner-radius:0px;border-radius:0}
 body{background:transparent}
 button{color:inherit}label{color:#65748a}textarea{font:inherit;width:100%;resize:vertical;min-height:90px;padding:12px;border:1px solid var(--border);border-radius:12px;color:#283448;background:#ffffffb3}
 .primary,.secondary{border-radius:24px}.primary{color:white}.primary:hover:not(:disabled){background:#52a600}.secondary{background:#ffffffb3;border-color:#dfe6ee;color:#283448}.dot.online{background:#65a88b;box-shadow:none}

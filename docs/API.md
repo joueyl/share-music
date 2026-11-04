@@ -54,8 +54,8 @@ avatarUrl 可为 null；头像和显示名目前为数据库预留字段，暂�
 | category | string，默认空，最长 40，例如“民谣”“轻音乐” |
 | coverUrl | HTTPS URL 或 null，默认 null，最长 2048 |
 
-Permissions：`{skip:boolean,stream:boolean,seek:boolean,enqueue:boolean}`，四项均需提供。
-默认 `{skip:false,stream:false,seek:false,enqueue:true}`，即成员可点歌，房主控制播放；房主始终拥有全部权限。
+Permissions：`{skip:boolean,stream:boolean,seek:boolean,enqueue:boolean,playbackMode?:boolean}`。playbackMode 为独立“播放模式修改”权限，与 skip（切歌/播放控制）、enqueue（播放列表控制）分开；原四项必填，新增字段兼容旧请求可省略，新客户端应显式提交。
+新房间默认 `{skip:true,stream:true,seek:true,enqueue:true,playbackMode:true}`，即权限全开；已有房间保留保存的默认/成员权限，房主始终拥有全部权限。`enqueue` 是“播放列表控制”的兼容协议/存储字段，统一授权添加、删除任意成员的歌曲、排序及清空，不再另设“加入播放列表”权限。
 
 ### POST /api/rooms
 
@@ -63,7 +63,7 @@ Permissions：`{skip:boolean,stream:boolean,seek:boolean,enqueue:boolean}`，四
 {
   "name":"日落之前的慢半拍",
   "settings":{"description":"留一点时间给音乐","atmosphere":"sunset","visibility":"public","category":"民谣"},
-  "defaults":{"skip":false,"stream":false,"seek":false,"enqueue":true}
+  "defaults":{"skip":true,"stream":true,"seek":true,"enqueue":true,"playbackMode":true}
 }
 ```
 
@@ -87,7 +87,7 @@ code 为 12 位十六进制房间码，返回 `{id,name}`，随后通过 WebSock
 
 ```text
 id, name, hostId, settings, inviteCode, stateVersion, defaults,
-members[], playlist[], playback, pending, requests[], serverNow
+members[], playlist[], playbackMode, playback, pending, requests[], serverNow
 ```
 
 `members` 包含 id/name/joinedAt/online/overrides/permissions。
@@ -109,7 +109,7 @@ members[], playlist[], playback, pending, requests[], serverNow
 房主需先在线 join：
 
 ```json
-{"expectedStateVersion":1,"defaults":{"skip":false,"stream":false,"seek":false,"enqueue":true}}
+{"expectedStateVersion":1,"defaults":{"skip":true,"stream":true,"seek":true,"enqueue":true,"playbackMode":true}}
 ```
 
 返回 RoomSnapshot。指定成员的覆盖权限通过 WebSocket `permission` 命令设置。
@@ -158,7 +158,7 @@ id 为内容哈希，不是队列 UUID；按内容去重，所有登录用户共
 
 body：`{"songId":"123","requestId":"UUID"}`。
 获取完整网易云标准音质链接，计算兼容元数据、存数据库，再入队。返回 `{ok:true,track:TrackMetadata}`。
-需在线成员和 enqueue 权限；每用户每 10 分钟 200 次；同时最多 2 首导入/刷新。
+需在线成员和播放列表控制（enqueue）权限；每用户每 10 分钟 200 次；同时最多 2 首导入/刷新。
 重试复用 requestId，同一用户 requestId 不得换歌曲或房间；成功入队后才返回成功。
 链接有效则跨房间、跨用户、重启后复用，避免重复请求。
 
@@ -199,7 +199,7 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 ## 4. 网易云与管理
 
 `GET /api/netease/:method` 使用 query，`POST /api/netease/:method` 使用 JSON；均需 Bearer token。
-允许方法：search、search_suggest、cloudsearch、simi_song、song_detail、song_url、song_url_v1、lyric、lyric_new、playlist_detail、playlist_track_all、user_playlist、user_account、user_cloud、login_status。
+允许方法：search、search_suggest、cloudsearch、simi_song、song_detail、song_url、song_url_v1、lyric、lyric_new、playlist_detail、playlist_track_all、user_playlist、user_account、user_cloud、login_status、album。
 
 相似推荐：`GET /api/netease/simi_song?id=歌曲网易云ID&limit=12&offset=0`，返回上游 `songs` 列表。id 必须为 1–20 位数字，limit 为 1–100，offset 为 0–100000 的整数。客户端根据当前播放加载，过滤当前歌曲、重复结果和队列已有歌曲；点选后通过既有音乐添加接口入队，不自动播放。此功能需要同步更新服务端白名单。
 仅转发白名单参数，禁止注入 Cookie、代理和地址。详情见 [NETEASE.md](NETEASE.md)、[MUSIC-SEARCH.md](MUSIC-SEARCH.md)。
@@ -216,6 +216,14 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 配置 NETEASE_ADMIN_TOKEN 时使用 HTTP Basic，用户名 admin、密码为该本地配置值；未配置时只允许直接本机访问。
 POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。密码登录每来源每分钟最多 5 次，全局每分钟最多 10 次。手机号为 5–20 位数字，国家区号为 1–4 位数字（不含 +，默认 86），邮箱不超过 254 字符，密码 1–128 字符，拒绝额外字段。密码仅用于本次上游请求，不持久化。失败不覆盖旧凭据；新登录请求使旧二维码/密码请求结果失效。账号密码错误返回 INVALID_CREDENTIALS；上游风控或安全验证返回 NETEASE_LOGIN_REJECTED，需改用二维码；上游不可用返回 NETEASE_UNAVAILABLE。不提供短信验证码发送或交互式风控验证。
 
+### 服务端内部定时任务（无新增 HTTP 路由）
+
+Asia/Shanghai 每日 08:00，有已保存的网易云 MUSIC_U 时调用 daily_signin（安卓 type=0）、yunbei_sign、vip_tasks + vip_growthpoint_get（仅真实 unGetIds）。按凭据与任务持久化当日尝试标记，晚启动仅补当天未尝试项；无登录态跳过，超时/未确认结果当日不自动重复领取。
+
+新的网易云歌曲已提交播放并生效时，将歌曲总时长转换为秒，**播放中就上报整首总时长，而非播完后才上报**；sourceid 使用详情中的真实专辑 ID。该参数不代表实际已听满，统计是否计入由上游决定。单并发、100 项等待队列和 Worker 超时隔离，失败不阻塞其他接口或房间命令；无网易云 ID、空房间、准备失败不报告，暂停/seek/普通进度不重复报告。服务端凭据更换后旧排队任务失效；详细边界见 [网易云任务说明](NETEASE.md#服务端每日任务与播放打卡)。
+
+副作用方法不加入 `/api/netease/:method` 白名单，普通用户不能通过代理自行签到、领取或注入听歌记录；无需新的请求参数或数据库结构迁移。
+
 ## 5. WebSocket /ws
 
 连接后 5 秒内：`{"type":"auth","token":"..."}`，成功收到 authenticated。
@@ -228,7 +236,18 @@ POST 还检查同源 Origin；不向客户端返回已保存的 Cookie。密码�
 
 成功：`{type:'result',commandId,ok:true,stateVersion}`；失败：`{type:'result',commandId,ok:false,error}`，状态冲突还推送快照。
 持久化队列/权限修改后才确认成功；数据库写失败进入保护状态，恢复数据库后需重启服务。
-支持 action：enqueue、remove、reorder、clear、play、instant、next、previous、pause、resume、stop、seek、quality、defaults、permission。
+支持 action：playbackMode、enqueue、remove、reorder、clear、play、instant、next、previous、pause、resume、stop、seek、quality、defaults、permission。
+
+`enqueue/remove/reorder/clear` 统一检查播放列表控制（enqueue）权限，`instant` 也须该权限及原播放权限。删除当前或准备中的歌曲返回 TRACK_IN_USE；clear 保留当前歌曲（含暂停）及时间轴，无当前歌曲时全部清空；存在 pending 时返回 PLAYBACK_TRANSITION_PENDING，不改列表。reorder 仍须提交完整且无重复的歌曲 ID。上述操作沿用版本、幂等和持久化检查。
+`playbackMode` 负载为 `{mode:"queue"|"shuffle"|"single"|"loop"}`，须在线成员且有 permissions.playbackMode（播放模式修改）权限；pending 时拒绝。快照顶层 playbackMode 为当前房间模式，旧服务端缺失时客户端禁用模式入口。
+
+- queue（默认点歌）：自然播完删除当前队列项并持久化，再接下一首；手动跳过、停止、暂停不删歌曲。
+- shuffle：本轮可播放歌曲不重复，全部播过后重新随机；多首时避免跨轮首尾同曲。新增加入未播集合、删除及排序不重置本轮，不可用曲暂跳过；手动点播和上一首允许主动重复。
+- single：自然播完重播同曲，手动下一首仍可切歌。
+- loop：按当前列表从上到下循环，不删除歌曲。
+
+切换不重置当前进度，模式由服务端统一广播和持久化；MySQL 复用 settings 表的 `room.playbackMode.<roomId>` 键，与房间/队列同事务保存，无结构迁移。旧房间缺省为 queue（注意自然播完会删除歌曲）。重启后保留模式、停止播放，随机轮次重新开始。
+
 负载结构以 `packages/shared/src/index.ts` 的 commandSchema 为准。
 聊天消息 `{type:'chat',roomId,requestId,text}`，text 1–500 字符；返回 chat-result/chat-error，房内广播 chat；最近 100 条仅存内存。
 时钟、ready 和音源加载见 [PROTOCOL.md](PROTOCOL.md)。
@@ -300,3 +319,15 @@ QQ 上游不可用或响应异常返回 HTTP 502（QQ_MUSIC_UNAVAILABLE / QQ_INV
 - `GET /api/rooms/:id/music/:trackId/cover/image`：Bearer 鉴权，只读取该房间歌曲已有或恢复的封面，不接受 URL 参数。下载前后校验在线成员身份；返回 JPEG/PNG/WebP/GIF 字节，`private, no-store`。每用户 60 次/分钟，全局 120 次/分钟，最多两个不同封面下载，相同 URL 合并；10 MiB、15 秒及最多 5 次请求，每次重定向重新检查 HTTPS 图片白名单、凭据、端口与 fragment，拒绝 SVG。失败不影响音乐播放。
 
 QQ 封面 CDN 无 CORS 许可时不能直接用于 Canvas/WebGL。舞台使用同源 Blob 图像：桌面从现有 Rust 图片下载接口取字节，Web 从上述受保护接口取字节；内嵌 Blob 封面直接复用，不重复下载音频。
+
+独立模式权限兼容：新房间默认开启；旧房间无 defaults.playbackMode 时按旧 defaults.skip 补齐，旧成员存在 skip 覆盖且未设模式权限时迁移其原有效权限，避免升级自动提权。已有独立字段后，成员未设置则跟随房间，不再随 skip 改变。旧 defaults 请求省略新增字段时保留现值；无需数据库结构迁移，权限沿用 defaults/overrides JSON 持久化，需同步更新前后端。
+
+## 我的音乐：主页、歌单、专辑及同频内收藏
+
+- `POST /api/music/reference/resolve`：Bearer 鉴权，严格 body `{input:string}`（1–4096），返回 `{kind:"user"|"playlist"|"album",id:string}`。每用户 20 次/分钟、全局 120 次/分钟。长链本地识别，短链仅请求固定 163cn.tv HTTPS，最多 5 次/10 秒，逐跳拒绝凭据、非默认端口、私网/外域与不支持资源；不获取最终网页，不转发任何认证。错误为 MUSIC_LINK_INVALID / MUSIC_LINK_RESOLVE_FAILED / MUSIC_LINK_REDIRECT_LIMIT。
+- `/api/netease/user_playlist?uid=<主页用户ID>&offset=0&limit=30`：分页获取该用户可访问的歌单，包括上游允许展示的创建/收藏列表，不保证读取私有列表。新页面逐页加载，每批最多 100 页，超大列表可继续加载；不从歌单 creatorId 或专辑 userid 推断需要加载主页。
+- `/api/netease/playlist_detail?id=<歌单ID>`、`playlist_track_all?id=...&offset=...&limit=50` 沿用原接口；新增只读 `album?id=<专辑ID>`，返回上游真实 album/songs，id 为 1–20 位数字。歌单/专辑歌曲仍通过现有房间导入接口加入播放列表，原权限、容量和 requestId 幂等规则不变。
+- `GET /api/music/favorites`：Bearer 鉴权，返回 `{collections:MusicCollection[]}`，仅当前同频账号可见；每用户 60 次/分钟。
+- `PUT /api/music/favorites`：Bearer 鉴权，严格 `{kind:"playlist"|"album",id:"数字ID",saved:boolean}`。true 收藏，false 取消；返回最新 `{collections}`。每用户 20 次/分钟、全局 120 次/分钟，每账号最多 200 项（MUSIC_FAVORITES_FULL）。客户端不能指定 userId 或伪造名称/封面，收藏元数据由服务端向真实网易云详情接口验证；同账号并发写串行化防止覆盖，重复收藏/取消结果幂等。损坏的存量数据返回 MUSIC_FAVORITES_INVALID，不静默清空。
+
+MusicCollection 包含 kind/id/name/coverUrl/trackCount/creatorId，可带 description。收藏保存在 settings 的 `music.favorites.<同频用户UUID>` JSON 中，跨客户端/重启保留，不更改共享网易云账号的歌单收藏；无数据库结构迁移。当前与房间一样以单服务进程为基准，不提供多实例收藏写锁。需同步更新前后端，桌面重建。

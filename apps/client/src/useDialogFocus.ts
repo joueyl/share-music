@@ -1,4 +1,6 @@
-import { nextTick, onMounted, onUnmounted, type Ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref, readonly, type Ref } from 'vue';
+const modalCount = ref(0);
+export const modalDepth = readonly(modalCount);
 let depth = 0, background: HTMLElement | null = null, originalInert = false, originalOverflow = '';
 let originalPaddingRight = '', originalGap = '', originalGapPriority = '';
 const scrollbarGapProperty = '--modal-scrollbar-gap';
@@ -18,11 +20,13 @@ export function lockModalBackground() {
   if (gap > 0) body.style.paddingRight = `${padding + gap}px`;
   root.style.setProperty(scrollbarGapProperty, `${gap}px`);
  }
+ modalCount.value = depth;
  if (background) background.inert = true;
  let released = false;
  return () => {
   if (released) return; released = true;
-  if (--depth === 0) {
+  modalCount.value = --depth;
+  if (depth === 0) {
    if (background) background.inert = originalInert;
    document.body.style.overflow = originalOverflow;
    document.body.style.paddingRight = originalPaddingRight;
@@ -34,13 +38,13 @@ export function lockModalBackground() {
  };
 }
 /** Native dialog keyboard behaviour for our custom design surfaces. */
-export function useDialogFocus(element: Ref<HTMLElement | null>, close: () => void) {
+export function useDialogFocus(element: Ref<HTMLElement | null>, close: () => void, externalSelector?: string) {
  let previous: HTMLElement | null = null, unlock = () => {};
  function key(event: KeyboardEvent) {
   if (event.isComposing) return;
   if (event.key === 'Escape') { event.preventDefault(); close(); }
   if (event.key !== 'Tab') return;
-  const nodes = [...(element.value?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"],summary') ?? [])].filter(n => n.getClientRects().length);
+  const nodes = [...(element.value?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex="0"],summary') ?? []), ...(externalSelector ? document.querySelectorAll<HTMLElement>(externalSelector) : [])].filter(n => !n.inert && n.getClientRects().length);
   if (!nodes.length) { event.preventDefault(); return; }
   if (event.shiftKey && document.activeElement === nodes[0]) { event.preventDefault(); nodes.at(-1)?.focus(); }
   else if (!event.shiftKey && document.activeElement === nodes.at(-1)) { event.preventDefault(); nodes[0]?.focus(); }
@@ -50,5 +54,9 @@ export function useDialogFocus(element: Ref<HTMLElement | null>, close: () => vo
   document.addEventListener('keydown', key); await nextTick();
   (element.value?.querySelector<HTMLElement>('[autofocus]') ?? element.value?.querySelector<HTMLElement>('input:not(:disabled),button:not(:disabled)'))?.focus();
  });
- onUnmounted(() => { document.removeEventListener('keydown', key); unlock(); previous?.focus(); });
+ onUnmounted(async () => {
+  document.removeEventListener('keydown', key); unlock();
+  // Player inert is reactive; restore focus only after its DOM attributes update.
+  await nextTick(); previous?.focus();
+ });
 }

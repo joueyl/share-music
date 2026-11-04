@@ -46,3 +46,15 @@ it('rolls back the entire room save when a queue write fails',async()=>{
   await expect(db.saveRoom({id:randomUUID(),name:'房间',hostId:randomUUID(),defaults:DEFAULT_PERMISSIONS,overrides:{}})).rejects.toThrow('DATABASE_UNAVAILABLE');
   expect(connection.rollback).toHaveBeenCalledOnce();expect(connection.commit).not.toHaveBeenCalled();
 });
+
+it('saves the playback mode in existing settings within the room transaction',async()=>{
+ const {db,connection}=fixture();const id=randomUUID();
+ await db.saveRoom({id,name:'room',hostId:randomUUID(),defaults:DEFAULT_PERMISSIONS,overrides:{},playbackMode:'shuffle'});
+ expect(connection.execute).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO settings'),[`room.playbackMode.${id}`,'shuffle']);
+ expect(connection.commit).toHaveBeenCalledOnce();
+});
+it('restores room playback modes and defaults legacy rooms to queue mode',async()=>{
+ const {db,pool}=fixture();
+ pool.execute.mockImplementation(async(sql:any)=>[String(sql).includes('SELECT rooms.*')?[{id:'a',playback_mode:'loop',defaults_json:'{}',overrides_json:'{}'},{id:'b',defaults_json:'{}',overrides_json:'{}'}]:[],[]] as any);
+ expect((await db.rooms()).map(r=>r.playbackMode)).toEqual(['loop','queue']);
+});

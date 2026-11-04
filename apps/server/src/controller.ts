@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { permissionsSchema, roomSettingsSchema } from '../../../packages/shared/src';
 import { AppService } from './app.service';
 import { DomainError } from './engine';
-import { resolvePlaylistShareLink } from './playlist-link';
+import { resolveMusicReference, resolvePlaylistShareLink } from './playlist-link';
 import { qqMid } from './qq';
 const loginSchema = z.object({ name: z.string().trim().min(2).max(40), password: z.string().min(10).max(128), register: z.boolean().default(false) }).strict();
 export function httpError(error: unknown): never {
@@ -21,6 +21,22 @@ export class ApiController {
       const user=await this.user(header);this.app.limit(`playlist-resolve:${user.id}`,20,60000);this.app.limit('playlist-resolve:global',120,60000);
       const {input}=z.object({input:z.string().trim().min(1).max(4096)}).strict().parse(body);
       return await resolvePlaylistShareLink(input);
+    }catch(e){httpError(e);}
+  }
+  @Post('music/reference/resolve') async resolveReference(@Body() body:unknown,@Headers('authorization') header?:string){
+    try{
+      const user=await this.user(header);this.app.limit(`music-reference:${user.id}`,20,60000);this.app.limit('music-reference:global',120,60000);
+      const {input}=z.object({input:z.string().trim().min(1).max(4096)}).strict().parse(body);return await resolveMusicReference(input);
+    }catch(e){httpError(e);}
+  }
+  @Get('music/favorites') async musicFavorites(@Headers('authorization') header?:string){
+    try{const user=await this.user(header);this.app.limit(`music-favorites:${user.id}`,60,60000);return {collections:await this.app.musicFavorites.list(user.id)};}catch(e){httpError(e);}
+  }
+  @Put('music/favorites') async setMusicFavorite(@Body() body:unknown,@Headers('authorization') header?:string){
+    try{
+      const user=await this.user(header);this.app.limit(`music-favorites-write:${user.id}`,20,60000);this.app.limit('music-favorites-write:global',120,60000);
+      const {kind,id,saved}=z.object({kind:z.enum(['playlist','album']),id:z.string().regex(/^\d{1,20}$/),saved:z.boolean()}).strict().parse(body);
+      return {collections:await this.app.musicFavorites.set(user.id,kind,id,saved)};
     }catch(e){httpError(e);}
   }
   @Get('music/uploaded') async uploadedMusic(@Query() query:unknown,@Headers('authorization') header?:string) {

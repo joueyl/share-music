@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { nextTick, reactive } from 'vue';
+import { h, nextTick, reactive } from 'vue';
 import { all, node, renderer, text } from './helpers/vue-host';
 import QueueDrawer from '../src/components/QueueDrawer.vue';
 import { moveQueueTrack } from '../src/queue-order';
@@ -13,8 +13,8 @@ vi.mock('vue',async original=>{const vue=await original<typeof import('vue')>();
 let mounted:ReturnType<typeof renderer.createApp>;
 const settle=async()=>{await nextTick();await nextTick();};
 beforeEach(()=>{
- vi.stubGlobal('document',{elementFromPoint:()=>f.target});vi.stubGlobal('requestAnimationFrame',vi.fn(()=>1));vi.stubGlobal('cancelAnimationFrame',vi.fn());
- f.app=reactive({host:true,connected:true,pendingActions:0,user:{id:'host'},permission:{skip:true,enqueue:true},room:{id:'room',stateVersion:1,pending:null,members:[],playback:{sourceId:'b'},playlist:['a','b','c','d'].map(id=>({id,name:id,available:true,providerId:'host',durationMs:100000}))},act:vi.fn().mockResolvedValue(undefined)});
+ vi.stubGlobal('document',{elementFromPoint:()=>f.target,addEventListener:vi.fn(),removeEventListener:vi.fn()});vi.stubGlobal('requestAnimationFrame',vi.fn(()=>1));vi.stubGlobal('cancelAnimationFrame',vi.fn());
+ f.app=reactive({host:true,connected:true,pendingActions:0,user:{id:'host'},permission:{skip:true,enqueue:true,playbackMode:true},room:{id:'room',playbackMode:'queue',stateVersion:1,pending:null,members:[],playback:{sourceId:'b'},playlist:['a','b','c','d'].map(id=>({id,name:id,available:true,providerId:'host',durationMs:100000}))},act:vi.fn().mockResolvedValue(undefined)});
 });
 afterEach(()=>{mounted?.unmount();vi.unstubAllGlobals();});
 async function mount(){const root=node('root');mounted=renderer.createApp(QueueDrawer);mounted.mount(root);await settle();
@@ -49,12 +49,12 @@ it('cancels on room-version changes, pointer cancellation or an ordinary click',
  grip(root,'a').props.onPointerdown(pointer(20));f.app.room.stateVersion++;await settle();await dialog.props.onPointerup(pointer(140));expect(f.app.act).not.toHaveBeenCalled();
  grip(root,'a').props.onPointerdown(pointer(20));dialog.props.onPointercancel();expect(f.app.act).not.toHaveBeenCalled();
 });
-it('disables ordering for non-hosts, disconnected clients, pending transitions and unconfirmed actions',async()=>{
+it('disables ordering without playlist control, disconnected clients, pending transitions and unconfirmed actions',async()=>{
  const {root}=await mount();
  for(const change of [()=>{f.app.connected=false;},()=>{f.app.connected=true;f.app.room.pending={id:'pending'};},()=>{f.app.room.pending=null;f.app.pendingActions=1;}]){
   change();await settle();expect(grip(root,'a').props.disabled).toBe(true);grip(root,'a').props.onPointerdown(pointer(20));expect(f.app.act).not.toHaveBeenCalled();
  }
- f.app.pendingActions=0;f.app.host=false;await settle();expect(grip(root,'a')).toBeUndefined();
+ f.app.pendingActions=0;f.app.host=false;await settle();expect(grip(root,'a')).toBeDefined();f.app.permission.enqueue=false;await settle();expect(grip(root,'a')).toBeUndefined();
 });
 it('auto-scrolls near an edge and stops the animation when the gesture is cancelled',async()=>{
  const {root,dialog,list}=await mount();grip(root,'a').props.onPointerdown(pointer(20));f.target=null;
@@ -96,4 +96,52 @@ it('coalesces repeated activation while a playback command is being sent',async(
  f.app.act.mockImplementation(()=>new Promise<void>(resolve=>finish=resolve));
  row(root,'a').props.onDblclick(doubleClick());row(root,'a').props.onDblclick(doubleClick());await settle();
  expect(f.app.act).toHaveBeenCalledOnce();finish();await settle();
+});
+
+it('allows members with playlist control to remove other members songs and clear while a song is active',async()=>{
+ f.app.host=false;f.app.user.id='member';const {root}=await mount();
+ const clear=all(root).find(n=>n.props.class==='queue-clear');expect(clear.props.disabled).toBe(false);await clear.props.onClick();
+ expect(f.app.act).toHaveBeenLastCalledWith({type:'clear',payload:{}});await settle();
+ const remove=all(row(root,'a')).find(n=>n.props['aria-label']==='移除音轨');expect(remove.props.disabled).toBe(false);await remove.props.onClick();
+ expect(f.app.act).toHaveBeenLastCalledWith({type:'remove',payload:{trackId:'a'}});
+ expect(all(row(root,'b')).find(n=>n.props['aria-label']==='移除音轨').props.disabled).toBe(true);
+});
+it('disables clear during pending operations, disconnect and when only the current song remains',async()=>{
+ const {root}=await mount();const clear=()=>all(root).find(n=>n.props.class==='queue-clear');
+ for(const patch of [()=>f.app.connected=false,()=>{f.app.connected=true;f.app.room.pending={};},()=>{f.app.room.pending=null;f.app.pendingActions=1;},()=>{f.app.pendingActions=0;f.app.room.playlist=f.app.room.playlist.filter((t:any)=>t.id==='b');}]){
+  patch();await settle();expect(clear().props.disabled).toBe(true);await clear().props.onClick();expect(f.app.act).not.toHaveBeenCalled();
+ }
+ f.app.permission.enqueue=false;await settle();expect(clear()).toBeUndefined();
+});
+it('closes song menus on outside clicks or another menu, and unregisters the listener',async()=>{
+ const {dialog}=await mount(),inside={},outside={};
+ const first={open:true,contains:(target:unknown)=>target===inside},second={open:true,contains:()=>false};
+ dialog.querySelectorAll=()=>[first,second];
+ const listener=(document.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(c=>c[0]==='click')![1];
+ listener({target:inside});expect(first.open).toBe(true);expect(second.open).toBe(false);
+ listener({target:outside});expect(first.open).toBe(false);
+ mounted.unmount();expect(document.removeEventListener).toHaveBeenCalledWith('click',listener);
+});
+
+it('animates closed when the external queue toggle requests it and can reopen before leaving',async()=>{
+ const state=reactive({open:true}),root=node('root');mounted=renderer.createApp({setup:()=>()=>h(QueueDrawer,{open:state.open})});mounted.mount(root);await settle();
+ expect(all(root).some(n=>n.props.role==='dialog')).toBe(true);
+ state.open=false;await settle();expect(all(root).some(n=>n.props.role==='dialog')).toBe(false);
+ state.open=true;await settle();expect(all(root).some(n=>n.props.role==='dialog')).toBe(true);
+});
+
+it('offers four shared modes and sends only a server command, with connection and permission guards',async()=>{
+ const {root}=await mount();const select=all(root).find(n=>n.props['aria-label']==='房间播放模式');
+ expect(all(select).filter(n=>n.type==='option').map(n=>n.props.value)).toEqual(['queue','shuffle','single','loop']);
+ await select.props.onChange({target:{value:'shuffle'}});expect(f.app.act).toHaveBeenLastCalledWith({type:'playbackMode',payload:{mode:'shuffle'}});
+ expect(f.app.room.playbackMode).toBe('queue');f.app.act.mockClear();
+ for(const change of [()=>f.app.permission.playbackMode=false,()=>{f.app.permission.playbackMode=true;f.app.connected=false;},()=>{f.app.connected=true;f.app.pendingActions=1;},()=>{f.app.pendingActions=0;f.app.room.pending={};}]){
+  change();await settle();expect(select.props.disabled).toBe(true);await select.props.onChange({target:{value:'loop'}});expect(f.app.act).not.toHaveBeenCalled();
+ }
+});
+
+it('mode controls remain allowed when playback is denied but mode modification is granted',async()=>{
+ const {root}=await mount();f.app.permission.skip=false;f.app.permission.enqueue=false;f.app.permission.playbackMode=true;await settle();
+ const control=all(root).find(n=>n.props['aria-label']==='房间播放模式'||String(n.props['aria-label']).startsWith('播放模式：'));
+ expect(control.props.disabled).toBe(false);
 });

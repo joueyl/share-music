@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { resolvePlaylistShareLink } from '../src/playlist-link';
+import { resolveMusicReference, resolvePlaylistShareLink } from '../src/playlist-link';
 import { ApiController } from '../src/controller';
 import type { AppService } from '../src/app.service';
 const redirect=(location:string)=>new Response('redirect',{status:302,headers:{location}});
@@ -46,4 +46,12 @@ it('requires authentication and a strict input body before resolution',async()=>
  await expect(controller.resolvePlaylist({input:'123',proxy:'http://bad'},'Bearer token')).rejects.toMatchObject({status:400});
  expect(await controller.resolvePlaylist({input:'123'},'Bearer token')).toEqual({id:'123'});
  expect(app.limit).toHaveBeenCalledWith('playlist-resolve:user',20,60000);
+});
+
+it('new reference reader safely expands short links to profiles, albums and playlists without fetching final pages',async()=>{
+ for(const [url,target] of [['https://music.163.com/#/user?id=274950922',{kind:'user',id:'274950922'}],['https://music.163.com/#/album/38306/?userid=274950922',{kind:'album',id:'38306'}],['https://music.163.com/m/playlist?id=804180248&creatorId=274950922',{kind:'playlist',id:'804180248'}]] as const){
+  const request=vi.fn().mockResolvedValue(redirect(url));expect(await resolveMusicReference('https://163cn.tv/Abc',request)).toEqual(target);expect(request).toHaveBeenCalledOnce();expect(request.mock.calls[0][1].headers).toEqual({Accept:'text/html'});
+ }
+ for(const url of ['http://127.0.0.1/','https://evil.test/user?id=1','https://music.163.com/song?id=1']){const request=vi.fn().mockResolvedValue(redirect(url));await expect(resolveMusicReference('https://163cn.tv/Abc',request)).rejects.toThrow('MUSIC_LINK_INVALID');expect(request).toHaveBeenCalledOnce();}
+ const request=vi.fn().mockResolvedValue(redirect('/Abc'));await expect(resolveMusicReference('https://163cn.tv/Abc',request)).rejects.toThrow('MUSIC_LINK_REDIRECT_LIMIT');
 });

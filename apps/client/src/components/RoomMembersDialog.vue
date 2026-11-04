@@ -9,8 +9,8 @@ const app = useApp(), emit = defineEmits<{ close: [] }>(), panel = ref<'members'
 const copied = ref(false);
 useDialogFocus(dialog, () => emit('close'));
 
-const keys: PermissionKey[] = ['skip', 'seek', 'enqueue'];
-const labels: Record<PermissionKey, string> = { skip: '切歌 / 播放控制', stream: '旧版兼容字段', seek: '进度切换', enqueue: '加入播放列表' };
+const keys: PermissionKey[] = ['skip', 'seek', 'enqueue', 'playbackMode'];
+const labels: Record<PermissionKey, string> = { skip: '切歌 / 播放控制', stream: '旧版兼容字段', seek: '进度切换', enqueue: '播放列表控制', playbackMode: '播放模式修改' };
 
 function setDefault(key: PermissionKey, value: boolean) {
   if (app.room) void app.act({ type: 'defaults', payload: { ...app.room.defaults, [key]: value } });
@@ -117,6 +117,9 @@ async function copyInvite() {
 </template>
 
 <style scoped>
+.override-row>span,.override-row .tone-select,.override-row .tone-select option{white-space:nowrap;overflow-wrap:normal}
+.override-row .tone-select{flex:0 0 auto;min-width:128px}
+
 .room-invite-card {
   display: flex;
   align-items: center;

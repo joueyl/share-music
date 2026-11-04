@@ -1,7 +1,7 @@
 import { createPool, type Pool, type PoolConnection, type RowDataPacket } from 'mysql2/promise';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { trackSchema, roomSettingsSchema, type TrackMetadata, type Track } from '../../../packages/shared/src';
+import { trackSchema, roomSettingsSchema, playbackModeSchema, type TrackMetadata, type Track } from '../../../packages/shared/src';
 import { songInfo, type DatabaseStore, type UserRecord } from './database';
 import type { RoomRecord } from './engine';
 import { MYSQL_SCHEMA } from './mysql-schema';
@@ -93,6 +93,7 @@ export class MySqlDatabase implements DatabaseStore {
     await this.run(`INSERT INTO rooms(id,name,host_id,description,atmosphere,visibility,category,cover_url,invite_code,defaults_json,overrides_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)
       ON DUPLICATE KEY UPDATE name=VALUES(name),host_id=VALUES(host_id),description=VALUES(description),atmosphere=VALUES(atmosphere),visibility=VALUES(visibility),category=VALUES(category),cover_url=VALUES(cover_url),defaults_json=VALUES(defaults_json),overrides_json=VALUES(overrides_json)`,
       [record.id,record.name,record.hostId,s.description,s.atmosphere,s.visibility,s.category,s.coverUrl,record.inviteCode??randomUUID().replaceAll('-','').slice(0,12),JSON.stringify(record.defaults),JSON.stringify(record.overrides)]);
+    await this.setSetting(`room.playbackMode.${record.id}`,record.playbackMode ?? 'queue');
     await this.run('DELETE FROM room_tracks WHERE room_id=?',[record.id]);
     for(const [index,t] of (record.playlist??[]).entries()) {
       // Queue entries already retain their complete metadata in room_tracks.
@@ -101,9 +102,9 @@ export class MySqlDatabase implements DatabaseStore {
     }
   }
   async rooms():Promise<RoomRecord[]> {
-    const [rooms,tracks]=await Promise.all([this.rows('SELECT * FROM rooms ORDER BY created_at,id'),this.rows('SELECT room_id,track_json FROM room_tracks ORDER BY room_id,position')]);
+    const [rooms,tracks]=await Promise.all([this.rows("SELECT rooms.*, modes.value AS playback_mode FROM rooms LEFT JOIN settings modes ON modes.setting_key=CONCAT('room.playbackMode.',rooms.id) ORDER BY rooms.created_at,rooms.id"),this.rows('SELECT room_id,track_json FROM room_tracks ORDER BY room_id,position')]);
     const queues=new Map<string,Track[]>();for(const t of tracks){const q=queues.get(t.room_id)??[];q.push(json(t.track_json));queues.set(t.room_id,q);}
-    return rooms.map(r=>({id:r.id,name:r.name,hostId:r.host_id,defaults:json(r.defaults_json),overrides:json(r.overrides_json),inviteCode:r.invite_code,
+    return rooms.map(r=>({id:r.id,name:r.name,hostId:r.host_id,playbackMode:playbackModeSchema.parse(r.playback_mode??'queue'),defaults:json(r.defaults_json),overrides:json(r.overrides_json),inviteCode:r.invite_code,
       settings:{description:r.description,atmosphere:r.atmosphere,visibility:r.visibility,category:r.category,coverUrl:r.cover_url},playlist:queues.get(r.id)??[]}));
   }
   async close() { await this.pool.end(); }

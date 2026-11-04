@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { lockModalBackground } from '../src/useDialogFocus';
+import { lockModalBackground, modalDepth } from '../src/useDialogFocus';
 import { ui, resetUi, openSearch } from '../src/ui';
 function setup({gap=20,padding='',computedPadding='0px',inert=false,overflow='auto',stable=false}={}) {
  const properties=new Map<string,{value:string;priority:string}>();
@@ -12,10 +12,10 @@ function setup({gap=20,padding='',computedPadding='0px',inert=false,overflow='au
 }
 afterEach(()=>{vi.unstubAllGlobals();resetUi();});
 it('holds inert, scroll lock and scrollbar padding until every overlapping dialog closes',()=>{
- const {shell,body,root}=setup();const drawer=lockModalBackground(),search=lockModalBackground();
+ const {shell,body,root}=setup();const drawer=lockModalBackground(),search=lockModalBackground();expect(modalDepth.value).toBe(2);
  expect(shell.inert).toBe(true);expect(body.style.overflow).toBe('hidden');expect(body.style.paddingRight).toBe('20px');expect(root.style.getPropertyValue('--modal-scrollbar-gap')).toBe('20px');
- drawer();expect(shell.inert).toBe(true);expect(body.style.paddingRight).toBe('20px');
- search();expect(shell.inert).toBe(false);expect(body.style.overflow).toBe('auto');expect(body.style.paddingRight).toBe('');expect(root.style.getPropertyValue('--modal-scrollbar-gap')).toBe('');
+ drawer();expect(modalDepth.value).toBe(1);expect(shell.inert).toBe(true);expect(body.style.paddingRight).toBe('20px');
+ search();expect(modalDepth.value).toBe(0);expect(shell.inert).toBe(false);expect(body.style.overflow).toBe('auto');expect(body.style.paddingRight).toBe('');expect(root.style.getPropertyValue('--modal-scrollbar-gap')).toBe('');
  search();expect(shell.inert).toBe(false);
 });
 it('restores original inert state, inline padding and CSS variable including its priority',()=>{

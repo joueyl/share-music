@@ -1,5 +1,10 @@
 /* Fit the workspace to the viewport, rather than hiding overflowing content.
    Narrow/very short windows keep document scrolling as an accessible fallback. */
+@media(max-width:900px),(max-height:639px){
+  /* Keep the library scrollport inside the existing navigation/player padding. */
+  .shell:not(.auth-shell)>.main:has(.tone-library){height:100dvh;min-height:0;display:flex;flex-direction:column}
+  .main:has(.tone-library)>.route-page{flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable}
+}
 @media(min-width:901px) and (min-height:640px){
   :root{--workspace-nav:clamp(64px,10vh,96px);--workspace-player:clamp(88px,13vh,124px)}
   .shell:not(.auth-shell){height:100dvh;min-height:0}

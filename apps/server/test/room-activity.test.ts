@@ -40,6 +40,7 @@ it('records authoritative actor, song, playback actions and seek target, not bac
 
 it('does not log forbidden, conflicting, invalid commands or duplicate successful retries', () => {
   const s = setup();
+  s.cmd({type:'permission',payload:{memberId:s.member.id,overrides:{skip:false}}});
   const command = { roomId: s.roomId, commandId: randomUUID(), expectedStateVersion: s.engine.snapshot(s.roomId).stateVersion, action: { type: 'enqueue' as const, payload: s.track } };
   s.engine.command(s.host.id, command); s.engine.command(s.host.id, command);
   expect(s.messages).toHaveLength(1);

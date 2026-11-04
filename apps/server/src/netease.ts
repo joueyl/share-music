@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Worker } from 'node:worker_threads';
 import type { DatabaseStore } from './database';
 import { DomainError } from './engine';
@@ -19,7 +19,7 @@ const invoke: MusicInvoker = (name, params) => new Promise((resolve, reject) => 
   worker.once('error', () => { finish(); reject(new DomainError('NETEASE_UNAVAILABLE')); });
   worker.once('exit', () => { clearTimeout(timer); reject(new DomainError('NETEASE_UNAVAILABLE')); });
 });
-export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'simi_song', 'song_detail', 'song_url', 'song_url_v1', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_account', 'user_cloud', 'login_status']);
+export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'simi_song', 'song_detail', 'song_url', 'song_url_v1', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_account', 'user_cloud', 'login_status', 'album']);
 function publicBody(value: any): any {
   if (Array.isArray(value)) return value.map(publicBody);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([k]) => !/^(cookie|token|accessToken|refreshToken|__csrf|MUSIC_U)$/i.test(k)).map(([k, v]) => [k, publicBody(v)]));
@@ -29,22 +29,50 @@ export class NeteaseService {
   private attempt?: { id: string; key: string; expiresAt: number; lastCheck: number; code: number; pending?: Promise<{ code: number }> };
   private generation = 0;
   constructor(private db: DatabaseStore, private api: MusicInvoker = invoke, private now = Date.now) {}
-  private async request(name: string, params: Record<string, unknown> = {}) {
+  private async request(name: string, params: Record<string, unknown> = {}, credential?:string) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
-        this.api(name, { ...params, cookie: await this.db.getSetting('netease.cookie') ?? '', timestamp: this.now() }),
+        this.api(name, { ...params, cookie: credential ?? await this.db.getSetting('netease.cookie') ?? '', timestamp: this.now() }),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new DomainError('NETEASE_UNAVAILABLE')), 20000); }),
       ]);
     } catch { throw new DomainError('NETEASE_UNAVAILABLE'); }
     finally { clearTimeout(timer); }
+  }
+  private credentialKey(cookie:string):string|null {
+    const token=/(?:^|;\s*)MUSIC_U=([^;\s]+)/.exec(cookie)?.[1];
+    return token?createHash('sha256').update(token).digest('hex'):null;
+  }
+  async accountSessionKey():Promise<string|null> {
+    return this.credentialKey(await this.db.getSetting('netease.cookie')??'');
+  }
+  /** Server-only account maintenance. Never extend the browser proxy allowlist. */
+  async accountCall(name:string,params:Record<string,unknown>,expectedSession:string) {
+    const cookie=await this.db.getSetting('netease.cookie')??'';
+    if(!expectedSession||this.credentialKey(cookie)!==expectedSession)throw new DomainError('NETEASE_LOGIN_REPLACED');
+    let clean:Record<string,unknown>;
+    switch(name){
+      case 'daily_signin':clean={type:0};break;
+      case 'yunbei_sign':case 'vip_tasks':clean={};break;
+      case 'vip_growthpoint_get':
+        if(typeof params.ids!=='string'||params.ids.length>4000||!/^\d{1,20}(?:_\d{1,10})?(?:,\d{1,20}(?:_\d{1,10})?){0,99}$/.test(params.ids))throw new DomainError('INVALID_REQUEST');
+        clean={ids:params.ids};break;
+      case 'song_detail':
+        if(!/^\d{1,20}$/.test(String(params.ids??'')))throw new DomainError('INVALID_REQUEST');
+        clean={ids:String(params.ids)};break;
+      case 'scrobble':
+        if(!/^\d{1,20}$/.test(String(params.id??''))||!/^\d{1,20}$/.test(String(params.sourceid??''))||!Number.isInteger(params.time)||Number(params.time)<1||Number(params.time)>86400)throw new DomainError('INVALID_REQUEST');
+        clean={id:String(params.id),sourceid:String(params.sourceid),time:Number(params.time)};break;
+      default:throw new DomainError('NETEASE_METHOD_NOT_ALLOWED');
+    }
+    return publicBody((await this.request(name,clean,cookie)).body);
   }
   async call(name: string, params: Record<string, unknown>) {
     if (!musicMethods.has(name)) throw new DomainError('NETEASE_METHOD_NOT_ALLOWED');
     // Do not allow browser callers to inject credentials, proxies or network addresses.
     const allowed = new Set(['keywords', 'limit', 'offset', 'type', 'id', 'ids', 'uid', 'level', 'br']);
     const clean = Object.fromEntries(Object.entries(params).filter(([key]) => allowed.has(key)));
-    if(['simi_song','lyric_new','playlist_track_all','playlist_detail','user_playlist'].includes(name)){
+    if(['simi_song','lyric_new','playlist_track_all','playlist_detail','user_playlist','album'].includes(name)){
       const key=name==='user_playlist'?'uid':'id';
       if(!/^\d{1,20}$/.test(String(clean[key]??'')))throw new DomainError('INVALID_REQUEST');
       if(name==='simi_song'||name==='playlist_track_all'||name==='user_playlist'){

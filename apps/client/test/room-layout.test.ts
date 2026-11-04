@@ -11,7 +11,7 @@ it('allocates stage content in normal grid flow instead of overlapping fixed min
  expect(css).toMatch(/\.stage-song\s*\{[^}]*grid-column: 2;[^}]*grid-row: 2;/s);
  expect(css).not.toMatch(/min-height:\s*580px|min-width:\s*260px|margin-right:\s*220px/);
  expect(css).toContain('.stage-top-presence {\n  position: relative');
- expect(css).toContain('.stage-audio-status {\n  position: static');
+ expect(css).not.toContain('stage-audio-status');
 });
 it('keeps narrow and short rooms scrollable with space for the fixed transport and chat input',()=>{
  const app=styles('App.vue'),room=styles('views/Room.vue');
@@ -30,11 +30,11 @@ it('wraps long untimed lyrics, bounds word spacing, and scrolls long lines witho
  expect(template).toContain(":margin=\"`min(${lineMargins[current]?.[j] ?? '0px'}, 1em)`\"");
  expect(css).toMatch(/\.lumiere-empty\s*\{[^}]*white-space: normal/s);
 });
-it('preserves accessible full titles and playback loading/error feedback in every stage mode',()=>{
+it('preserves accessible full titles without a shifting status caption in any stage mode',()=>{
  const room=read('views/Room.vue');
  expect(room.match(/:title="track\?\.name"/g)).toHaveLength(2);
- expect(room).toContain('class="stage-audio-status" role="status"');
- expect(room).toContain("app.room.pending?'正在准备同步…':app.media.detail||'等待音乐开始'");
+ expect(room).not.toContain('stage-audio-status');
+ expect(room).not.toContain('音乐准备中');
  for(const file of ['views/Room.vue','App.vue','components/TrackLyrics.vue'])expect(parse(read(file)).errors).toEqual([]);
 });
 
@@ -53,4 +53,15 @@ it('pins the chat launcher below the room toolbar instead of pushing it down as 
  expect(trigger).toContain('position:fixed');expect(trigger).toContain('top:68px');
  expect(trigger).toContain('bottom:auto');expect(trigger).toContain('flex-shrink:0');
  expect(trigger).toContain('white-space:nowrap');expect(trigger).toContain('max-width:calc(100% - 32px)');
+});
+
+it('rounds the independent player bottom corners and shares the window maximized radius without clipping the page',()=>{
+ const app=read('App.vue'),player=read('components/GlobalPlayer.vue');
+ const tone=readFileSync(new URL('../src/tone.css',import.meta.url),'utf8');
+ expect(tone).toContain('#app{--window-corner-radius:20px;');expect(tone).toContain('#app.is-maximized{--window-corner-radius:0px;');
+ expect(styles('App.vue')).toContain('border-radius: var(--window-corner-radius, 20px)');
+ expect(styles('components/GlobalPlayer.vue')).toContain('border-radius:0 0 var(--window-corner-radius,20px) var(--window-corner-radius,20px)');
+ expect(styles('components/GlobalPlayer.vue')).not.toMatch(/overflow\s*:\s*hidden|clip-path|scale\(/);
+ expect(player).toContain('prefers-reduced-motion:reduce');
+ expect(app).toContain('播放器独立于 shell 的 inert 锁');expect(app).toContain('<GlobalPlayer v-if="app.user" />');
 });

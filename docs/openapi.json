@@ -3,7 +3,7 @@
   "info": {
     "title": "同频 TONE API",
     "version": "0.2.2-mysql",
-    "description": "MySQL-backed server. Registration and login use username and password only. WebSocket protocol is documented separately in docs/API.md and docs/PROTOCOL.md. Music is stored as direct provider URLs and expiry timestamps. See docs/API.md for bounded refresh, 100 MiB bounded downloads and client-side MD5 verification."
+    "description": "MySQL-backed server. Internal-only Netease account jobs run daily at 08:00 Asia/Shanghai; committed playback asynchronously reports full track duration while playing. Maintenance/scrobble methods are not exposed by the HTTP proxy. See docs/NETEASE.md for bounded queues, credential gating and persisted daily attempts. Registration and login use username and password only. WebSocket protocol is documented separately in docs/API.md and docs/PROTOCOL.md. Music is stored as direct provider URLs and expiry timestamps. See docs/API.md for bounded refresh, 100 MiB bounded downloads and client-side MD5 verification."
   },
   "servers": [
     {
@@ -11,6 +11,140 @@
     }
   ],
   "paths": {
+    "/api/music/reference/resolve": {
+      "post": {
+        "summary": "识别并安全展开网易云个人主页、歌单、专辑链接",
+        "operationId": "resolve_music_reference",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "input"
+                ],
+                "properties": {
+                  "input": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicReference"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or upstream data"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "503": {
+            "description": "Database unavailable"
+          }
+        }
+      }
+    },
+    "/api/music/favorites": {
+      "get": {
+        "summary": "读取当前同频账号内收藏的歌单和专辑",
+        "operationId": "get_music_favorites",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicFavoritesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or upstream data"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "503": {
+            "description": "Database unavailable"
+          }
+        }
+      },
+      "put": {
+        "summary": "收藏或取消收藏；只接受资源 ID，元数据由服务端向网易云验证",
+        "operationId": "set_music_favorite",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MusicFavoriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MusicFavoritesResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or upstream data"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "503": {
+            "description": "Database unavailable"
+          }
+        }
+      }
+    },
     "/api/health": {
       "get": {
         "summary": "健康检查（含数据库探测）",
@@ -2241,11 +2375,12 @@
                 "schema": {
                   "type": "object",
                   "required": [
-                    "track"
+                    "id"
                   ],
                   "properties": {
-                    "track": {
-                      "$ref": "#/components/schemas/TrackMetadata"
+                    "id": {
+                      "type": "string",
+                      "pattern": "^\\d{1,20}$"
                     }
                   }
                 }
@@ -3202,9 +3337,121 @@
       }
     },
     "schemas": {
+      "MusicReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "user",
+              "playlist",
+              "album"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^\\d{1,20}$"
+          }
+        }
+      },
+      "MusicCollection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id",
+          "name",
+          "coverUrl",
+          "trackCount",
+          "creatorId"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "playlist",
+              "album"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^\\d{1,20}$"
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "coverUrl": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "trackCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "creatorId": {
+            "type": "string",
+            "maxLength": 20
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        }
+      },
+      "MusicFavoritesResponse": {
+        "type": "object",
+        "required": [
+          "collections"
+        ],
+        "properties": {
+          "collections": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/MusicCollection"
+            }
+          }
+        }
+      },
+      "MusicFavoriteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "id",
+          "saved"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "playlist",
+              "album"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "pattern": "^\\d{1,20}$"
+          },
+          "saved": {
+            "type": "boolean"
+          }
+        }
+      },
       "Permissions": {
+        "description": "新房间默认全部为 true；已有房间保留保存的设置。enqueue 为统一播放列表控制（添加、删除、排序、清空）的兼容字段，不是独立的加入权限。",
         "type": "object",
         "properties": {
+          "playbackMode": {
+            "type": "boolean",
+            "description": "独立播放模式修改权限；新房间默认开启，支持成员覆盖。旧请求可省略，旧房间缺字段时按原 skip 权限兼容，旧 defaults 请求省略时保留现值"
+          },
           "skip": {
             "type": "boolean"
           },
@@ -3215,6 +3462,7 @@
             "type": "boolean"
           },
           "enqueue": {
+            "description": "播放列表控制：添加、删除任意成员歌曲、完整排序及清空；清空保留当前歌曲，准备期间拒绝清空",
             "type": "boolean"
           }
         },
@@ -3608,6 +3856,12 @@
         ],
         "additionalProperties": false
       },
+      "PlaybackMode": {
+        "type": "string",
+        "enum": ["queue", "shuffle", "single", "loop"],
+        "default": "queue",
+        "description": "点歌（默认，播完删除）、每轮无重复随机、单曲循环、列表循环；由服务端统一同步及持久化"
+      },
       "RoomSnapshot": {
         "type": "object",
         "required": [
@@ -3624,6 +3878,9 @@
           "serverNow"
         ],
         "properties": {
+          "playbackMode": {
+            "$ref": "#/components/schemas/PlaybackMode"
+          },
           "id": {
             "type": "string",
             "format": "uuid"

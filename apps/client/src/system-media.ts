@@ -1,4 +1,4 @@
-import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, positionAt, type Action, type RoomSnapshot } from '@music-share/shared';
+import { ALL_PERMISSIONS, NO_PERMISSIONS, positionAt, type Action, type RoomSnapshot } from '@music-share/shared';
 export type SystemMediaState = {
   roomId:string|null; trackId:string|null; sourceEpoch:number; title:string;
   playback:'playing'|'paused'|'stopped'; durationMs:number; positionMs:number; canControl:boolean; canSeek:boolean;
@@ -8,7 +8,7 @@ export type SystemMediaEvent = {
   roomId:string; trackId:string; sourceEpoch:number; positionMs?:number;
 };
 function permissions(room:RoomSnapshot|null,userId:string|null) {
-  return room && userId && room.hostId===userId?ALL_PERMISSIONS:room?.members.find(member=>member.id===userId)?.permissions??DEFAULT_PERMISSIONS;
+  return room && userId && room.hostId===userId?ALL_PERMISSIONS:room?.members.find(member=>member.id===userId)?.permissions??NO_PERMISSIONS;
 }
 export function systemMediaState(room:RoomSnapshot|null,userId:string|null,connected:boolean,offset:number,now=Date.now()):SystemMediaState {
   const track=room?.playlist?.find(item=>item.id===room.playback.sourceId),p=permissions(room,userId);

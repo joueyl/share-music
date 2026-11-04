@@ -49,8 +49,7 @@ it('keeps the queue mounted until its slide-out finishes and compensates fixed s
  expect(css).toContain('width:calc(100% - var(--modal-scrollbar-gap,0px))');
  expect(css).toContain('.global-player,.modal-backdrop,.drawer-backdrop{right:var(--modal-scrollbar-gap,0px)}');
 });
-it('omits the playback technology caption without suppressing loading and failure feedback',()=>{
+it('does not render any transient status caption inside the stage',()=>{
  const room=read('../src/views/Room.vue');expect(room).not.toContain('HTML Audio · 同步收听');
- expect(room).toContain('v-if="app.room.pending || app.media.status !== \'playing\'"');
- expect(room).toContain("app.room.pending?'正在准备同步…':app.media.detail");
+ expect(room).not.toContain('stage-audio-status');expect(room).not.toContain('音乐准备中');
 });

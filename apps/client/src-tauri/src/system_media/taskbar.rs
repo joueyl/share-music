@@ -99,10 +99,28 @@ impl Drop for ProxyWindow {
         }
     }
 }
+#[derive(Default)]
+struct CreatedMessages {
+    main: Cell<bool>,
+    proxy: Cell<bool>,
+}
+impl CreatedMessages {
+    fn record(&self, proxy: bool) {
+        if proxy {
+            self.proxy.set(true);
+        } else {
+            self.main.set(true);
+        }
+    }
+    fn take(&self) -> (bool, bool) {
+        (self.main.replace(false), self.proxy.replace(false))
+    }
+}
 struct Hook {
     app: tauri::AppHandle,
     snapshot: Arc<Mutex<Snapshot>>,
     created: u32,
+    pending_created: CreatedMessages,
     alive: Cell<bool>,
     main: HWND,
     proxy: HWND,
@@ -143,6 +161,7 @@ impl Taskbar {
             app,
             snapshot,
             created: unsafe { RegisterWindowMessageW(w!("TaskbarButtonCreated")) },
+            pending_created: CreatedMessages::default(),
             alive: Cell::new(true),
             main: hwnd,
             proxy: proxy.hwnd,
@@ -175,7 +194,7 @@ impl Taskbar {
             _apartment: apartment,
         })
     }
-    pub fn created(&mut self) {
+    fn created(&mut self) {
         if let Ok(api) = unsafe {
             CoCreateInstance::<_, ITaskbarList4>(&TaskbarList, None, CLSCTX_INPROC_SERVER)
         } {
@@ -244,9 +263,26 @@ impl Taskbar {
             self.update(&state);
         }
     }
+    pub fn retry_startup(&mut self, state: &Snapshot) {
+        // An early Explorer call may appear to succeed before the flyout is installed.
+        // Re-attempt Add first, without unregistering an already working cover tab.
+        self.main_added = false;
+        self.proxy_added = false;
+        self.registration_failed = false;
+        self.update(state);
+    }
     pub fn update(&mut self, state: &Snapshot) {
         if !self.hook.alive.get() {
             return;
+        }
+        // Consume creation notifications here, after the previous COM call released RUNTIME.
+        // Keep main/proxy notifications separate: a proxy tab must rebuild its own toolbar.
+        let (main_created, proxy_created) = self.hook.pending_created.take();
+        if main_created {
+            self.created();
+        }
+        if proxy_created {
+            self.proxy_added = false;
         }
         if self.hook.preview_failed.replace(false) {
             self.hook.artwork.borrow_mut().take();
@@ -364,8 +400,11 @@ unsafe extern "system" fn window_proc(
         }
         hook.preview_failed.set(true);
         queue_sync(hook);
-    } else if !proxy && message == hook.created {
-        let _ = hook.app.run_on_main_thread(super::refresh_taskbar);
+    } else if message == hook.created {
+        hook.pending_created.record(proxy);
+        // run_on_main_thread can execute inline on this thread and lose the event to
+        // Runtime::try_borrow_mut while Explorer pumps messages inside a COM call.
+        queue_sync(hook);
     } else if !proxy && message == SYNC_PREVIEW {
         super::sync_taskbar();
         return LRESULT(0);
@@ -532,6 +571,21 @@ mod tests {
     use windows::Win32::UI::WindowsAndMessaging::{
         GetWindow, GetWindowLongPtrW, GWL_EXSTYLE, GW_OWNER, WM_DWMSENDICONICLIVEPREVIEWBITMAP,
     };
+    #[test]
+    fn created_notifications_survive_busy_runtime_and_coalesce_per_window() {
+        let notifications = CreatedMessages::default();
+        let runtime = RefCell::new(());
+        let busy = runtime.borrow_mut();
+        notifications.record(false);
+        notifications.record(false);
+        notifications.record(true);
+        assert!(runtime.try_borrow_mut().is_err());
+        drop(busy);
+        assert_eq!(notifications.take(), (true, true));
+        assert_eq!(notifications.take(), (false, false));
+        notifications.record(true);
+        assert_eq!(notifications.take(), (false, true));
+    }
     #[test]
     fn album_cover_requests_are_isolated_from_the_real_hwnd_and_peek() {
         let main = HWND(1usize as _);

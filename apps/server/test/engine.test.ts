@@ -48,7 +48,9 @@ describe('authoritative room engine', () => {
  it.each(['startLive', 'requestLive', 'approveLive', 'rejectLive', 'stopLive'])('rejects removed system streaming command %s', type => {
   expect(commandSchema.safeParse({ type, payload: { spec, bitrateBps: 2304000, requestId: randomUUID(), sourceEpoch: 1 } }).success).toBe(false);
  });
- it('defaults allow enqueue but reject forged skip/seek/stream controls', () => {
+ it('new rooms allow all controls by default and denied controls are enforced', () => {
+  expect(engine.snapshot(roomId).defaults).toEqual({skip:true,seek:true,stream:true,enqueue:true,playbackMode:true});
+  cmd(host.id,{type:'permission',payload:{memberId:member.id,overrides:{skip:false,seek:false}}});
   const t = track(); cmd(member.id, { type: 'enqueue', payload: t });
   for (const action of [{ type: 'play', payload: { trackId: t.id } }, { type: 'seek', payload: { positionMs: 0 } }] as Action[]) expect(() => cmd(member.id, action)).toThrow('FORBIDDEN');
   expect(engine.snapshot(roomId).playlist[0].providerId).toBe(member.id);
@@ -73,5 +75,49 @@ describe('authoritative room engine', () => {
  it('pause follows the original timeline when readiness times out', () => { const t = track(); start(t); now += 1000; cmd(host.id, { type: 'pause', payload: {} }); const pending = engine.snapshot(roomId).pending!; now = pending.deadlineAt; engine.tick(); const committed = engine.snapshot(roomId).pending!; expect(committed.playback.positionMs).toBe(6200); now = committed.playback.effectiveAtServerMs; engine.tick(); expect(engine.snapshot(roomId).playback.positionMs).toBe(6200); });
  it('natural EOF stops instead of looping the last file', () => { const t = track(); start(t); now += t.durationMs; engine.tick(); expect(engine.snapshot(roomId).playback.playState).toBe('stopped'); expect(engine.snapshot(roomId).pending).toBeNull(); });
 
+
+ it('playlist control grants members add/remove/reorder/clear across other providers', () => {
+  const a=track(),b=track();cmd(host.id,{type:'enqueue',payload:a});cmd(member.id,{type:'enqueue',payload:b});
+  cmd(member.id,{type:'reorder',payload:{trackIds:[b.id,a.id]}});
+  expect(engine.snapshot(roomId).playlist.map(t=>t.id)).toEqual([b.id,a.id]);
+  cmd(member.id,{type:'remove',payload:{trackId:a.id}});
+  cmd(member.id,{type:'clear',payload:{}});expect(engine.snapshot(roomId).playlist).toEqual([]);
+ });
+ it('revoking playlist control rejects every mutation, including removal of own songs and instant playback', () => {
+  const a=track();cmd(member.id,{type:'enqueue',payload:a});
+  cmd(host.id,{type:'permission',payload:{memberId:member.id,overrides:{enqueue:false}}});
+  for(const action of [{type:'enqueue',payload:track()},{type:'instant',payload:track()},{type:'remove',payload:{trackId:a.id}},{type:'reorder',payload:{trackIds:[a.id]}},{type:'clear',payload:{}}] as Action[]){
+   const before=engine.snapshot(roomId);expect(()=>cmd(member.id,action)).toThrow('FORBIDDEN');expect(engine.snapshot(roomId)).toEqual(before);
+  }
+ });
+ it('member playlist overrides win over room defaults and can be restored to follow the room', () => {
+  cmd(host.id,{type:'defaults',payload:{...DEFAULT_PERMISSIONS,enqueue:false}});
+  expect(()=>cmd(member.id,{type:'enqueue',payload:track()})).toThrow('FORBIDDEN');
+  cmd(host.id,{type:'permission',payload:{memberId:member.id,overrides:{enqueue:true}}});
+  cmd(member.id,{type:'enqueue',payload:track()});
+  cmd(host.id,{type:'permission',payload:{memberId:member.id,overrides:{}}});
+  expect(()=>cmd(member.id,{type:'clear',payload:{}})).toThrow('FORBIDDEN');
+  cmd(host.id,{type:'clear',payload:{}});expect(engine.snapshot(roomId).playlist).toEqual([]);
+ });
+ it.each(['playing','paused'] as const)('clear preserves the current %s song and exact playback state, persists and deduplicates', state => {
+  const a=track(),b=track();start(a);cmd(member.id,{type:'enqueue',payload:b});
+  if(state==='paused'){cmd(host.id,{type:'pause',payload:{}});readyAll();}
+  const before=engine.snapshot(roomId).playback,id=randomUUID(),version=engine.snapshot(roomId).stateVersion;
+  const result=cmd(member.id,{type:'clear',payload:{}},id,version);
+  expect(engine.snapshot(roomId).playlist.map(t=>t.id)).toEqual([a.id]);expect(engine.snapshot(roomId).playback).toEqual(before);
+  expect(saved.at(-1)!.playlist!.map(t=>t.id)).toEqual([a.id]);expect(cmd(member.id,{type:'clear',payload:{}},id,version)).toBe(result);
+  expect(()=>cmd(member.id,{type:'remove',payload:{trackId:a.id}})).toThrow('TRACK_IN_USE');
+ });
+ it('clear refuses pending playback, then clears all songs once stopped', () => {
+  const a=track();cmd(host.id,{type:'enqueue',payload:a});cmd(host.id,{type:'play',payload:{trackId:a.id}});
+  const before=engine.snapshot(roomId);expect(()=>cmd(member.id,{type:'clear',payload:{}})).toThrow('PLAYBACK_TRANSITION_PENDING');expect(engine.snapshot(roomId)).toEqual(before);
+  expect(()=>cmd(member.id,{type:'remove',payload:{trackId:a.id}})).toThrow('TRACK_IN_USE');
+  cmd(host.id,{type:'stop',payload:{}});cmd(member.id,{type:'clear',payload:{}});expect(engine.snapshot(roomId).playlist).toEqual([]);
+ });
+ it('restoring rooms preserves their saved defaults rather than enabling permissions retroactively',()=>{
+  const record={...saved.at(-1)!,defaults:{skip:false,seek:false,stream:false,enqueue:false}};
+  const restored=new RoomEngine();restored.restore([record]);restored.restoreOverrides([record]);restored.join(roomId,member);
+  expect(restored.snapshot(roomId).members[0].permissions).toEqual({...record.defaults,playbackMode:false});
+ });
 
 });

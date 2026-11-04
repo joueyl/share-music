@@ -26,3 +26,10 @@ it('clears playback on leave and ignores late media status', async () => {
  emit('media-status', {status:'playing',detail:'stale'});
  expect(app.media.status).toBe('idle'); expect(app.room).toBeNull();
 });
+
+it('reports audio failures in the existing notice without transient stage status messages',async()=>{
+ const {useApp}=await import('../src/store');const app=useApp();await app.initialize();
+ emit('media-status',{status:'buffering',detail:'音乐准备中'});expect(app.notice).toBe('');
+ emit('media-status',{status:'error',detail:'音频加载失败'});expect(app.notice).toBe('音频加载失败');
+ app.notice='';emit('media-status',{status:'error',detail:'音频加载失败'});expect(app.notice).toBe('');
+});

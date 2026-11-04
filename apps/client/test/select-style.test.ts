@@ -17,3 +17,15 @@ it('reuses the accessible shared native select for the music source picker',()=>
  const source=read('../src/components/MusicSearchDialog.vue');
  expect(source).toContain('class="tone-select music-source-select"');expect(source).toContain('aria-label="搜索音源"');expect(source).toContain('音源平台');expect(source).toContain('pointer-events:none');expect(source).toContain('min-height:44px');expect(source).toContain('.music-source-select:focus-visible');expect(source).toContain('@media(forced-colors:active)');
 });
+
+it('uses one unified playlist control permission and keeps member permission choices on one line',()=>{
+ const members=read('../src/components/RoomMembersDialog.vue'),settings=read('../src/components/RoomSettingsDialog.vue');
+ expect(members).toContain("enqueue: '播放列表控制'");expect(members).not.toContain("enqueue: '加入播放列表'");
+ expect(members).toContain('white-space:nowrap;overflow-wrap:normal');expect(members).toContain('min-width:128px');
+ expect(settings).toContain('hostOnly=ref(false)');expect(settings).toContain('stream:true');expect(settings).toContain('播放列表控制');
+});
+
+it('applies the shared native select styles inside the queue drawer too',()=>{
+ expect(read('../src/selects.css')).toContain(':is(.shell,.modal-backdrop,.drawer-backdrop) .tone-select');
+ const queue=read('../src/components/QueueDrawer.vue');expect(queue).toContain('overflow-y:auto');expect(queue).toContain('.queue-mode{display:flex;flex-direction:row;');
+});

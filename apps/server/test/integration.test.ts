@@ -30,7 +30,7 @@ it('HTTP auth plus two real WebSocket clients: room snapshots, forbidden control
  expect((await api(`/rooms/${randomUUID()}/music/uploaded`,{hash:'a'.repeat(64),requestId:randomUUID()})).status).toBe(401);
  expect((await api(`/rooms/${randomUUID()}/music/uploaded`,{hash:'invalid',requestId:randomUUID()},a.token)).status).toBe(400);
  const b = (await api('/login', { name: 'bob', password: 'bob-password-long', register: true })).data;
- const room = (await api('/rooms', { name: 'integration room' }, a.token)).data;
+ const room = (await api('/rooms', { name: 'integration room', defaults:{skip:false,seek:false,stream:false,enqueue:true} }, a.token)).data;
  const host = new Client(a.token), member = new Client(b.token);
  await host.wait(m => m.type === 'authenticated'); await member.wait(m => m.type === 'authenticated');
  host.send({ type: 'join', roomId: room.id }); await host.wait(m => m.type === 'snapshot');
@@ -59,7 +59,7 @@ it('serves an uncached local QR login page and protects music proxy requests',as
 it('serves song identity metadata only to room members and checks immediate playback permissions',async()=>{
  const a=(await api('/login',{name:'library-host',password:'library-host-password',register:true})).data;
  const b=(await api('/login',{name:'library-member',password:'library-member-password',register:true})).data;
- const room=(await api('/rooms',{name:'library room'},a.token)).data;
+ const room=(await api('/rooms',{name:'library room',defaults:{skip:false,seek:false,stream:false,enqueue:true}},a.token)).data;
  const host=new Client(a.token),member=new Client(b.token);await host.wait(m=>m.type==='authenticated');await member.wait(m=>m.type==='authenticated');
  host.send({type:'join',roomId:room.id});await host.wait(m=>m.type==='snapshot');
  member.send({type:'join',roomId:room.id});const joined=(await host.wait(m=>m.type==='snapshot'&&m.data.members.length===2)).data;
@@ -135,3 +135,17 @@ it('protects password management with admin/origin checks and validates before i
  for(let i=0;i<3;i++)await post({});
  expect((await post({})).status).toBe(429);
 });
+
+it('broadcasts one authoritative playback mode to two real clients and deduplicates retries',async()=>{
+ const a=(await api('/login',{name:'mode-host',password:'mode-host-password',register:true})).data;
+ const b=(await api('/login',{name:'mode-member',password:'mode-member-password',register:true})).data;
+ const room=(await api('/rooms',{name:'mode room'},a.token)).data;expect(room.playbackMode).toBe('queue');
+ const host=new Client(a.token),member=new Client(b.token);await host.wait(m=>m.type==='authenticated');await member.wait(m=>m.type==='authenticated');
+ host.send({type:'join',roomId:room.id});await host.wait(m=>m.type==='snapshot');
+ member.send({type:'join',roomId:room.id});const joined=(await member.wait(m=>m.type==='snapshot'&&m.data.members.length===2)).data;
+ const command={roomId:room.id,commandId:randomUUID(),expectedStateVersion:joined.stateVersion,action:{type:'playbackMode',payload:{mode:'shuffle'}}};
+ member.send({type:'command',data:command});const result=await member.wait(m=>m.type==='result'&&m.commandId===command.commandId);expect(result.ok).toBe(true);
+ for(const client of [host,member])expect((await client.wait(m=>m.type==='snapshot'&&m.data.playbackMode==='shuffle')).data.pending).toBeNull();
+ member.send({type:'command',data:command});expect((await member.wait(m=>m.type==='result'&&m.commandId===command.commandId)).stateVersion).toBe(result.stateVersion);
+ expect((await api(`/rooms/${room.id}`,undefined,a.token)).data.playbackMode).toBe('shuffle');
+},10000);

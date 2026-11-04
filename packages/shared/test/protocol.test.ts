@@ -10,3 +10,11 @@ it('accepts provider MD5 without inventing MP3 specifications and retains SHA me
 });
 it('rejects arbitrary file paths and malformed controls', () => { const command = { commandId: randomUUID(), roomId: randomUUID(), expectedStateVersion: 0, action: { type: 'seek', payload: { positionMs: -1 } } }; expect(envelopeSchema.safeParse(command).success).toBe(false); command.action.payload.positionMs = 100; expect(envelopeSchema.safeParse({ ...command, path: '/secret' }).success).toBe(false); expect(envelopeSchema.safeParse(command).success).toBe(true); });
 it('computes CD bitrate and validates strict lossless formats', () => { expect(requiredBandwidth(1411200, 7)).toBe(11854080); expect(supportsLossless({ sampleRate: 48000, bits: 24, channels: 2 })).toBe(true); expect(supportsLossless({ sampleRate: 192000, bits: 24, channels: 2 })).toBe(false); });
+
+it('accepts independent mode permission booleans and never fills omitted member overrides',async()=>{
+ const {permissionsSchema,commandSchema}=await import('../src');
+ expect(permissionsSchema.safeParse({skip:true,stream:true,seek:true,enqueue:true,playbackMode:false}).success).toBe(true);
+ expect(permissionsSchema.safeParse({skip:true,stream:true,seek:true,enqueue:true,playbackMode:'false'}).success).toBe(false);
+ const parsed=commandSchema.parse({type:'permission',payload:{memberId:randomUUID(),overrides:{}}});
+ if(parsed.type==='permission')expect(parsed.payload.overrides).toEqual({});
+});

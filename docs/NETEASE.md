@@ -19,7 +19,7 @@
 
 ## 自动携带凭据
 
-业务代码通过 `app.netease.call(method, params)` 统一调用，始终从数据库取最新 Cookie 注入，不依赖进程内缓存，重启仍有效。已开放的只读方法：search、search_suggest、cloudsearch、simi_song、song_detail、song_url、song_url_v1、lyric、playlist_detail、user_playlist、user_account、user_cloud、login_status。
+业务代码通过 `app.netease.call(method, params)` 统一调用，始终从数据库取最新 Cookie 注入，不依赖进程内缓存，重启仍有效。已开放的只读方法：search、search_suggest、cloudsearch、simi_song、song_detail、song_url、song_url_v1、lyric、playlist_detail、user_playlist、user_account、user_cloud、login_status、album。
 
 HTTP 路径 `GET /api/netease/:method`（查询参数）或 `POST /api/netease/:method`（JSON）。调用者必须携带本项目登录获得的 `Authorization: Bearer ...`。例如 `/api/netease/song_detail?ids=123`。服务端内部再携带网易云 Cookie，客户端不需要知道该凭据。客户端提供的 cookie、代理、IP、域名等覆盖参数不会被转发。没有开放第三方包中的账号修改、登出和任意模块调用接口；需要更多接口时明确扩展方法及参数白名单。
 
@@ -39,3 +39,14 @@ Nginx `/loginServe` 转发需覆盖 `Host $http_host` 和 `X-Forwarded-Proto $sc
 
 
 `/loginServe` 也可切换 QQ 音乐扫码，两种音源会话独立；网易云原有配置和操作不变。QQ 部署与范围见 [QQ-MUSIC.md](QQ-MUSIC.md)。
+
+## 服务端每日任务与播放打卡
+
+- 使用数据库 `netease.cookie` 中的 MUSIC_U 登录态，不是项目 Bearer token、TOKEN_SECRET 或 QQ 会话。Asia/Shanghai 每天 **08:00** 自动尝试安卓签到（`daily_signin`，`type=0`）、云贝签到（`yunbei_sign`）、读取 `vip_tasks` 返回的 `unGetIds` 并调用 `vip_growthpoint_get`；无待领取 ID 不伪造奖励，不做任务刷取或付费操作。
+- 服务重启晚于 08:00 时只补当天未尝试的任务，不追补旧日期；08:00 无凭据则跳过。凭据过期由上游真实拒绝，需管理员重新登录。任务启动前持久化当日尝试标记（`netease.daily.<登录态指纹>.<任务>`），超时/未知结果当日不自动重试，以免重复执行有副作用的请求；记录在 settings 表，无结构迁移。凭据更换后旧待处理任务不能使用新账号凭据。当前为单服务进程调度，不提供跨实例分布式任务锁。
+- 房间新的歌曲播放经 ready/提交生效且仍有在线成员后，将网易云 ID、歌曲总时长加入独立打卡队列。**在播放中即提交整首总时长（秒），不等播完；该参数不是实测听歌时长，也不保证上游按完整收听计入统计。** 后台读取 song_detail 取得真实专辑 ID 作为 sourceid，以队列 durationMs 与详情 dt/duration 较小值转整秒作为 scrobble.time。元数据缺失、非网易云、过短歌曲或空房间跳过，不用随机来源 ID 冒充歌单/专辑。
+- 每次新的切歌/循环播放可上报一次，普通快照、进度、暂停/继续、seek、音质同步和幂等重试不会重复打卡。歌曲加载准备中或取消/失败的准备不打卡。上报失败不回滚播放或队列，不伪造成功回执。
+- 打卡为单并发、最多 100 项等待队列，与每日任务和 HTTP 业务调用无共享串行锁；满队列丢弃并输出不含凭据的提示。沿用独立 Worker 和 18 秒 Worker/20 秒服务调用超时，不让慢打卡占住搜索、导入、取链或播放命令；关闭服务停止调度、丢弃等待项，并等待有界的在途调用结束后关闭数据库。
+- 这些副作用方法只允许服务端内部固定参数调用，`/api/netease/:method` 仍保持只读白名单。后台日志只输出固定任务名和确认状态，不记录 Cookie、token、上游原始错误或完整响应。只有真实账号联调才能验收签到、领取或排行结果，单元测试不代表已获得奖励。
+
+已核对安装包 4.32.0 的 daily_signin、yunbei_sign、vip_tasks、vip_growthpoint_get、scrobble 模块与随包文档；没有额外部署第三方 HTTP 服务或新增定时框架依赖。

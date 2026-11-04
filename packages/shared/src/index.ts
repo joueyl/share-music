@@ -1,3 +1,4 @@
+export { parseMusicReference, type MusicReference, type MusicCollection } from './music-reference';
 import { z } from 'zod';
 export { playlistReference, isPlaylistShortLink, parsePlaylistLink } from './playlist-link';
 
@@ -5,10 +6,12 @@ export const MAX_MEMBERS = 8;
 export const DEFAULT_BUFFER_MS = 3000;
 export const MAX_BUFFER_MS = 5000;
 export const RELAY_BUDGET_BPS = 3_500_000;
-export const permissionsSchema = z.object({ skip: z.boolean(), stream: z.boolean(), seek: z.boolean(), enqueue: z.boolean() }).strict();
+// enqueue is the wire/storage key for unified playlist control (add/remove/reorder/clear).
+export const permissionsSchema = z.object({ skip: z.boolean(), stream: z.boolean(), seek: z.boolean(), enqueue: z.boolean(), playbackMode: z.boolean().optional() }).strict();
 export type Permissions = z.infer<typeof permissionsSchema>;
-export const DEFAULT_PERMISSIONS: Permissions = { skip: false, stream: false, seek: false, enqueue: true };
-export const ALL_PERMISSIONS: Permissions = { skip: true, stream: true, seek: true, enqueue: true };
+export const DEFAULT_PERMISSIONS: Permissions = { skip: true, stream: true, seek: true, enqueue: true, playbackMode: true };
+export const ALL_PERMISSIONS: Permissions = { skip: true, stream: true, seek: true, enqueue: true, playbackMode: true };
+export const NO_PERMISSIONS: Permissions = { skip: false, stream: false, seek: false, enqueue: false, playbackMode: false };
 export type PermissionKey = keyof Permissions;
 export type Quality = 'lossless' | 'source' | 'opus';
 export const audioSpecSchema = z.object({ sampleRate: z.number().int().positive().max(192000), bits: z.number().int().positive().max(32), channels: z.number().int().min(1).max(8) }).strict();
@@ -61,7 +64,11 @@ export const roomSettingsSchema = z.object({
   coverUrl: z.string().url().startsWith('https://').max(2048).nullable().default(null),
 }).strict();
 export type RoomSettings = z.infer<typeof roomSettingsSchema>;
+export const playbackModeSchema = z.enum(['queue', 'shuffle', 'single', 'loop']);
+export type PlaybackMode = z.infer<typeof playbackModeSchema>;
+export const PLAYBACK_MODE_LABELS: Record<PlaybackMode, string> = { queue: '点歌模式', shuffle: '随机模式', single: '单曲循环', loop: '列表循环' };
 export type RoomSnapshot = {
+  playbackMode?: PlaybackMode;
   settings?: RoomSettings; inviteCode?: string;
   id: string; name: string; hostId: string; stateVersion: number; defaults: Permissions;
   members: Member[]; playlist: Track[]; playback: Playback; pending: PendingPlayback | null;
@@ -70,6 +77,7 @@ export type RoomSnapshot = {
 const id = z.string().uuid();
 const empty = z.object({}).strict();
 const variants = [
+  z.object({ type: z.literal('playbackMode'), payload: z.object({ mode: playbackModeSchema }).strict() }),
   z.object({ type: z.literal('enqueue'), payload: trackSchema }),
   z.object({ type: z.literal('remove'), payload: z.object({ trackId: id }).strict() }),
   z.object({ type: z.literal('reorder'), payload: z.object({ trackIds: z.array(id).max(200) }).strict() }),

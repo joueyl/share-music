@@ -1,5 +1,5 @@
 /* Shared native selects: preserve keyboard, screen-reader and mobile pickers. */
-:is(.shell,.modal-backdrop) .tone-select{
+:is(.shell,.modal-backdrop,.drawer-backdrop) .tone-select{
   appearance:none;
   color-scheme:light;
   min-height:40px;
@@ -18,15 +18,15 @@
   cursor:pointer;
   transition:border-color .16s,box-shadow .16s,background-color .16s;
 }
-:is(.shell,.modal-backdrop) .tone-select:hover:not(:disabled){border-color:#afc5e4;background-color:#fff}
-:is(.shell,.modal-backdrop) .tone-select:focus-visible{outline:2px solid #5dbb00;outline-offset:2px;border-color:#91afe0;box-shadow:0 0 0 3px #5dbb0012}
-:is(.shell,.modal-backdrop) .tone-select:disabled{color:#a0acbb;background-color:#f0f3f7;cursor:not-allowed;opacity:.65}
+:is(.shell,.modal-backdrop,.drawer-backdrop) .tone-select:hover:not(:disabled){border-color:#afc5e4;background-color:#fff}
+:is(.shell,.modal-backdrop,.drawer-backdrop) .tone-select:focus-visible{outline:2px solid #5dbb00;outline-offset:2px;border-color:#91afe0;box-shadow:0 0 0 3px #5dbb0012}
+:is(.shell,.modal-backdrop,.drawer-backdrop) .tone-select:disabled{color:#a0acbb;background-color:#f0f3f7;cursor:not-allowed;opacity:.65}
 .tone-select option{background:#fbfcfe;color:#52647d}
 
 /* Progressive enhancement: modern WebView2 gets a matching dropdown panel;
    older runtimes keep the platform picker, with the same closed control. */
 @supports(appearance:base-select){
-  :is(.shell,.modal-backdrop) .tone-select{appearance:base-select;background-image:none;padding-right:12px;align-items:center;gap:12px}
+  :is(.shell,.modal-backdrop,.drawer-backdrop) .tone-select{appearance:base-select;background-image:none;padding-right:12px;align-items:center;gap:12px}
   .tone-select::picker(select){appearance:base-select;max-width:min(420px,calc(100vw - 32px));max-height:min(320px,calc(100dvh - 32px));overflow:auto;margin-block:6px;padding:6px;border:1px solid #e0e8f2;border-radius:14px;background:#fbfcfe;color:#52647d;box-shadow:0 12px 32px #38527524;scrollbar-width:thin;scrollbar-color:#b2c4db transparent}
   .tone-select::picker-icon{content:'';width:7px;height:7px;flex-shrink:0;margin-left:auto;margin-right:3px;border-right:1.8px solid #7b8ca3;border-bottom:1.8px solid #7b8ca3;transform:rotate(45deg);transition:transform .16s}
   .tone-select:open::picker-icon{transform:rotate(225deg)}
@@ -36,10 +36,10 @@
   .tone-select option:checked{background:#e6effe;color:#396ebf;font-weight:500}
   .tone-select option::checkmark{order:2;margin-left:auto;color:#5dbb00}
 }
-@media(pointer:coarse){:is(.shell,.modal-backdrop) .tone-select{min-height:44px;font-size:16px}}
-@media(prefers-reduced-motion:reduce){:is(.shell,.modal-backdrop) .tone-select,.tone-select::picker-icon{transition:none}}
+@media(pointer:coarse){:is(.shell,.modal-backdrop,.drawer-backdrop) .tone-select{min-height:44px;font-size:16px}}
+@media(prefers-reduced-motion:reduce){:is(.shell,.modal-backdrop,.drawer-backdrop) .tone-select,.tone-select::picker-icon{transition:none}}
 @media(forced-colors:active){
-  :is(.shell,.modal-backdrop) .tone-select{appearance:auto;background-image:none;border-color:ButtonText;color:ButtonText;forced-color-adjust:auto}
+  :is(.shell,.modal-backdrop,.drawer-backdrop) .tone-select{appearance:auto;background-image:none;border-color:ButtonText;color:ButtonText;forced-color-adjust:auto}
   .tone-select::picker(select){appearance:auto;border-color:ButtonText;background:Canvas;color:CanvasText;box-shadow:none}
   .tone-select::picker-icon{display:none}
 }

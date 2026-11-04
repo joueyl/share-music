@@ -206,7 +206,6 @@ async function invite() {
               </div>
             </div>
           </template>
-          <span v-if="app.room.pending || app.media.status !== 'playing'" class="stage-audio-status" role="status">{{ app.room.pending?'正在准备同步…':app.media.detail||'等待音乐开始' }}</span>
         </section>
         <!-- 相似推荐已按需求隐藏 -->
         <!-- <SimilarRecommendations :key="app.room.id" /> -->
@@ -264,7 +263,7 @@ async function invite() {
 .listening-stage.lumiere-active {
   display: grid;
   grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 12px;
   padding: 16px;
   flex: 1;
@@ -323,15 +322,7 @@ async function invite() {
   padding-block: 36px;
 }
 
-.listening-stage .stage-audio-status {
-  position: static;
-  grid-column: 1 / -1;
-  grid-row: 3;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  font-size: 11px;
-  line-height: 1.5;
-}
+
 
 .listening-stage.lumiere-active {
   grid-template-columns: minmax(0, 1fr);
