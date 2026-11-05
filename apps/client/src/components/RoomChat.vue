@@ -4,11 +4,13 @@ import { MessageCircle, Send, LoaderCircle, ArrowDown, MoreHorizontal, Heart, Mu
 import { useApp } from '../store';
 import { ui } from '../ui';
 import { sendChat } from '../bridge';
+import { modalDepth } from '../useDialogFocus';
 
 const app = useApp();
 const props=withDefaults(defineProps<{active?:boolean}>(),{active:true});
 const draft = ref(''), sending = ref(false), error = ref(''), unread = ref(0);
 const list = ref<HTMLElement | null>(null), atBottom = ref(true);
+const input = ref<HTMLTextAreaElement | null>(null);
 const canSend = computed(() => !!app.room && app.connected && !!draft.value.trim() && !sending.value);
 let alive = true, pending: { roomId: string; text: string; requestId: string } | null = null;
 onUnmounted(() => { alive = false; });
@@ -41,12 +43,14 @@ async function submit() {
   // A timed-out send can be retried without adding a duplicate message.
   if (!pending || pending.roomId !== roomId || pending.text !== text) pending = { roomId, text, requestId: crypto.randomUUID() };
   const requestId = pending.requestId;
+  let sent = false;
   sending.value = true; error.value = '';
   try {
     await sendChat(roomId, text, requestId);
     if (!alive || app.room?.id !== roomId) return;
     if (draft.value.trim() === text) draft.value = '';
     pending = null; void scrollToBottom();
+    sent = true;
   } catch (e) {
     if (!alive || app.room?.id !== roomId) return;
     const code = e instanceof Error ? e.message : String(e);
@@ -58,7 +62,16 @@ async function submit() {
       SESSION_EXPIRED: '登录已失效，请重新登录', UNAUTHORIZED: '登录已失效，请重新登录',
     };
     error.value = errors[code] ?? code;
-  } finally { if (alive) sending.value = false; }
+  } finally {
+    if (alive) sending.value = false;
+    // Wait for Vue to remove disabled before returning focus to the composer.
+    if (sent) {
+      await nextTick();
+      if (alive && props.active && app.connected && app.room?.id === roomId && modalDepth.value === 0) {
+        input.value?.focus({ preventScroll: true });
+      }
+    }
+  }
 }
 </script>
 
@@ -91,7 +104,7 @@ async function submit() {
     <div class="chat-quick-replies"><button type="button" :disabled="!app.connected||sending" @click="draft='这首歌好听！'"><Heart :size="13" />好喜欢</button><button type="button" :disabled="!app.connected||sending" @click="draft='晚安'">晚安</button><button type="button" :disabled="!app.connected||sending" @click="draft='好听！'">好听！</button></div>
     <form class="room-chat-form" @submit.prevent="submit">
       <label class="sr-only" for="room-chat-draft">聊天消息</label>
-      <textarea id="room-chat-draft" v-model="draft" maxlength="500" rows="1" :disabled="!app.connected || sending" placeholder="说点什么，让此刻更近…" @keydown="keydown" />
+      <textarea id="room-chat-draft" ref="input" v-model="draft" maxlength="500" rows="1" :disabled="!app.connected || sending" placeholder="说点什么，让此刻更近…" @keydown="keydown" />
       <div class="room-chat-actions"><button class="primary" aria-label="发送聊天消息" :aria-busy="sending" :disabled="!canSend"><LoaderCircle v-if="sending" :size="14" class="spinning" /><Send v-else :size="14" /><span class="sr-only">{{ sending ? '发送中' : '发送' }}</span></button></div>
       <p v-if="error" class="chat-error" role="alert">{{ error }}</p>
     </form>

@@ -9,7 +9,8 @@ import { verifyUpdateFile } from './verify-update.mjs';
 
 export function validateRelease(version,event,ref){
  if(ref?.startsWith('refs/tags/')&&ref!==`refs/tags/v${version}`)throw new Error(`标签必须与项目版本一致：v${version}`);
- if(event==='push'&&ref!==`refs/tags/v${version}`)throw new Error('自动发布仅支持版本标签');
+ // main builds warm default-branch caches; only matching tags may create releases.
+ if(event==='push'&&ref!==`refs/tags/v${version}`&&ref!=='refs/heads/main')throw new Error('自动构建仅支持 main 或匹配的版本标签');
 }
 export function publicServerUrl(value){
  if(typeof value!=='string'||!value||value.trim()!==value||/[\r\n]/.test(value))throw new Error('服务地址不能为空或包含换行');

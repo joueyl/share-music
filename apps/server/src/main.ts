@@ -11,6 +11,7 @@ import { RoomGateway } from './gateway';
 @Module({ controllers: [ApiController, NeteaseController, QqController], providers: [AppService, RoomGateway] })
 class AppModule {}
 async function main() {
+  if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('服务端需要 Node.js 24+（hana-music-api 编程式 SDK）');
   const app = await NestFactory.create(AppModule, { bodyParser: false });
   app.use(json({ limit: '32kb' }));
   app.useWebSocketAdapter(new WsAdapter(app));

@@ -13,13 +13,13 @@
 
 在 **Actions → Desktop installers → Run workflow** 选择分支并运行，一次触发全部四种构建目标。流水线将：
 
-- 校验版本、更新日志和生产服务地址，执行 `npm ci` 与 JavaScript 测试。
+- 使用 Node.js 24，校验版本、更新日志和生产服务地址，执行 `npm ci` 与 JavaScript 测试；网易云 hana 编程式 SDK 的离线兼容测试也在此环境执行。
 - 安装固定 Rust 1.90.0，使用对应平台的系统 WebView / HTML Audio。
 - 缓存 Cargo 下载与 Rust 依赖，构建 Tauri 桌面壳及客户端。
 - 调用对应平台的 `package:win` / `package:linux` / `package:mac` 及检查命令。Linux 安装 WebKitGTK 4.1、GTK3、PipeWire、D-Bus 等依赖；macOS 分别使用 Intel / Apple Silicon runner，并设置最低系统版本 13.0。
 - 每个目标独立上传名为 `music-share-目标-版本号` 的 Actions Artifact，保留 30 天；包含对应安装包、`SHA256SUMS-目标.txt`、`RELEASE-NOTES.md`。文件名统一包含版本、平台及架构，避免冲突。
 
-手动运行不创建或公开 Release。产物可从本次 Actions 运行页面下载。首次构建 Rust 与系统桌面依赖可能较慢，工作流超时为 180 分钟；实际耗时受 GitHub runner 和网络影响，私有仓库还需留意 Actions 配额。
+手动运行不创建或公开 Release。main 分支推送涉及客户端、共享包、scripts、根依赖清单/锁文件或本工作流时，也会自动构建四个目标以预热默认分支缓存，只上传 Actions Artifact，不创建或公开 Release；纯文档或仅服务端改动不触发此预热。标签推送不受路径过滤影响。产物可从本次 Actions 运行页面下载。首次构建 Rust 与系统桌面依赖可能较慢，工作流超时为 180 分钟；自动预热会增加 Actions 用量，实际耗时受 GitHub runner 和网络影响，私有仓库还需留意 Actions 配额。
 
 ## 版本标签与 Release 草稿
 
@@ -55,9 +55,9 @@ Windows、Linux 和两种 macOS 架构均使用固定提交版本的 `Swatinem/r
 
 - 缓存 Cargo registry 下载、Git 依赖及 `apps/client/src-tauri/target` 中的第三方依赖编译产物。
 - 不缓存 Cargo 安装的工具或本项目最终安装包，不因缓存命中跳过构建、测试和签名检查。
-- 缓存键包含系统、架构、原生依赖配置；Action 自动纳入 Rust 编译器、Cargo.lock/Cargo.toml 与相关构建环境，避免不兼容产物混用。
+- 缓存键包含系统、架构、原生依赖配置；Action 自动纳入 Rust 编译器、Cargo.lock/Cargo.toml 与相关构建环境，避免不兼容产物混用。自定义 key 不再额外拼接原始 Cargo.lock 哈希；沿用固定版本 rust-cache 对本项目版本的归一化及真实依赖哈希，使仅应用升版不再改变恢复前缀，依赖变化仍由 Action 识别。
 - `cache-on-failure` 允许普通任务失败后保存已生成的缓存，但缓存服务异常、任务取消或 runner 中断时不保证保存。
-- 第一次仍需冷构建。可先在默认分支 `main` 手动运行一次，后续标签构建可复用可访问的默认分支缓存；不同标签之间不保证直接共享。命中与保存结果可查看 **Cache Cargo downloads and Rust dependencies** 及其 Post 步骤。
+- 第一次仍需冷构建。main 相关推送会自动预热，也可在默认分支 `main` 手动运行一次；**等待 main 构建及缓存保存完成后再推新标签**，后续标签才能复用默认分支缓存。GitHub 不允许不同标签直接读取彼此缓存，单纯重复发标签不能预热下一版本。main 与标签同时推送时，两者可能并行冷构建。命中与保存结果可查看 **Cache Cargo downloads and Rust dependencies** 及其 Post 步骤。
 
 npm 依赖与 Cargo/Rust 编译产物分别缓存。缓存失效、依赖或工具链变化时仍可能重新编译，不保证固定加速比例。
 

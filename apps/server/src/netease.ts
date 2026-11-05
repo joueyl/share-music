@@ -1,24 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { Worker } from 'node:worker_threads';
+import { invokeHana, type MusicInvoker, type MusicResult as Result } from './hana-music';
+export type { MusicInvoker } from './hana-music';
 import type { DatabaseStore } from './database';
 import { DomainError } from './engine';
 
-type Result = { body: Record<string, any>; cookie?: string[] };
-export type MusicInvoker = (name: string, params: Record<string, unknown>) => Promise<Result>;
 export type PasswordLogin = { type: 'phone'; phone: string; countrycode: string; password: string } | { type: 'email'; email: string; password: string };
-// The upstream library logs raw error responses. Isolate and discard its output so
-// login cookies never reach server logs; terminating the worker also bounds requests.
-const invoke: MusicInvoker = (name, params) => new Promise((resolve, reject) => {
-  const worker = new Worker(`const {parentPort,workerData}=require('node:worker_threads');
-    (async()=>{try{const api=require(workerData.module);if(!Object.hasOwn(api,workerData.name)||typeof api[workerData.name]!=='function')throw Error();const result=await api[workerData.name](workerData.params);parentPort.postMessage({ok:true,result});}catch(e){if(['login','login_cellphone'].includes(workerData.name)&&Number.isInteger(e?.body?.code))parentPort.postMessage({ok:true,result:{body:{code:e.body.code}}});else parentPort.postMessage({ok:false});}})();`,
-    { eval: true, workerData: { module: require.resolve('NeteaseCloudMusicApi'), name, params }, stdout: true, stderr: true });
-  worker.stdout?.resume(); worker.stderr?.resume();
-  const timer = setTimeout(() => { void worker.terminate(); reject(new DomainError('NETEASE_UNAVAILABLE')); }, 18000);
-  const finish = () => { clearTimeout(timer); void worker.terminate(); };
-  worker.once('message', message => { finish(); message.ok ? resolve(message.result) : reject(new DomainError('NETEASE_UNAVAILABLE')); });
-  worker.once('error', () => { finish(); reject(new DomainError('NETEASE_UNAVAILABLE')); });
-  worker.once('exit', () => { clearTimeout(timer); reject(new DomainError('NETEASE_UNAVAILABLE')); });
-});
 export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'simi_song', 'song_detail', 'song_url', 'song_url_v1', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_account', 'user_cloud', 'login_status', 'album']);
 function publicBody(value: any): any {
   if (Array.isArray(value)) return value.map(publicBody);
@@ -28,7 +14,7 @@ function publicBody(value: any): any {
 export class NeteaseService {
   private attempt?: { id: string; key: string; expiresAt: number; lastCheck: number; code: number; pending?: Promise<{ code: number }> };
   private generation = 0;
-  constructor(private db: DatabaseStore, private api: MusicInvoker = invoke, private now = Date.now) {}
+  constructor(private db: DatabaseStore, private api: MusicInvoker = invokeHana, private now = Date.now) {}
   private async request(name: string, params: Record<string, unknown> = {}, credential?:string) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {

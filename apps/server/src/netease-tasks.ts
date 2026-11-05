@@ -10,7 +10,14 @@ export function nextAccountRun(now:number):number {
 }
 function accepted(body:any):void {if(Number(body?.code)!==200)throw new DomainError('NETEASE_BACKGROUND_REJECTED');}
 export function unclaimedVipIds(body:any):string {
- const raw=body?.data?.unGetIds??body?.unGetIds;
+ let raw=body?.data?.unGetIds??body?.unGetIds;
+ // hana exposes the actual VIP task groups, not a synthetic unGetIds field.
+ if(raw===undefined&&Array.isArray(body?.data?.taskList)){
+  if(body.data.taskList.length>100)throw new DomainError('NETEASE_INVALID_RESPONSE');
+  const groups=body.data.taskList;
+  if(groups.some((group:any)=>!Array.isArray(group?.taskItems)||group.taskItems.length>100))throw new DomainError('NETEASE_INVALID_RESPONSE');
+  raw=groups.flatMap((group:any)=>group.taskItems.filter((task:any)=>task?.needReceive===true).map((task:any)=>task.taskId));
+ }
  const values=Array.isArray(raw)?raw:typeof raw==='string'?(raw?raw.split(','):[]):null;
  if(!values||values.length>100)throw new DomainError('NETEASE_INVALID_RESPONSE');
  const ids=[...new Set(values.map(String))];
@@ -83,7 +90,8 @@ export class NeteaseAccountTasks {
      if(!/^\d{1,20}$/.test(String(album??''))||!Number.isFinite(total)||total<1000)throw new DomainError('NETEASE_INVALID_RESPONSE');
      const time=Math.floor(Math.min(job.durationMs,total)/1000);
      if(time<1||this.stopped)continue;
-     accepted(await this.netease.accountCall('scrobble',{id:job.id,sourceid:String(album),time},session));
+     const response=await this.netease.accountCall('scrobble',{id:job.id,sourceid:String(album),time},session);
+     accepted(response);
     }catch{this.log('网易云听歌记录未确认成功，已跳过，不阻塞播放');}
    }
   }finally{this.pumping=false;}

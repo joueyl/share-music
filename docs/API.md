@@ -4,6 +4,8 @@
 
 ## 通用约定
 
+网易云后端使用 hana-music-api 3.2.0 的编程式 SDK（Node.js 24+），不启动独立 hana HTTP 服务；本项目对外接口与权限不变，现有 Cookie 沿用数据库保存值，升级见 [网易云服务端说明](NETEASE.md)。
+
 - 本机默认地址 `http://localhost:3000`；生产环境使用 HTTPS / WSS。
 - 除 `/api/health`、`/api/login` 外，业务 HTTP 请求需 `Authorization: Bearer <token>`。
 - JSON 接口使用 `Content-Type: application/json`。请求对象严格校验，不接受未声明字段。

@@ -11,7 +11,7 @@ afterEach(async()=>{for(const close of drains.splice(0))await close();vi.useReal
 function fixture(cookie='MUSIC_U=test-session'){
  const db=new Database(':memory:');db.setSetting('netease.cookie',cookie);let now=morning;
  const api=vi.fn(async(name:string,_params:Record<string,unknown>):Promise<any>=>{
-  if(name==='vip_tasks')return {body:{code:200,data:{unGetIds:['123_7','124_1','123_7']}}};
+  if(name==='vip_tasks')return {body:{code:200,data:{taskList:[{taskItems:[{taskId:'123_7',needReceive:true},{taskId:'124_1',needReceive:true},{taskId:'123_7',needReceive:true},{taskId:'125_1',needReceive:false}]}]}}};
   if(name==='song_detail')return {body:{code:200,songs:[{id:42,dt:185400,al:{id:7}}]}};
   return {body:{code:200}};
  });
@@ -51,6 +51,9 @@ it('one stalled daily job does not block the other tasks, and a timeout is not t
  expect(f.log).toHaveBeenCalledWith(expect.stringContaining('android 未确认成功'));await f.tasks.runDaily();expect(f.api).toHaveBeenCalledTimes(3);
 });
 it('accepts only genuine unclaimed VIP task IDs and does not invent rewards',()=>{
+ expect(unclaimedVipIds({data:{taskList:[{taskItems:[{taskId:'12_7',needReceive:true},{taskId:'13_1',needReceive:false},{taskId:'14_2'}]},{taskItems:[{taskId:'12_7',needReceive:true}]}]}})).toBe('12_7');
+ expect(unclaimedVipIds({data:{taskList:[]}})).toBe('');
+ for(const body of [{data:{taskList:[{}]}},{data:{taskList:[{taskItems:[{taskId:'bad',needReceive:true}]}]}}])expect(()=>unclaimedVipIds(body)).toThrow('NETEASE_INVALID_RESPONSE');
  expect(unclaimedVipIds({data:{unGetIds:[]}})).toBe('');expect(unclaimedVipIds({unGetIds:'12_7,13_1'})).toBe('12_7,13_1');
  for(const body of [{data:{}},{data:{unGetIds:['http://evil']}},{data:{unGetIds:Array(101).fill('1_7')}}])expect(()=>unclaimedVipIds(body)).toThrow('NETEASE_INVALID_RESPONSE');
 });
@@ -58,6 +61,26 @@ it('submits full song duration while playback is ongoing, in an independent queu
  const f=fixture();f.tasks.enqueueScrobble(track);await new Promise<void>(resolve=>setImmediate(resolve));await settle();
  expect(f.api).toHaveBeenCalledWith('song_detail',expect.objectContaining({ids:'42'}));
  expect(f.api).toHaveBeenCalledWith('scrobble',expect.objectContaining({id:'42',sourceid:'7',time:185}));
+ expect(f.log).not.toHaveBeenCalled();
+});
+it('reports scrobble failure without logging response bodies or credentials',async()=>{
+ const f=fixture();f.api.mockImplementation(async name=>name==='song_detail'
+  ?{body:{code:200,songs:[{id:42,dt:185400,al:{id:7}}]}}
+  :{body:{code:502,message:'需要重新登录',cookie:'private-cookie',data:{access_token:'private-token',headers:{'set-cookie':'private-header',Authorization:'private-auth'},note:'MUSIC_U=private-inline;'}}});
+ f.tasks.enqueueScrobble(track);await new Promise<void>(resolve=>setImmediate(resolve));await settle();
+ const logs=f.log.mock.calls.flat().join('\n');
+ expect(f.log).toHaveBeenCalledExactlyOnceWith('网易云听歌记录未确认成功，已跳过，不阻塞播放');
+ expect(logs).not.toContain('需要重新登录');
+ expect(logs).not.toContain('private-');expect(logs).not.toContain('test-session');
+});
+it('does not log even large scrobble responses or drop later listening jobs',async()=>{
+ const f=fixture();f.api.mockImplementation(async name=>name==='song_detail'
+  ?{body:{code:200,songs:[{id:42,dt:185400,al:{id:7}}]}}
+  :{body:{code:200,data:'x'.repeat(10000)}});
+ f.tasks.enqueueScrobble(track);f.tasks.enqueueScrobble(track);
+ await new Promise<void>(resolve=>setImmediate(resolve));await settle();
+ expect(f.log).not.toHaveBeenCalled();
+ expect(f.api.mock.calls.filter(([name])=>name==='scrobble')).toHaveLength(2);
 });
 it('a stalled scrobble neither serializes search nor blocks daily tasks and has a bounded timeout',async()=>{
  vi.useFakeTimers();const f=fixture();f.api.mockImplementation(async(name)=>{

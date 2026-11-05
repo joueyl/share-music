@@ -10,7 +10,7 @@ Tauri 2 + Vue 3 + TypeScript + Pinia + Vue Router 客户端，HTML Audio 播放�
 
 ## 快速启动
 
-需要 Node.js 22.18+、Rust 1.90+。Windows 需要 Visual Studio C++ 桌面开发工具及 WebView2。
+需要 Node.js 24+、Rust 1.90+。Windows 需要 Visual Studio C++ 桌面开发工具及 WebView2。
 
 在项目根目录运行：
 

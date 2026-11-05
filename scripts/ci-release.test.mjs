@@ -22,7 +22,8 @@ function fixture(t){
 }
 test('tag must match the prepared application version, not arbitrary branch or tag text',()=>{
  validateRelease('0.1.2','push','refs/tags/v0.1.2');validateRelease('0.1.2','workflow_dispatch','refs/heads/main');
- for(const ref of ['refs/tags/v0.1.1','refs/tags/v0.1.2-rc.1','refs/heads/main','refs/tags/v0.1.2\nX=bad'])assert.throws(()=>validateRelease('0.1.2','push',ref));
+ validateRelease('0.1.2','push','refs/heads/main');
+ for(const ref of ['refs/tags/v0.1.1','refs/tags/v0.1.2-rc.1','refs/heads/feature','refs/tags/v0.1.2\nX=bad'])assert.throws(()=>validateRelease('0.1.2','push',ref));
 });
 test('requires the actual build OS and architecture rather than mislabelling packages',()=>{
  for(const [target,os,arch] of [['windows-x64','win32','x64'],['linux-x64','linux','x64'],['macos-x64','darwin','x64'],['macos-arm64','darwin','arm64']])validateBuildHost(target,os,arch);
@@ -97,12 +98,25 @@ test('every desktop build caches Cargo downloads and compiled dependencies after
  for(const job of [windows,unix]){
   assert.match(job,/uses: Swatinem\/rust-cache@[a-f0-9]{40} # v2/);
   assert.match(job,/workspaces: apps\/client\/src-tauri -> target/);
-  assert.match(job,/key: \$\{\{ runner.os \}\}-\$\{\{ runner.arch \}\}-desktop-\$\{\{ hashFiles\('apps\/client\/src-tauri\/Cargo.lock'\) \}\}/);
+  assert.match(job,/key: \$\{\{ runner.os \}\}-\$\{\{ runner.arch \}\}-desktop\n/);
+  assert.doesNotMatch(job,/hashFiles\('apps\/client\/src-tauri\/Cargo.lock'\)/);
   for(const option of ["cache-targets: 'true'","cache-workspace-crates: 'false'","cache-bin: 'false'","cache-on-failure: 'true'"])assert(job.includes(option));
   assert(job.indexOf('rustup default 1.90.0')<job.indexOf('uses: Swatinem/rust-cache@'));
   assert(job.indexOf('uses: Swatinem/rust-cache@')<job.indexOf('node scripts/ci-release.mjs collect'));
   assert(!job.includes('add-rust-environment-hash-key: false'));
  }
+});
+
+test('main warms the same four-platform caches without creating or publishing a release',()=>{
+ const workflow=read(project,'.github/workflows/desktop-release.yml').replace(/\r\n/g,'\n');
+ const triggers=workflow.slice(0,workflow.indexOf('\npermissions:'));
+ assert.match(triggers,/push:\n    branches:\n      - main\n/);
+ for(const path of ['apps/client/**','packages/shared/**','scripts/**','package-lock.json'])assert.ok(triggers.includes(`- '${path}'`));
+ assert.match(triggers,/tags:\n      - 'v\[0-9\]\*\.\[0-9\]\*\.\[0-9\]\*'/);
+ const release=workflow.slice(workflow.indexOf('\n  release-draft:\n'));
+ assert.match(release,/if: github.event_name == 'push' && startsWith\(github.ref, 'refs\/tags\/v'\)/);
+ assert.doesNotMatch(workflow,/if:.*cache-hit/);
+ assert.doesNotMatch(workflow,/pull_request_target|workflow_run:/);
 });
 test('collects Linux DEB/AppImage and two distinct macOS architecture packages then verifies all five installers',async t=>{
  const f=await allArtifacts(t),result=await mergeRelease(f.root,{});

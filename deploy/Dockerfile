@@ -1,4 +1,4 @@
-FROM node:22.18-bookworm-slim AS build
+FROM node:24-bookworm-slim AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages packages
@@ -7,7 +7,7 @@ COPY apps/client/package.json apps/client/package.json
 RUN npm ci --ignore-scripts
 RUN npm run build -w @music-share/server
 RUN npm prune --omit=dev --ignore-scripts
-FROM node:22.18-bookworm-slim
+FROM node:24-bookworm-slim
 ENV NODE_ENV=production PORT=3000 BIND_ADDRESS=0.0.0.0 DATABASE_DRIVER=mysql QQ_MUSIC_STATE_DIR=/data/qq-music
 WORKDIR /app
 COPY --from=build --chown=node:node /app/node_modules node_modules

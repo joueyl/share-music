@@ -3,6 +3,16 @@ name: Desktop installers
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/desktop-release.yml'
+      - 'apps/client/**'
+      - 'packages/shared/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
     tags:
       - 'v[0-9]*.[0-9]*.[0-9]*'
 
@@ -28,7 +38,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
       - name: Validate version, tag and public server URL
         id: release
@@ -57,7 +67,8 @@ jobs:
         with:
           prefix-key: desktop-rust-v1
           workspaces: apps/client/src-tauri -> target
-          key: ${{ runner.os }}-${{ runner.arch }}-desktop-${{ hashFiles('apps/client/src-tauri/Cargo.lock') }}
+          # Let rust-cache normalize workspace versions and hash dependencies itself.
+          key: ${{ runner.os }}-${{ runner.arch }}-desktop
           env-vars: CARGO CC CFLAGS CXX RUST MACOSX_DEPLOYMENT_TARGET
           cache-targets: 'true'
           cache-workspace-crates: 'false'
@@ -109,7 +120,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
       - name: Validate version, tag, server URL and host architecture
         id: release
@@ -158,7 +169,8 @@ jobs:
         with:
           prefix-key: desktop-rust-v1
           workspaces: apps/client/src-tauri -> target
-          key: ${{ runner.os }}-${{ runner.arch }}-desktop-${{ hashFiles('apps/client/src-tauri/Cargo.lock') }}
+          # Keep the restore prefix stable across version-only Cargo.lock changes.
+          key: ${{ runner.os }}-${{ runner.arch }}-desktop
           env-vars: CARGO CC CFLAGS CXX RUST MACOSX_DEPLOYMENT_TARGET
           cache-targets: 'true'
           cache-workspace-crates: 'false'
@@ -195,7 +207,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - uses: actions/download-artifact@v4
         with:
           pattern: music-share-*-${{ needs.build.outputs.version }}

@@ -2,7 +2,7 @@
 
 客户端使用 HTML Audio。Windows 由 WebView2 解码，macOS/Linux 由系统 WebView 解码。
 
-需要 Node.js 22.18+、Rust 1.90+ 及目标平台 Tauri 开发依赖。Windows 安装 Visual Studio C++ 桌面开发工具与 WebView2。Windows 安装包配置 WebView2 bootstrapper；离线安装前需预装 Runtime。
+需要 Node.js 24+、Rust 1.90+ 及目标平台 Tauri 开发依赖。Windows 安装 Visual Studio C++ 桌面开发工具与 WebView2。Windows 安装包配置 WebView2 bootstrapper；离线安装前需预装 Runtime。
 
 ```sh
 npm ci
