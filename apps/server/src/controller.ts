@@ -116,11 +116,18 @@ export class ApiController {
   }
   @Get('health') async health() { try {await this.app.flush();await this.app.database.getSetting('__health__');}catch(e){httpError(e);} return { ok: true, protocolVersion: 1, chatProtocolVersion: 1, relayUsedBps: this.app.capacity.usedBps, relayBudgetBps: this.app.capacity.budget, turnProvider: this.app.turn.provider, publicRelayUsedBps: this.app.publicCapacity.usedBps, publicRelayBudgetBps: this.app.publicCapacity.budget }; }
   @Post('login') async login(@Body() body: unknown, @Req() req: Request) {
-    try { this.app.limit(`login:${req.ip}`, 10, 60000); const v = loginSchema.parse(body); return await this.app.auth.login(v.name, v.password, v.register); } catch (e) { httpError(e); }
+    try { this.app.limit(`login:${req.ip}`, 10, 60000); const v = loginSchema.parse(body); return await this.app.auth.login(v.name, v.password, v.register, req.ip ?? req.socket.remoteAddress); } catch (e) { httpError(e); }
   }
   @Get('rooms') async rooms(@Headers('authorization') header?: string,@Query() query?:unknown) { try { const user=await this.user(header); const q=z.object({keywords:z.string().trim().max(100).default(''),category:z.string().trim().max(40).default('')}).strict().parse(query??{});return this.app.engine.list(user.id,q.keywords,q.category); } catch (e) { httpError(e); } }
   @Post('rooms') async create(@Body() body: unknown, @Headers('authorization') header?: string) {
-    try { const user = await this.user(header); this.app.limit(`create:${user.id}`, 5, 60000); const v=z.object({name:z.string().trim().min(1).max(80),settings:roomSettingsSchema.optional(),defaults:permissionsSchema.optional()}).strict().parse(body); const room=this.app.engine.create(v.name,user.id,v.settings,v.defaults);await this.app.flush();return room; } catch (e) { httpError(e); }
+    try {
+      const user = await this.user(header); this.app.limit(`create:${user.id}`, 5, 60000);
+      const v=z.object({name:z.string().trim().min(1).max(80),settings:roomSettingsSchema.optional(),defaults:permissionsSchema.optional()}).strict().parse(body);
+      const creator = await this.app.database.getUser(user.id);
+      if (!creator) throw new DomainError('UNAUTHORIZED');
+      const room=this.app.engine.create(v.name,user.id,v.settings,v.defaults,{name:creator.name,displayName:creator.displayName??creator.name,avatarUrl:creator.avatarUrl??null});
+      await this.app.flush();return room;
+    } catch (e) { httpError(e); }
   }
   @Get('me') async me(@Headers('authorization') header?:string) {
     try {const user=await this.user(header),saved=await this.app.database.getUser(user.id);return {id:user.id,name:user.name,displayName:saved?.displayName??user.name,avatarUrl:saved?.avatarUrl??null};}catch(e){httpError(e);}

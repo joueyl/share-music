@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as THREE from 'three';
-import { useCachedActivity } from '../useCachedActivity';
+import { useStageActivity } from '../useStageActivity';
 import { createStageFrameLimiter, getRuntimeProfile } from '../runtime-profile';
 import { createStageArtworkLoader } from '../stage-artwork';
 import { loadStageArtwork } from '../bridge';
@@ -64,7 +64,7 @@ let currentCoverImage: HTMLImageElement | null = null;
 
 let animId: number = 0;
 let resumeStage=()=>{},pauseStage=()=>{};
-const stageActive=useCachedActivity(()=>resumeStage(),()=>pauseStage());
+const stageActive=useStageActivity(()=>resumeStage(),()=>pauseStage());
 
 // Default camera framing state for reset
 let defaultCamPos = new THREE.Vector3(0, 4.2, 0.85);

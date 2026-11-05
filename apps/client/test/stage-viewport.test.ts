@@ -39,6 +39,7 @@ it('uses the same guarded resize path for both models before each render',()=>{
  for(const component of ['IpodStage','TurntableStage']){
   const code=readFileSync(new URL(`../src/components/${component}.vue`,import.meta.url),'utf8');
   expect(code).toContain('new THREE.WebGLRenderer(stageRendererOptions())');
+  expect(code).toContain('useStageActivity(()=>resumeStage(),()=>pauseStage())');
   expect(code).toContain('renderer.outputColorSpace = THREE.SRGBColorSpace;');
   expect(code).not.toMatch(/renderer\.setSize|renderer\.setPixelRatio|new ResizeObserver/);
   expect(code.indexOf('viewport.sync()')).toBeLessThan(code.indexOf('postprocessing.render(delta)'));

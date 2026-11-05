@@ -5,10 +5,10 @@ import Playlists from '../src/views/Playlists.vue';
 import { parseMusicReference } from '@music-share/shared';
 import { parse } from '@vue/compiler-sfc';
 import { readFileSync } from 'node:fs';
-const f=vi.hoisted(()=>({app:null as any,detail:vi.fn(),resolve:vi.fn(),users:vi.fn(),songs:vi.fn(),favorites:vi.fn(),favorite:vi.fn(),album:vi.fn(),add:vi.fn()}));
+const f=vi.hoisted(()=>({app:null as any,detail:vi.fn(),resolve:vi.fn(),users:vi.fn(),songs:vi.fn(),favorites:vi.fn(),favorite:vi.fn(),album:vi.fn(),add:vi.fn(),play:vi.fn()}));
 vi.mock('../src/store',()=>({useApp:()=>f.app}));
 vi.mock('../src/server-config',()=>({getServerUrl:()=> 'http://localhost:3000'}));
-vi.mock('../src/bridge',()=>({playlistDetail:f.detail,resolveMusicLink:f.resolve,userPlaylists:f.users,playlistSongs:f.songs,musicFavorites:f.favorites,setMusicFavorite:f.favorite,albumDetail:f.album,addSearchedMusic:f.add}));
+vi.mock('../src/bridge',()=>({playlistDetail:f.detail,resolveMusicLink:f.resolve,userPlaylists:f.users,playlistSongs:f.songs,musicFavorites:f.favorites,setMusicFavorite:f.favorite,albumDetail:f.album,addSearchedMusic:f.add,playMusic:f.play}));
 let mounted:ReturnType<typeof renderer.createApp>;
 const settle=async()=>{for(let i=0;i<8;i++){await Promise.resolve();await nextTick();}};
 const saved=Array.from({length:30},(_,i)=>({id:String(i+1),name:`最近歌单${i+1}`}));
@@ -18,6 +18,7 @@ beforeEach(()=>{
  vi.stubGlobal('localStorage',{getItem:vi.fn(()=>JSON.stringify(saved)),setItem:vi.fn()});
  f.resolve.mockReset().mockImplementation(async(input:string)=>parseMusicReference(input));
  f.favorites.mockReset().mockResolvedValue([]);f.favorite.mockReset().mockResolvedValue([]);f.add.mockReset().mockResolvedValue({id:'added'});
+ f.play.mockReset().mockResolvedValue({});
  f.album.mockReset().mockResolvedValue({collection:{kind:'album',id:'38306',name:'测试专辑',trackCount:1,creatorId:'',coverUrl:''},songs:[{id:'8',name:'专辑歌曲',artists:'歌手',album:'专辑'}]});
  f.detail.mockReset().mockResolvedValue({id:'1',name:'测试歌单',creatorId:'123',trackCount:100});
  f.users.mockReset().mockResolvedValue({playlists:[],more:false});
@@ -69,7 +70,7 @@ it('reserves remaining height for lists and compacts only the my-music controls'
  expect(errors).toEqual([]);const css=descriptor.styles[0].content;expect(descriptor.styles[0].scoped).toBe(true);
  expect(css).toContain('.tone-library .track-list{flex:1;min-height:0;overflow:auto;');
  expect(css).toContain('.library-topbar{display:flex;');expect(css).toContain('.library-selection-toolbar{display:flex;');
- expect(css).toContain('min-height:78px');expect(css).toContain('max-width:760px');
+ expect(css).toContain('min-height:68px');expect(css).toContain('max-width:760px');
 });
 
 it('shows exactly the requested two music tabs',async()=>{
@@ -87,7 +88,7 @@ it('album paths with userid open album details, never a profile or a playlist',a
  const root=await mount();await importPlaylist(root,'https://music.163.com/#/album/38306/?userid=274950922');
  expect(f.album).toHaveBeenCalledWith('38306');expect(f.detail).not.toHaveBeenCalled();expect(f.users).not.toHaveBeenCalled();
  expect(text(root)).toContain('专辑 ID：38306');expect(text(root)).toContain('专辑歌曲');
- await all(root).find(n=>n.type==='button'&&text(n).trim()==='加入播放列表').props.onClick();await settle();expect(f.add).toHaveBeenCalledWith('room','8',expect.any(String),undefined);
+ await all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·')).props.onClick();await settle();expect(f.add).toHaveBeenCalledWith('room','8',expect.any(String),undefined);expect(f.play).not.toHaveBeenCalled();
 });
 it('favorites are confirmed by the server, shown in the favorites tab, and may be reopened',async()=>{
  const saved={kind:'playlist',id:'1',name:'收藏歌单',trackCount:1,creatorId:'123',coverUrl:''};
@@ -121,7 +122,7 @@ it.each(['playlist','album'] as const)('enters %s details before the request com
  expect(text(root)).toContain('返回已收藏');expect(text(root)).toContain(`正在加载${kind==='album'?'专辑':'歌单'}详情`);
  expect(all(root).some(n=>n.props.class==='library-selection-toolbar')).toBe(false);
  reject(Error('DETAIL_OFFLINE'));await pending;await settle();expect(text(root)).toContain('DETAIL_OFFLINE');expect(text(root)).toContain('重新加载详情');expect(text(root)).not.toContain('暂无可读取的歌曲');
- await all(root).find(n=>n.type==='button'&&text(n)==='重新加载详情').props.onClick();await settle();expect(text(root)).not.toContain('重新加载详情');expect(text(root)).toContain('加入播放列表');
+ await all(root).find(n=>n.type==='button'&&text(n)==='重新加载详情').props.onClick();await settle();expect(text(root)).not.toContain('重新加载详情');expect(text(root)).toContain('加入房间 ·');
 });
 it('returning during detail loading ignores its late response and preserves the collection list',async()=>{
  const item={kind:'album',id:'38306',name:'收藏专辑',trackCount:1,creatorId:'',coverUrl:''};f.favorites.mockResolvedValueOnce([item]);const root=await mount();all(root).find(n=>n.props.role==='tab'&&text(n).trim()==='已收藏').props.onClick();await settle();
@@ -131,7 +132,7 @@ it('returning during detail loading ignores its late response and preserves the 
 });
 it('anchors every collection cover to the start with a fixed square size',()=>{
  const {descriptor}=parse(readFileSync(new URL('../src/views/Playlists.vue',import.meta.url),'utf8'));const css=descriptor.styles[0].content;
- expect(css).toContain('justify-content:flex-start;text-align:left');expect(css).toContain('.collection-open .album-art{width:52px;height:52px;flex:0 0 52px;object-fit:cover}');expect(css).toContain('.collection-open>span{flex:1;min-width:0}');
+ expect(css).toContain('justify-content:flex-start;text-align:left');expect(css).toContain('.collection-open .album-art{width:92px;height:92px;flex:0 0 92px;object-fit:cover}');expect(css).toContain('.collection-open>span{flex:1;min-width:0}');
 });
 
 it('presents aligned song metadata and real durations while keeping accessible selection',async()=>{
@@ -144,6 +145,105 @@ it('presents aligned song metadata and real durations while keeping accessible s
 
 it('removes the legacy dark border and backing from detail artwork without changing card borders',()=>{
  const {descriptor}=parse(readFileSync(new URL('../src/views/Playlists.vue',import.meta.url),'utf8'));const css=descriptor.styles[0].content;
- expect(css).toContain('.tone-library .detail-track-main .music-search-cover{width:52px;height:52px;flex:0 0 52px;border:0;border-radius:10px;background:transparent;box-shadow:none;object-fit:cover}');
+ expect(css).toContain('.tone-library .detail-track-main .music-search-cover{width:44px;height:44px;flex:0 0 44px;border:0;border-radius:10px;background:transparent;box-shadow:none;object-fit:cover}');
  expect(css).toContain('background:var(--surface);border:1px solid var(--border);border-radius:16px');
+});
+
+it('shows only the centered empty placeholder after an empty favorites response, with a working browse action',async()=>{
+ const root=await mount();all(root).find(n=>n.props.role==='tab'&&text(n).trim()==='已收藏').props.onClick();await settle();
+ expect(text(root)).toContain('还没有收藏');
+ expect(all(root).filter(n=>n.props['data-state']==='empty')).toHaveLength(1);
+ for(const cls of ['collection-grid','music-collection-card','collection-summary','library-selection-toolbar'])expect(all(root).some(n=>n.props.class===cls)).toBe(false);
+ expect(all(root).some(n=>n.type==='form'||n.type==='details')).toBe(false);
+ expect(text(root)).not.toContain('可先浏览和收藏');expect(text(root)).not.toContain('读取失败');
+ all(root).find(n=>n.type==='button'&&text(n)==='浏览网易云歌单').props.onClick();await settle();
+ expect(all(root).some(n=>n.type==='form')).toBe(true);
+});
+
+it('does not show the empty-favorites success placeholder while a request is pending',async()=>{
+ let finish!:(value:any)=>void;f.favorites.mockImplementationOnce(()=>new Promise(resolve=>finish=resolve));
+ const root=await mount();all(root).find(n=>n.props.role==='tab'&&text(n)==='已收藏').props.onClick();await settle();
+ expect(text(root)).toContain('正在读取收藏');expect(text(root)).not.toContain('还没有收藏');
+ expect(all(root).some(n=>n.props['data-state']==='loading')).toBe(true);
+ finish([]);await settle();expect(text(root)).toContain('还没有收藏');
+});
+
+it('clears the failed-read notice after a successful explicit favorites retry',async()=>{
+ f.favorites.mockRejectedValue(Error('OFFLINE'));const root=await mount();all(root).find(n=>n.props.role==='tab'&&text(n)==='已收藏').props.onClick();await settle();
+ expect(all(root).some(n=>n.props['data-state']==='error')).toBe(true);
+ f.favorites.mockResolvedValueOnce([]);await all(root).find(n=>n.type==='button'&&text(n)==='重试读取收藏').props.onClick();await settle();
+ expect(text(root)).not.toContain('OFFLINE');expect(text(root)).toContain('还没有收藏');
+});
+
+it('restores the previous collection scroll position when returning from details',async()=>{
+ const item={kind:'playlist',id:'1',name:'收藏歌单',trackCount:1};f.favorites.mockResolvedValueOnce([item]);
+ const root=await mount();all(root).find(n=>n.props.role==='tab'&&text(n)==='已收藏').props.onClick();await settle();
+ const list=all(root).find(n=>n.props.class==='collection-grid');list.scrollTop=320;
+ await all(root).find(n=>n.props['aria-label']==='打开歌单 收藏歌单').props.onClick();await settle();
+ all(root).find(n=>n.type==='button'&&text(n)==='返回已收藏').props.onClick();await settle();
+ expect(all(root).find(n=>n.props.class==='collection-grid').scrollTop).toBe(320);
+});
+
+it('keeps native collection navigation separate from the favorite action',async()=>{
+ f.favorites.mockResolvedValueOnce([{kind:'album',id:'38306',name:'专辑卡片',trackCount:1}]);
+ const root=await mount();all(root).find(n=>n.props.role==='tab'&&text(n)==='已收藏').props.onClick();await settle();
+ const card=all(root).find(n=>n.props.class==='music-collection-card'),buttons=all(card).filter(n=>n.type==='button');
+ expect(buttons).toHaveLength(2);for(const button of buttons)expect(all(button).filter(n=>n.type==='button')).toHaveLength(1);
+ expect(buttons[0].props['data-collection-key']).toBe('album:38306');
+ await buttons[1].props.onClick();await settle();expect(f.album).not.toHaveBeenCalled();expect(f.favorite).toHaveBeenCalledWith('album','38306',false);
+});
+
+it.each([
+ ['no-room','可先浏览和收藏'],['offline','连接已断开'],['permission','当前没有播放列表控制权限'],['pending','房间正在处理操作'],['action','房间正在处理操作']
+])('explains the disabled batch action for %s and prevents requests',async(reason,copy)=>{
+ const root=await mount();await importPlaylist(root,'https://music.163.com/album/38306');
+ if(reason==='no-room')f.app.room=null;if(reason==='offline')f.app.connected=false;if(reason==='permission')f.app.permission.enqueue=false;if(reason==='pending')f.app.room.pending={};if(reason==='action')f.app.pendingActions=1;await settle();
+ expect(text(root)).toContain(copy);const add=all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·'));expect(add.props.disabled).toBe(true);
+ await add.props.onClick();expect(f.add).not.toHaveBeenCalled();
+});
+
+it('clears and restores all loaded selection without losing songs, then batches without playing',async()=>{
+ const root=await mount();await importPlaylist(root,'https://music.163.com/album/38306');
+ all(root).find(n=>n.type==='button'&&text(n)==='取消选择').props.onClick();await settle();expect(text(root)).toContain('已选 0 首');
+ const select=all(root).find(n=>n.props.class==='library-selection');all(select).find(n=>n.type==='input').props.onChange();await settle();expect(text(root)).toContain('已选 1 首');
+ await all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·')).props.onClick();await settle();expect(f.add).toHaveBeenCalledOnce();expect(f.play).not.toHaveBeenCalled();expect(text(root)).toContain('已选 0 首');
+});
+
+it('keeps explicit immediate playback separate from batch enqueue and still adds later selected songs',async()=>{
+ f.album.mockResolvedValueOnce({collection:{kind:'album',id:'38306',name:'专辑',trackCount:2},songs:[{id:'1',name:'歌曲1'},{id:'2',name:'歌曲2'}]});
+ f.play.mockImplementationOnce(async()=>{f.app.room.pending={};});
+ const root=await mount();await importPlaylist(root,'https://music.163.com/album/38306');
+ await all(root).find(n=>n.type==='button'&&text(n)==='立即播放').props.onClick();await settle();expect(f.add).toHaveBeenCalledTimes(2);expect(f.play).toHaveBeenCalledOnce();
+});
+
+it('preserves selection on failures, reuses the idempotency key on retry and enforces room capacity',async()=>{
+ const root=await mount();await importPlaylist(root,'https://music.163.com/album/38306');f.app.room.playlist=Array(200).fill({});
+ let button=all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·'));await button.props.onClick();await settle();expect(f.add).not.toHaveBeenCalled();expect(text(root)).toContain('房间最多 200 首');
+ f.app.room.playlist=[];f.add.mockRejectedValueOnce(Error('TEMPORARY_FAILURE'));await button.props.onClick();await settle();expect(text(root)).toContain('已选 1 首');
+ const key=f.add.mock.calls[0][2];button=all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·'));await button.props.onClick();await settle();expect(f.add.mock.calls[1][2]).toBe(key);expect(text(root)).toContain('已选 0 首');
+});
+
+it('inherits the theme accent instead of forcing a separate blue palette',()=>{
+ const {descriptor}=parse(readFileSync(new URL('../src/views/Playlists.vue',import.meta.url),'utf8')),css=descriptor.styles[0].content;
+ expect(css).not.toMatch(/--accent\s*:/);expect(css).not.toMatch(/#(?:4f80db|4272c9|edf3fa|edf3fc|b8cdec|91aacd)\b/i);
+ expect(css).toContain('background:var(--accent)');expect(css).toContain('color-mix(in srgb,var(--accent) 10%,white)');expect(css).toContain('border-color:color-mix(in srgb,var(--accent)');
+});
+
+it('bounds the card reveal delay and changes the tab indicator without delaying requests',async()=>{
+ f.favorites.mockResolvedValueOnce(Array.from({length:12},(_,i)=>({kind:'playlist',id:String(i+1),name:`歌单${i}`})));
+ const root=await mount();all(root).find(n=>n.props.role==='tab'&&text(n)==='已收藏').props.onClick();await settle();
+ const cards=all(root).filter(n=>n.props.class==='music-collection-card');expect(cards.map(n=>n.props.style['--library-index'])).toEqual([0,1,2,3,4,5,6,7,7,7,7,7]);
+ const tabs=all(root).find(n=>n.props.role==='tablist');expect(tabs.props.class).toContain('favorites-active');
+ const pending=all(root).find(n=>n.props['aria-label']==='打开歌单 歌单0').props.onClick();expect(f.detail).toHaveBeenCalledWith('1');await pending;await settle();
+ const list=all(root).find(n=>n.props['aria-label']==='歌单歌曲列表');all(list).find(n=>n.type==='input').props.onChange();await settle();
+ expect(all(root).find(n=>n.props['aria-label']==='歌单歌曲列表')).toBe(list);expect(f.detail).toHaveBeenCalledOnce();
+});
+
+it('keeps motion finite and cancels it for reduced-motion without losing the selected-tab position',()=>{
+ const {descriptor}=parse(readFileSync(new URL('../src/views/Playlists.vue',import.meta.url),'utf8')),css=descriptor.styles[0].content;
+ for(const name of ['library-content-in','library-heart-pop','library-count-in'])expect(css).toContain(`@keyframes ${name}`);
+ expect(css).toContain('var(--motion-normal) var(--motion-ease)');expect(css).toContain('var(--library-index,0)*18ms');expect(css).not.toContain('infinite');
+ const reduce=css.slice(css.lastIndexOf('@media(prefers-reduced-motion:reduce)'));
+ expect(reduce).toContain('animation:none!important;transition:none!important');expect(reduce).not.toContain('.collection-tabs.favorites-active::before');expect(reduce).toContain('transform:none');
+ expect(css).toContain('.collection-tabs.favorites-active::before{transform:translateX(calc(100% + 4px))}');
 });

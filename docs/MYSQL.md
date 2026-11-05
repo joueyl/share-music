@@ -24,17 +24,19 @@ Compose 保留旧 SQLite 数据卷作为回退资料，不自动部署或清空 
 
 | 表 | 关键字段 / Brilliant 设计 |
 |---|---|
-| users | id、name（唯一用户名，注册/登录使用）、display_name、avatar_url、password_hash、salt、created_at、updated_at |
-| rooms | id、name、host_id、description、atmosphere（日落/深夜/周末/自定义）、visibility（公开/邀请）、category、cover_url、invite_code、defaults_json、overrides_json、created_at、updated_at |
+| users | id、name（唯一用户名，注册/登录使用）、display_name、avatar_url、password_hash、salt、last_login_ip（最近一次成功登录 IP）、created_at、updated_at |
+| rooms | id、name、host_id（当前房主）、creator_id（原始创建者）、creator_name、creator_display_name、creator_avatar_url（创建时用户名/显示名/头像）、description、atmosphere（日落/深夜/周末/自定义）、visibility（公开/邀请）、category、cover_url、invite_code、defaults_json、overrides_json、created_at、updated_at |
 | songs | sequence、scope、source、content_hash、name、artists、album、cover_url、duration_ms、size_bytes、lossless、bitrate_bps、sample_rate、bits、channels、netease_id、source_url、source_expires_at、track_json、detail_json、created_at、updated_at |
 
 辅助表：room_tracks 保存房间歌曲 UUID、排序、添加者及完整队列元数据；settings 保存服务端配置；schema_migrations 记录版本。
-rooms.host_id 外键关联 users；room_tracks.room_id 关联 rooms。songs 按 `(scope,source)` 唯一。
+rooms.host_id 和 rooms.creator_id 外键关联 users；room_tracks.room_id 关联 rooms。songs 按 `(scope,source)` 唯一。
+creator_id 在新房间创建时由已认证用户写入，后续房主转移或房间保存不改变它；历史未知创建者留 NULL。last_login_ip 只保留最近一次成功注册/密码登录的地址，失败登录和 token 验证不更新，不对普通 API 公开；须按账号敏感数据限制数据库访问，不额外打印 IP。代理部署的 `TRUST_PROXY` 配置见 [API](API.md#post-apilogin) 与配置模板，未配置时仅记录直连地址。
+创建时由服务端读取该认证用户的资料，另存 creator_name、creator_display_name、creator_avatar_url 快照，后续资料变更或房主转移不覆盖它们。缺少显示名时使用用户名，头像可空；不复制密码哈希、盐、Cookie 或登录 IP。创建者资料快照仅在数据库内部保存，现有房间响应不新增这些字段。
 相同内容可有多个来源；未完整解析的老歌曲保留 track_json，其可空元数据不会被编造。
 房间内点歌写入 room_tracks。公共来源歌曲在 songs 中按 `(scope,source)` 更新，队列 UUID、排序、添加者和完整快照在 room_tracks 中保留；同一首歌加入多个房间不会因此复制公共歌曲资料。历史来源和不同音频版本仍可能各有记录，不能仅凭歌名批量删重。
 
 新增设计字段应先修改共享 Zod schema/类型、API 校验与文档，再新增有版本号的 **ALTER TABLE** 迁移；
-本版提供版本 1 的基础初始化，以及版本 2 的音乐直链字段增量升级，不会任意根据网页内容动态执行 DDL，也不会自动重建/删表。
+启动提供版本 1 的基础初始化、版本 2 的音乐直链字段升级、版本 3 的登录 IP/创建者字段与创建者外键升级，以及版本 4 的创建者资料快照字段升级。升级前备份数据库，部署新版后端并重启，启动账号需具备对应 ALTER/REFERENCES 权限；旧用户 IP、旧房间未知创建者及缺失的创建时资料保持 NULL，后续成功登录才补充 IP。快照不从当前用户资料自动回填，新建房间才保存创建时资料。不会任意根据网页内容动态执行 DDL，也不会自动重建/删表。此升级不需要重新导入 SQLite，也不修改已发布客户端协议。
 JSON 保留来源详情与扩展兼容信息，但公共 API 仍严格限制字段。
 
 ## 重新执行迁移（仅供其他空库）

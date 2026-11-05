@@ -33,6 +33,7 @@
 
 返回：`{"token":"...","user":{"id":"UUID","name":"用户名"}}`。
 登录限流：同 IP 每分钟 10 次。忘记密码和可变登录有效期尚未实现。邮箱不参与认证；用户名中即使包含 @ 也只按普通用户名处理，不自动转小写、不自动写入邮箱。
+注册成功时保存、每次密码登录成功后覆盖 `users.last_login_ip`（IPv4/IPv6，IPv4 映射地址规范为 IPv4）。失败登录不更新，复用 token 不更新；IP 不接受请求体上报，也不在登录、`/api/me` 或房间响应中公开。默认使用直连地址，不信任转发头；经反向代理部署时配置 `TRUST_PROXY` 为可信代理 IP/CIDR 列表，并确保代理正确覆盖/追加 `X-Forwarded-For`，否则记录的是代理地址。无法获取地址时为空，不记录 IP 历史。
 
 ### GET /api/me
 
@@ -70,6 +71,7 @@ Permissions：`{skip:boolean,stream:boolean,seek:boolean,enqueue:boolean,playbac
 ```
 
 name 必填，1–80 字符；settings/defaults 可省略。返回 RoomSnapshot；创建成功返回前已持久化。
+创建者由当前认证账号决定，内部保存为 `rooms.creator_id` 外键关联 `users.id`；同时以 `creator_name`、`creator_display_name`、`creator_avatar_url` 保存创建当时的用户名、显示名与头像快照。与会转移的 `host_id` 分离，房主转移、后续资料变化及房间保存均不覆盖创建者快照。缺少显示名时使用用户名，缺少头像为 NULL；不复制密码、盐、Cookie 或登录 IP。旧房间缺失创建者/创建时资料时保持 NULL，不按当前房主或当前资料猜测回填。请求体不接受 creatorId/creatorInfo，现有响应结构与授权规则不变，不新增公开创建者资料接口。
 每个用户每分钟最多创建 5 次。设计图中的 24 字限制未强制到旧接口，继续兼容现有 80 字规则。
 
 ### GET /api/rooms?keywords=&category=

@@ -5,8 +5,9 @@ import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, MAX_MEMBERS, type PlaybackMode, p
 
 export class DomainError extends Error { constructor(public code: string) { super(code); } }
 const fail = (code: string): never => { throw new DomainError(code); };
-export type RoomRecord = { playbackMode?: PlaybackMode; id: string; name: string; hostId: string; defaults: Permissions; overrides: Record<string, Partial<Permissions>>; settings?: RoomSettings; inviteCode?: string; playlist?: Track[] };
-type InternalRoom = RoomSnapshot & { offlineAt: Map<string, number>; dedup: Map<string, { fingerprint: string; version: number }>; lastIndex: number; shufflePlayed: Set<string>; reportPlaybackStart: boolean };
+export type RoomCreatorInfo = { name: string; displayName: string; avatarUrl: string|null };
+export type RoomRecord = { creatorId?: string|null; creatorInfo?: RoomCreatorInfo|null; playbackMode?: PlaybackMode; id: string; name: string; hostId: string; defaults: Permissions; overrides: Record<string, Partial<Permissions>>; settings?: RoomSettings; inviteCode?: string; playlist?: Track[] };
+type InternalRoom = RoomSnapshot & { creatorId?: string|null; creatorInfo?: RoomCreatorInfo|null; offlineAt: Map<string, number>; dedup: Map<string, { fingerprint: string; version: number }>; lastIndex: number; shufflePlayed: Set<string>; reportPlaybackStart: boolean };
 const stopped = (epoch = 0, now = 0): Playback => ({ sourceId: null, sourceEpoch: epoch, sourceType: null, playState: 'stopped', positionMs: 0, effectiveAtServerMs: now, providerId: null, qualityMode: 'lossless', spec: null, bitrateBps: 0, instant: false });
 
 export class RoomEngine {
@@ -17,9 +18,9 @@ export class RoomEngine {
   private make(record: RoomRecord): InternalRoom {
     return { ...record, defaults:{...record.defaults,playbackMode:record.defaults.playbackMode??record.defaults.skip}, playbackMode: playbackModeSchema.parse(record.playbackMode ?? 'queue'), shufflePlayed: new Set(), reportPlaybackStart: false, stateVersion: 0, members: [], settings: record.settings ?? roomSettingsSchema.parse({}), inviteCode: record.inviteCode ?? randomUUID().replaceAll('-', '').slice(0,12), playlist: (record.playlist ?? []).map(t=>({...t,available:hasRemoteAudio(t)})), playback: stopped(), pending: null, requests: [], serverNow: this.now(), offlineAt: new Map([[record.hostId, this.now()]]), dedup: new Map(), lastIndex: -1 };
   }
-  create(name: string, hostId: string, settings?: RoomSettings, defaults: Permissions = DEFAULT_PERMISSIONS): RoomSnapshot {
+  create(name: string, hostId: string, settings?: RoomSettings, defaults: Permissions = DEFAULT_PERMISSIONS, creatorInfo?: RoomCreatorInfo): RoomSnapshot {
     const id = randomUUID();
-    const room = this.make({ id, name, hostId, defaults: { ...defaults }, overrides: {}, settings });
+    const room = this.make({ id, name, hostId, creatorId: hostId, creatorInfo: creatorInfo ? {name:creatorInfo.name,displayName:creatorInfo.displayName,avatarUrl:creatorInfo.avatarUrl} : null, defaults: { ...defaults }, overrides: {}, settings });
     this.rooms.set(id, room); this.save(room); return this.snapshot(id);
   }
   private get(id: string): InternalRoom { return this.rooms.get(id) ?? fail('ROOM_NOT_FOUND'); }
@@ -50,7 +51,7 @@ export class RoomEngine {
       this.overrides.set(r.id, overrides);
     }
   }
-  private save(r: InternalRoom) { this.persist({ id: r.id, name: r.name, hostId: r.hostId, defaults: r.defaults, overrides: this.overrides.get(r.id) ?? {}, settings:r.settings, inviteCode:r.inviteCode, playlist:r.playlist, playbackMode:r.playbackMode }); }
+  private save(r: InternalRoom) { this.persist({ id: r.id, name: r.name, hostId: r.hostId, creatorId: r.creatorId ?? null, creatorInfo: r.creatorInfo ?? null, defaults: r.defaults, overrides: this.overrides.get(r.id) ?? {}, settings:r.settings, inviteCode:r.inviteCode, playlist:r.playlist, playbackMode:r.playbackMode }); }
   private refreshPermissions(r: InternalRoom) {
     for (const m of r.members) { m.overrides = this.overrides.get(r.id)?.[m.id] ?? {}; m.permissions = m.id === r.hostId ? { ...ALL_PERMISSIONS } : { ...r.defaults, ...m.overrides }; }
   }

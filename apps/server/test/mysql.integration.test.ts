@@ -85,6 +85,8 @@ it.runIf(process.env.RUN_MYSQL_TESTS==='1')('real MySQL: SQLite import, restart,
     const createdRoom=await fetch(base+'/rooms',{method:'POST',headers,body:JSON.stringify({name:'API 房间',settings:{atmosphere:'night',visibility:'invite'}})});
     expect(createdRoom.status).toBe(201);const apiRoom=await createdRoom.json() as {id:string;stateVersion:number;inviteCode:string};
     expect((await db.rooms()).find(r=>r.id===apiRoom.id)?.settings?.atmosphere).toBe('night');
+    expect((await db.rooms()).find(r=>r.id===apiRoom.id)?.creatorInfo).toMatchObject({name:'迁移用户',avatarUrl:null});
+    expect(apiRoom).not.toHaveProperty('creatorInfo');
     expect((await fetch(base+'/rooms/resolve/'+apiRoom.inviteCode,{headers})).status).toBe(200);
     const profile=await fetch(base+'/me',{headers});expect(profile.status).toBe(200);expect(await profile.json()).not.toHaveProperty('email');
     const edited=await fetch(base+'/rooms/'+apiRoom.id+'/settings',{method:'PUT',headers,body:JSON.stringify({expectedStateVersion:apiRoom.stateVersion,settings:{visibility:'public'},name:'公开房间'})});

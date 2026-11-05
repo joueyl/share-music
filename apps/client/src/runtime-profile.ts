@@ -1,15 +1,20 @@
 export function resolveRuntimeProfile(platform:string,arch=''){
- const mac=/mac|darwin/i.test(platform),audioPriority=mac&&arch!=='aarch64'&&arch!=='arm64';
+ // Retina supersampling + MSAA is costly in WKWebView, including Apple Silicon.
+ const mac=/mac|darwin/i.test(platform),audioPriority=mac;
  return {name:audioPriority?'audio-priority':'high',audioAnalysis:!audioPriority,
-  supersampling:audioPriority?1:2,maxPixelRatio:audioPriority?1.5:Infinity,
-  pixelBudget:audioPriority?1500000:Infinity,maxSamples:audioPriority?0:Infinity,
-  maxFps:audioPriority?30:60,shadowSize:audioPriority?1024:2048,preserveDrawingBuffer:!audioPriority};
+  supersampling:audioPriority?1.5:2,maxPixelRatio:Infinity,
+  pixelBudget:Infinity,maxSamples:audioPriority?2:Infinity,
+  maxFps:60,shadowSize:audioPriority?1024:2048,preserveDrawingBuffer:!audioPriority};
 }
 let profile=resolveRuntimeProfile(typeof navigator==='undefined'?'':navigator.platform);
 export function configureRuntimeProfile(platform?:string,arch?:string){
  profile=resolveRuntimeProfile(platform??(typeof navigator==='undefined'?'':navigator.platform),arch);return profile;
 }
 export function getRuntimeProfile(){return profile;}
+/** Preserve the original 60fps easing speed when GPU frames are decimated. */
+export function stageAnimationBlend(delta:number){
+ return Number.isFinite(delta)?1-Math.pow(0.92,Math.max(0,Math.min(delta,0.05))*60):0;
+}
 /** Decimate GPU frames, not the HTML Audio clock or shared room time. */
 export function createStageFrameLimiter(maxFps=getRuntimeProfile().maxFps){
  let previous=-Infinity;

@@ -47,9 +47,14 @@ it('uses maximum supported MSAA and ULTRA SMAA without duplicate tone mapping', 
  expect(state.passes[2].effects[0].options).toEqual({ preset: 'ultra' });
  expect(renderer.getContext().getInternalformatParameter).toHaveBeenCalledWith(1, 2, 5);
 });
-it('keeps ACES/alpha processing enabled with HIGH SMAA and no MSAA on audio-priority Macs',()=>{
- configureRuntimeProfile('macos','x86_64');fixture();expect(state.options.multisampling).toBe(0);
+it.each(['x86_64','aarch64','arm64'])('keeps ACES/alpha processing with HIGH SMAA and 2x MSAA on %s Macs',arch=>{
+ configureRuntimeProfile('macos',arch);fixture();expect(state.options.multisampling).toBe(2);
  expect(state.passes[1].effects[1].options).toEqual({mode:'aces'});expect(state.passes[2].effects[0].options).toEqual({preset:'high'});expect(state.passes).toHaveLength(4);
+});
+it('does not exceed 2x MSAA on Macs when only higher or incompatible sample counts exist',()=>{
+ configureRuntimeProfile('macos','arm64');fixture(true,[8,4],[8,4]);expect(state.options.multisampling).toBe(0);
+ fixture(true,[8,4,2],[8,4]);expect(state.options.multisampling).toBe(0);
+ fixture(true,[8,4,2],[8,4,2],1);expect(state.options.multisampling).toBe(0);
 });
 it('falls back to byte buffers on WebViews without float color attachments', () => {
  const { renderer } = fixture(false);

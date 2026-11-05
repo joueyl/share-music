@@ -12,7 +12,7 @@ function fixture() {
 it.each([false,true])('requires only a trimmed username and password (register=%s)',async register=>{
   const {controller,login,request}=fixture();
   await expect(controller.login({name:' Alice ',password:'test-password-123',register},request)).resolves.toHaveProperty('token');
-  expect(login).toHaveBeenCalledExactlyOnceWith('Alice','test-password-123',register);
+  expect(login).toHaveBeenCalledExactlyOnceWith('Alice','test-password-123',register,'127.0.0.1');
 });
 it.each([false,true])('rejects email fields before authentication (register=%s)',async register=>{
   const {controller,login,request}=fixture();

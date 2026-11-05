@@ -190,6 +190,7 @@
     "/api/login": {
       "post": {
         "summary": "用户名注册或登录",
+        "description": "成功注册或密码登录时服务端保存并覆盖最近登录 IP；失败登录及 token 验证不更新。默认取直连地址，TRUST_PROXY 可指定可信代理 IP/CIDR。不接受客户端 IP 字段，不在响应公开 IP。",
         "operationId": "post_api_login",
         "tags": [
           "用户"
@@ -418,6 +419,7 @@
       "post": {
         "summary": "创建并持久化房间",
         "operationId": "post_api_rooms",
+        "description": "创建成功前持久化；服务端以认证账号写入 rooms.creator_id（外键关联 users.id），并保存创建时用户名、显示名、头像至 creator_name/creator_display_name/creator_avatar_url，房主转移和资料变化不覆盖快照。不复制密码、Cookie 或 IP。旧房间未知创建者或创建时资料保持 NULL，不自动回填。客户端不得指定 creatorId/creatorInfo；响应和权限仍以现有协议为准，不公开新增快照字段。",
         "tags": [
           "房间"
         ],

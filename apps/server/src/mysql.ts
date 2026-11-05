@@ -28,6 +28,18 @@ export class MySqlDatabase implements DatabaseStore {
     if(!names.has('source_url'))await this.executor.query('ALTER TABLE songs ADD COLUMN source_url TEXT NULL');
     if(!names.has('source_expires_at'))await this.executor.query('ALTER TABLE songs ADD COLUMN source_expires_at BIGINT UNSIGNED NULL');
     await this.executor.query('INSERT IGNORE INTO schema_migrations(version) VALUES(2)');
+    const [userColumns] = await this.executor.query<RowDataPacket[]>("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users'");
+    if (!userColumns.some(c => c.COLUMN_NAME === 'last_login_ip')) await this.executor.query('ALTER TABLE users ADD COLUMN last_login_ip VARCHAR(45) NULL');
+    const [roomColumns] = await this.executor.query<RowDataPacket[]>("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='rooms'");
+    if (!roomColumns.some(c => c.COLUMN_NAME === 'creator_id')) await this.executor.query('ALTER TABLE rooms ADD COLUMN creator_id CHAR(36) NULL');
+    const [constraints] = await this.executor.query<RowDataPacket[]>("SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='rooms' AND CONSTRAINT_NAME='fk_rooms_creator'");
+    if (!constraints.length) await this.executor.query('ALTER TABLE rooms ADD CONSTRAINT fk_rooms_creator FOREIGN KEY(creator_id) REFERENCES users(id)');
+    await this.executor.query('INSERT IGNORE INTO schema_migrations(version) VALUES(3)');
+    // Creation-time profile snapshots are not backfilled from today's owner/profile.
+    for (const [column,type] of [['creator_name','VARCHAR(254)'],['creator_display_name','VARCHAR(80)'],['creator_avatar_url','VARCHAR(2048)']]) {
+      if (!roomColumns.some(c => c.COLUMN_NAME === column)) await this.executor.query(`ALTER TABLE rooms ADD COLUMN ${column} ${type} NULL`);
+    }
+    await this.executor.query('INSERT IGNORE INTO schema_migrations(version) VALUES(4)');
   }
   private async rows(sql:string, params:any[] = []):Promise<RowDataPacket[]> {
     try {const [rows] = await this.executor.execute<RowDataPacket[]>(sql,params); return rows;}catch{throw new DomainError('DATABASE_UNAVAILABLE');}
@@ -83,16 +95,17 @@ export class MySqlDatabase implements DatabaseStore {
   }
   async getSetting(key:string) { return (await this.rows('SELECT value FROM settings WHERE setting_key=?',[key]))[0]?.value as string|undefined; }
   async setSetting(key:string,value:string) { await this.run('INSERT INTO settings(setting_key,value) VALUES(?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)',[key,value]); }
-  async findUser(name:string):Promise<UserRecord|undefined> { return (await this.rows('SELECT id,name,email,display_name AS displayName,avatar_url AS avatarUrl,password_hash AS passwordHash,salt FROM users WHERE name=? LIMIT 1',[name]))[0] as UserRecord|undefined; }
-  async getUser(id:string):Promise<UserRecord|undefined> { return (await this.rows('SELECT id,name,email,display_name AS displayName,avatar_url AS avatarUrl,password_hash AS passwordHash,salt FROM users WHERE id=?',[id]))[0] as UserRecord|undefined; }
-  async insertUser(user:UserRecord) { await this.run('INSERT INTO users(id,name,email,display_name,avatar_url,password_hash,salt) VALUES(?,?,?,?,?,?,?)',[user.id,user.name,user.email??null,user.displayName??user.name,user.avatarUrl??null,user.passwordHash,user.salt]); }
+  async findUser(name:string):Promise<UserRecord|undefined> { return (await this.rows('SELECT id,name,email,display_name AS displayName,avatar_url AS avatarUrl,password_hash AS passwordHash,salt,last_login_ip AS lastLoginIp FROM users WHERE name=? LIMIT 1',[name]))[0] as UserRecord|undefined; }
+  async getUser(id:string):Promise<UserRecord|undefined> { return (await this.rows('SELECT id,name,email,display_name AS displayName,avatar_url AS avatarUrl,password_hash AS passwordHash,salt,last_login_ip AS lastLoginIp FROM users WHERE id=?',[id]))[0] as UserRecord|undefined; }
+  async insertUser(user:UserRecord) { await this.run('INSERT INTO users(id,name,email,display_name,avatar_url,password_hash,salt,last_login_ip) VALUES(?,?,?,?,?,?,?,?)',[user.id,user.name,user.email??null,user.displayName??user.name,user.avatarUrl??null,user.passwordHash,user.salt,user.lastLoginIp??null]); }
+  async updateLoginIp(id:string, ip:string|null) { await this.run('UPDATE users SET last_login_ip=? WHERE id=?',[ip,id]); }
   async saveRoom(record:RoomRecord):Promise<void> {
     // A room row and its ordered queue always commit together.
     if(this.executor===this.pool)return this.transaction(db=>db.saveRoom(record));
     const s=record.settings??roomSettingsSchema.parse({});
-    await this.run(`INSERT INTO rooms(id,name,host_id,description,atmosphere,visibility,category,cover_url,invite_code,defaults_json,overrides_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)
+    await this.run(`INSERT INTO rooms(id,name,host_id,description,atmosphere,visibility,category,cover_url,invite_code,defaults_json,overrides_json,creator_id,creator_name,creator_display_name,creator_avatar_url) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON DUPLICATE KEY UPDATE name=VALUES(name),host_id=VALUES(host_id),description=VALUES(description),atmosphere=VALUES(atmosphere),visibility=VALUES(visibility),category=VALUES(category),cover_url=VALUES(cover_url),defaults_json=VALUES(defaults_json),overrides_json=VALUES(overrides_json)`,
-      [record.id,record.name,record.hostId,s.description,s.atmosphere,s.visibility,s.category,s.coverUrl,record.inviteCode??randomUUID().replaceAll('-','').slice(0,12),JSON.stringify(record.defaults),JSON.stringify(record.overrides)]);
+      [record.id,record.name,record.hostId,s.description,s.atmosphere,s.visibility,s.category,s.coverUrl,record.inviteCode??randomUUID().replaceAll('-','').slice(0,12),JSON.stringify(record.defaults),JSON.stringify(record.overrides),record.creatorId??null,record.creatorInfo?.name??null,record.creatorInfo?.displayName??null,record.creatorInfo?.avatarUrl??null]);
     await this.setSetting(`room.playbackMode.${record.id}`,record.playbackMode ?? 'queue');
     await this.run('DELETE FROM room_tracks WHERE room_id=?',[record.id]);
     for(const [index,t] of (record.playlist??[]).entries()) {
@@ -104,7 +117,7 @@ export class MySqlDatabase implements DatabaseStore {
   async rooms():Promise<RoomRecord[]> {
     const [rooms,tracks]=await Promise.all([this.rows("SELECT rooms.*, modes.value AS playback_mode FROM rooms LEFT JOIN settings modes ON modes.setting_key=CONCAT('room.playbackMode.',rooms.id) ORDER BY rooms.created_at,rooms.id"),this.rows('SELECT room_id,track_json FROM room_tracks ORDER BY room_id,position')]);
     const queues=new Map<string,Track[]>();for(const t of tracks){const q=queues.get(t.room_id)??[];q.push(json(t.track_json));queues.set(t.room_id,q);}
-    return rooms.map(r=>({id:r.id,name:r.name,hostId:r.host_id,playbackMode:playbackModeSchema.parse(r.playback_mode??'queue'),defaults:json(r.defaults_json),overrides:json(r.overrides_json),inviteCode:r.invite_code,
+    return rooms.map(r=>({id:r.id,name:r.name,hostId:r.host_id,creatorId:r.creator_id??null,creatorInfo:r.creator_name==null?null:{name:r.creator_name,displayName:r.creator_display_name??r.creator_name,avatarUrl:r.creator_avatar_url??null},playbackMode:playbackModeSchema.parse(r.playback_mode??'queue'),defaults:json(r.defaults_json),overrides:json(r.overrides_json),inviteCode:r.invite_code,
       settings:{description:r.description,atmosphere:r.atmosphere,visibility:r.visibility,category:r.category,coverUrl:r.cover_url},playlist:queues.get(r.id)??[]}));
   }
   async close() { await this.pool.end(); }

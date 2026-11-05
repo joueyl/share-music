@@ -1,5 +1,6 @@
 import { createHmac, randomBytes, randomUUID, scrypt as scryptCallback, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
+import { isIP } from 'node:net';
 import { DomainError } from './engine';
 import type { DatabaseStore } from './database';
 const scrypt = promisify(scryptCallback);
@@ -7,18 +8,21 @@ export class Auth {
   constructor(private db: DatabaseStore, private secret: string, private now = Date.now) {
     if (secret.length < 32) throw new Error('TOKEN_SECRET must contain at least 32 characters');
   }
-  async login(name: string, password: string, register = false) {
+  async login(name: string, password: string, register = false, ip?: string) {
+    const loginIp = ip?.startsWith('::ffff:') && isIP(ip.slice(7)) === 4 ? ip.slice(7) : ip;
+    if (loginIp !== undefined && !isIP(loginIp)) throw new DomainError('INVALID_IP');
     let user = await this.db.findUser(name);
     if (register) {
       if (user) throw new DomainError('NAME_TAKEN');
       const salt = randomBytes(16).toString('hex');
       const passwordHash = (await scrypt(password, salt, 64) as Buffer).toString('hex');
-      user = { id: randomUUID(), name, salt, passwordHash };
+      user = { id: randomUUID(), name, salt, passwordHash, lastLoginIp: loginIp ?? null };
       try { await this.db.insertUser(user); } catch(e) { if(e instanceof DomainError && e.code==='DATABASE_UNAVAILABLE')throw e;throw new DomainError('NAME_TAKEN'); }
     } else {
       // Perform the same work for unknown users to reduce account timing disclosure.
       const hash = await scrypt(password, user?.salt ?? 'unknown-user-salt', 64) as Buffer;
       if (!user || !timingSafeEqual(hash, Buffer.from(user.passwordHash, 'hex'))) throw new DomainError('INVALID_CREDENTIALS');
+      await this.db.updateLoginIp(user.id, loginIp ?? null);
     }
     const payload = Buffer.from(JSON.stringify({ sub: user.id, exp: this.now() + 24 * 3600000 })).toString('base64url');
     const signature = createHmac('sha256', this.secret).update(payload).digest('base64url');

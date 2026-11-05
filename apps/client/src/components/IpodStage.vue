@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as THREE from 'three';
-import { useCachedActivity } from '../useCachedActivity';
-import { createStageFrameLimiter, getRuntimeProfile } from '../runtime-profile';
+import { useStageActivity } from '../useStageActivity';
+import { createStageFrameLimiter, getRuntimeProfile, stageAnimationBlend } from '../runtime-profile';
 import { createStageArtworkLoader } from '../stage-artwork';
 import { loadStageArtwork } from '../bridge';
 import { createStageViewport, stageRendererOptions } from '../stage-viewport';
@@ -50,7 +50,7 @@ let wheelCanvasTexture: THREE.CanvasTexture;
 let currentCoverImg: HTMLImageElement | null = null;
 let animId: number = 0;
 let resumeStage=()=>{},pauseStage=()=>{};
-const stageActive=useCachedActivity(()=>resumeStage(),()=>pauseStage());
+const stageActive=useStageActivity(()=>resumeStage(),()=>pauseStage());
 let progressTimer: number = 0;
 
 let targetRotX = 0; // 默认 0 垂直端正立起，绝不倾斜
@@ -606,6 +606,7 @@ onMounted(() => {
     viewport.sync();
     const delta = Math.min(clock.getDelta(), 0.05);
     const elapsedTime = clock.elapsedTime;
+    const blend = stageAnimationBlend(delta);
 
     if (ipodGroup) {
       const isPlaying = app.room?.playback.playState === 'playing';
@@ -621,23 +622,23 @@ onMounted(() => {
         const curRotY = stageTheme.ipod.parallaxTilt ? targetRotY : 0;
         const curRotX = stageTheme.ipod.parallaxTilt ? targetRotX : 0;
 
-        ipodGroup.rotation.z += (beatRoll - ipodGroup.rotation.z) * 0.08;
-        ipodGroup.rotation.y += (curRotY + beatYaw - ipodGroup.rotation.y) * 0.08;
-        ipodGroup.rotation.x += (curRotX + beatPitch - ipodGroup.rotation.x) * 0.08;
+        ipodGroup.rotation.z += (beatRoll - ipodGroup.rotation.z) * blend;
+        ipodGroup.rotation.y += (curRotY + beatYaw - ipodGroup.rotation.y) * blend;
+        ipodGroup.rotation.x += (curRotX + beatPitch - ipodGroup.rotation.x) * blend;
 
-        ipodGroup.position.x += (0 - ipodGroup.position.x) * 0.08;
-        ipodGroup.position.y += (beatPosY - ipodGroup.position.y) * 0.08;
+        ipodGroup.position.x += (0 - ipodGroup.position.x) * blend;
+        ipodGroup.position.y += (beatPosY - ipodGroup.position.y) * blend;
         ipodGroup.scale.set(1, 1, 1);
       } else {
         // 暂停、关闭律动、或用户自由拖拽把玩时：平稳保持端正，只响应视差（如开启）
         const curRotY = (!userHasInteracted && stageTheme.ipod.parallaxTilt) ? targetRotY : 0;
         const curRotX = (!userHasInteracted && stageTheme.ipod.parallaxTilt) ? targetRotX : 0;
 
-        ipodGroup.rotation.z += (0 - ipodGroup.rotation.z) * 0.08;
-        ipodGroup.rotation.y += (curRotY - ipodGroup.rotation.y) * 0.08;
-        ipodGroup.rotation.x += (curRotX - ipodGroup.rotation.x) * 0.08;
-        ipodGroup.position.x += (0 - ipodGroup.position.x) * 0.08;
-        ipodGroup.position.y += (0 - ipodGroup.position.y) * 0.08;
+        ipodGroup.rotation.z += (0 - ipodGroup.rotation.z) * blend;
+        ipodGroup.rotation.y += (curRotY - ipodGroup.rotation.y) * blend;
+        ipodGroup.rotation.x += (curRotX - ipodGroup.rotation.x) * blend;
+        ipodGroup.position.x += (0 - ipodGroup.position.x) * blend;
+        ipodGroup.position.y += (0 - ipodGroup.position.y) * blend;
         ipodGroup.scale.set(1, 1, 1);
       }
     }
