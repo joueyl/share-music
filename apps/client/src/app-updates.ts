@@ -17,6 +17,15 @@ export function createUpdates(adapter:Adapter){
  const locked=computed(()=>['downloading','installing','restarting'].includes(state.phase));
  const busy=computed(()=>locked.value||state.phase==='checking');
  const percent=computed(()=>state.total?Math.min(100,Math.floor(state.received/state.total*100)):null);
+ let startupCheck:Promise<boolean>|undefined;
+ function checkOnStartup():Promise<boolean>{
+  // One background check per app session; never download or install automatically.
+  return startupCheck??= (async()=>{
+   if(!adapter.desktop())return false;
+   await check();
+   return state.phase==='available';
+  })();
+ }
  function fail(error:unknown){state.phase='error';state.message=errors[error instanceof Error?error.message:String(error)]??'更新操作失败；旧安装包可能尚未包含更新模块，请手动安装新版后重试。';}
  async function check(){
   if(busy.value)return;
@@ -49,7 +58,7 @@ export function createUpdates(adapter:Adapter){
   if(state.phase!=='installed')return;state.phase='restarting';state.message='正在重启…';
   try{await adapter.restart();}catch{state.phase='installed';state.message='自动重启失败，请退出后重新打开程序。';}
  }
- return {state,locked,busy,percent,check,install,restart};
+ return {state,locked,busy,percent,check,checkOnStartup,install,restart};
 }
 export const appUpdates=createUpdates({
  desktop:isTauri,

@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, toRef, watch, computed, onMounted } from 'vue';
+import { ref, toRef, watch, computed, onMounted, onUnmounted } from 'vue';
+import { appUpdates } from './app-updates';
 import { useAutoDismissNotice } from './useAutoDismissNotice';
 import { Headphones, Search, X, LogOut, History, Settings2, Minus, Square, ChevronDown, Link, Palette, Disc3 } from 'lucide-vue-next';
 import { useRoute, useRouter } from 'vue-router';
@@ -25,6 +26,15 @@ watch(()=>ui.queue,open=>{if(open)queueMounted.value=true;});
 function queueClosed(){queueMounted.value=false;ui.queue=false;}
 const versionOpen = ref(false), accountOpen = ref(false);
 const splashDone = ref(false);
+const startupUpdateAvailable = ref(false);
+let alive = true;
+watch([splashDone, startupUpdateAvailable], ([ready, available]) => {
+  if (ready && available) {
+    startupUpdateAvailable.value = false;
+    if (appUpdates.state.phase === 'available') versionOpen.value = true;
+  }
+});
+onUnmounted(() => { alive = false; });
 const isMaximized = ref(false);
 const app = useApp(), router = useRouter(), route = useRoute();
 
@@ -55,6 +65,9 @@ watch(isMaximized, (val) => {
 }, { immediate: true });
 
 onMounted(async () => {
+  void appUpdates.checkOnStartup().then(available => {
+    if (alive) startupUpdateAvailable.value = available;
+  });
   if (bridge.desktop) {
     isMaximized.value = await bridge.isWindowMaximized();
     await bridge.onWindowResized(async () => {
