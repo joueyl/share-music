@@ -2317,7 +2317,7 @@ dependencies = [
 
 [[package]]
 name = "music-share-desktop"
-version = "1.4.4"
+version = "1.4.5"
 dependencies = [
  "futures-util",
  "libloading 0.8.9",
