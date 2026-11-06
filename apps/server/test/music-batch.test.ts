@@ -5,6 +5,7 @@ import { RoomEngine, DomainError } from '../src/engine';
 import { MusicImport } from '../src/music-import';
 import { NeteaseService, musicMethods } from '../src/netease';
 import { ApiController } from '../src/controller';
+import { createHanaInvoker } from '../src/hana-music';
 const detailRoute='/api/v3/song/detail',urlRoute='/api/song/enhance/player/url/v1';
 const databases:Database[]=[];afterEach(()=>databases.splice(0).forEach(db=>db.close()));
 function fixture(){
@@ -120,4 +121,23 @@ it('does not mark all nested -460 failures as invalid response or issue fifty ex
  const diagnostic=JSON.parse((f.log.mock.calls[0][0] as string).slice('网易云 batch 响应校验失败 '.length));
  expect(diagnostic).toMatchObject({phase:'business_rejected',stage:'song_url_v1',rootCode:200,sourceCode:-460});
  expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(0);
+});
+
+
+it('regresses the all-50-invalid-response failure through the actual worker serialization boundary',async()=>{
+ const f=fixture();
+ const module='data:text/javascript;base64,'+Buffer.from(`
+ export async function invokeModule(){return {status:200,body:{code:400},cookie:[]};}
+ export async function createRequest(path,data){
+  if(path!=='/api/batch'||typeof data['/api/v3/song/detail']!=='string'||typeof data['/api/song/enhance/player/url/v1']!=='string')return {status:200,body:{code:400},cookie:[]};
+  const ids=JSON.parse(JSON.parse(data['/api/song/enhance/player/url/v1']).ids);
+  return {status:200,cookie:[],body:{code:200,'/api/v3/song/detail':{code:200,songs:ids.map(id=>({id,name:'song '+id,dt:120000}))},'/api/song/enhance/player/url/v1':{code:200,data:ids.map(id=>({id,url:'https://m801.music.126.net/'+id+'.mp3',size:4,type:'mp3',code:200,expi:300}))}}};
+ }`).toString('base64');
+ const api=vi.fn(createHanaInvoker(module)),netease=new NeteaseService(f.db,api,()=>1000);
+ const importer=new MusicImport(f.engine,netease,f.request,f.db,()=>1000);
+ vi.spyOn(f.service,'registered').mockImplementation((url,key)=>importer.registered(url,key));
+ const items=Array.from({length:50},(_,i)=>({songId:String(i+1),requestId:randomUUID()}));
+ const results=await importer.addBatch(f.room.id,f.user,items);
+ expect(results.every(result=>result.ok)).toBe(true);expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(50);
+ expect(api).toHaveBeenCalledOnce();expect(api.mock.calls[0][0]).toBe('batch');expect(f.request).not.toHaveBeenCalled();
 });

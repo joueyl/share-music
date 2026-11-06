@@ -121,7 +121,7 @@ it('the installed SDK accepts fixed read-only batch parameters in a single mocke
   const result=await call('batch',query,{...config,e_r:false,fetcher:async()=>{count++;return new Response(JSON.stringify({code:200,'/api/v3/song/detail':{code:200,songs:[]},'/api/song/enhance/player/url/v1':{code:200,data:[]}}),{status:200,headers:{'content-type':'application/json'}});}});
   return {status:200,body:{count,result:result.body},cookie:[]};
  }`));
- const result=await invoke('batch_probe',{cookie:'MUSIC_U=fixture','/api/v3/song/detail':{c:'[{"id":1},{"id":2}]'},'/api/song/enhance/player/url/v1':{ids:'[1,2]',level:'standard',encodeType:'flac'}});
+ const result=await invoke('batch_probe',{cookie:'MUSIC_U=fixture','/api/v3/song/detail':{c:'[{"id":1},{"id":2}]'},'/api/song/enhance/player/url/v1':{ids:'["1","2"]',br:128000}});
  expect(result.body.count).toBe(1);expect(result.body.result.code).toBe(200);
 });
 
@@ -161,6 +161,25 @@ it.each([['MUSIC_U=fixture','song_url_v1'],['','anonymous_registration']])('clas
  expect(log).toHaveBeenCalledExactlyOnceWith('网易云 SDK 调用失败 '+JSON.stringify({method:'song_url_v1',phase:'request',status:400,bodyCode:-460,upstreamStep}));
 });
 
+it('serializes only the fixed read batch routes through the public createRequest API',async()=>{
+ const invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(){throw Error('batch module must not be used');}
+ export async function createRequest(path,data,config){
+  return {status:200,body:{path,data,timeoutMs:config.timeoutMs,retry:config.retry},cookie:[]};
+ }`));
+ const detail='/api/v3/song/detail',source='/api/song/enhance/player/url/v1';
+ const query={[detail]:{c:'[{"id":1},{"id":2}]'},[source]:{ids:'["1","2"]',br:128000}};
+ const result=await invoke('batch',query);
+ expect(result.body).toEqual({path:'/api/batch',data:{[detail]:JSON.stringify(query[detail]),[source]:JSON.stringify(query[source])},timeoutMs:15000,retry:{retries:0,retryNonIdempotent:false}});
+});
+it.each([
+ {'/api/private/write':{}},
+ {'/api/v3/song/detail':{},'/api/song/enhance/player/url/v1':{},'/api/private/write':{}},
+ {'/api/v3/song/detail':'already serialized','/api/song/enhance/player/url/v1':{}},
+])('rejects internal batch route injection or unsupported input shapes without making a request',async query=>{
+ const invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(){return {status:200,body:{code:200},cookie:[]};}
+ export async function createRequest(){return {status:200,body:{code:200},cookie:[]};}`),18000,()=>{});
+ await expect(invoke('batch',query)).rejects.toThrow('NETEASE_UNAVAILABLE');
+});
 
 it('retains numeric module identifiers in diagnostics without enabling a v1 music route',async()=>{
  const log=vi.fn(),invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(){throw {status:400,body:{code:-460}};}`),18000,log);

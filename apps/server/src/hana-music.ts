@@ -13,7 +13,7 @@ const reply=message=>parentPort.postMessage({kind:'music-share:hana-result',...m
 (async()=>{
  let phase='import',upstreamStep;
  try {
-  const {invokeModule}=await import(workerData.module);
+  const {invokeModule,createRequest}=await import(workerData.module);
   const {cookie='',timestamp,noCookie,...query}=workerData.params;
   phase='request';
   const config={
@@ -28,7 +28,15 @@ const reply=message=>parentPort.postMessage({kind:'music-share:hana-result',...m
     }catch{upstreamStep=undefined;}
    }
   };
-  const result=await invokeModule(workerData.name,query,config);
+  let result;
+  if(workerData.name==='batch'){
+   // Hana 3.2.0 batch input accepts objects, but the upstream batch wire format
+   // requires JSON strings. Use its public request API for only our two read routes.
+   const routes=['/api/v3/song/detail','/api/song/enhance/player/url/v1'];
+   if(Object.keys(query).length!==routes.length||routes.some(route=>!query[route]||typeof query[route]!=='object'||Array.isArray(query[route])))throw Error('Invalid internal batch input');
+   const data=Object.fromEntries(routes.map(route=>[route,JSON.stringify(query[route])]));
+   result=await createRequest('/api/batch',data,config);
+  }else result=await invokeModule(workerData.name,query,config);
   phase='invalid_response';
   if(!Number.isInteger(result?.status)||result.status<200||result.status>=300||
      !result.body||typeof result.body!=='object'||Array.isArray(result.body)||!Array.isArray(result.cookie))throw Error('Invalid SDK response');

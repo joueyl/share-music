@@ -175,7 +175,7 @@ body：`{"songId":"123","requestId":"UUID"}`。
 ```
 
 - 每批 1–50 首，songId 与 requestId 各自不可重复；每项使用独立 UUID，不接受上游路由、Cookie 或 URL。
-- 服务端对未缓存/接近过期的歌曲调用一次内部 Hana `batch`，合并 `/api/v3/song/detail` 与 `/api/song/enhance/player/url/v1` 两个多歌曲只读请求；有效链接仍复用，不下载音频。
+- 服务端对未缓存/接近过期的歌曲通过 Hana 公开 `createRequest` 调用固定 `/api/batch`（子请求参数序列化为 JSON 字符串），合并 `/api/v3/song/detail` 与 `/api/song/enhance/player/url/v1` 两个多歌曲只读请求；有效链接仍复用，不下载音频。
 - 返回 `{results:[{songId,requestId,ok:true,track}|{songId,requestId,ok:false,error}]}`，结果和入队顺序与输入一致；逐首检查权限、容量及幂等。非原子事务，成功项不因其他歌曲失败回滚。
 - batch 顶层或子请求的数值业务拒绝返回 `NETEASE_UNAVAILABLE`（明确 301 为 `NETEASE_LOGIN_REQUIRED`）；缺字段或字段类型异常才是 `NETEASE_INVALID_RESPONSE`。服务端只打印固定阶段、数值代码及类型的脱敏诊断，不输出原始响应或对失败歌曲追加上游请求。
 - 每用户每 10 分钟 200 首，按歌曲数而非 HTTP 请求数计费；同时最多两个批量任务，其他单曲导入限制不变。

@@ -62,3 +62,7 @@ Nginx `/loginServe` 转发需覆盖 `Host $http_host` 和 `X-Forwarded-Proto $sc
 ## SDK 与 batch 脱敏诊断
 
 SDK 日志允许含数字后缀的方法名，不再误记 unknown；仅映射匿名初始化、播放器取链及 batch 的固定步骤标签，不输出 URL、Cookie 或原始消息。batch 顶层或子请求的数值业务拒绝按不可用/登录错误返回，只有缺字段或类型错误才是 NETEASE_INVALID_RESPONSE；校验失败仅打印一条固定阶段、数值代码及字段类型日志，不额外重试。
+
+## batch 参数编码
+
+Hana 3.2.0 batch 模块输入为对象，但上游需要 JSON 字符串。固定两项只读子请求在 Worker 内序列化后，通过公开 createRequest('/api/batch') 调用；不开放任意上游路径，不修改依赖源码，保留凭据注入、超时及禁用重试。
