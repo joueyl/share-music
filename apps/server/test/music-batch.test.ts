@@ -14,13 +14,13 @@ function fixture(){
   const ids=JSON.parse((params[urlRoute] as {ids:string}).ids) as number[];
   return {body:{code:200,[detailRoute]:{code:200,songs:ids.map(id=>({id,name:'song '+id,dt:120000}))},[urlRoute]:{code:200,data:ids.map(id=>({id,url:`https://m801.music.126.net/${id}.mp3`,size:4,type:'mp3',expi:300,code:200}))}}};
  });
- const netease=new NeteaseService(db,api,()=>1000),request=vi.fn();
+ const log=vi.fn(),netease=new NeteaseService(db,api,()=>1000,log),request=vi.fn();
  const ref:{value?:MusicImport}={},engine=new RoomEngine(undefined,undefined,()=>1000,(url,key)=>ref.value?.registered(url,key)??false);
  const user=randomUUID(),room=engine.create('room',user);engine.join(room.id,{id:user,name:'host'});
  const service=new MusicImport(engine,netease,request,db,()=>1000);ref.value=service;
  const items=[1,2,3].map(id=>({songId:String(id),requestId:randomUUID()}));
  const flush=vi.fn(async()=>{}),limit=vi.fn(),controller=new ApiController({auth:{verify:async()=>({id:user})},musicImport:service,flush,limit} as any);
- return {db,api,netease,request,engine,user,room,service,items,controller,flush,limit};
+ return {db,api,netease,log,request,engine,user,room,service,items,controller,flush,limit};
 }
 it('uses one actual SDK batch with two fixed multi-song read routes and preserves enqueue order',async()=>{
  const f=fixture(),result=await f.controller.addNeteaseBatch(f.room.id,{items:f.items},'Bearer test');
@@ -69,7 +69,7 @@ it('sanitizes failed batch requests into item failures without falling back to s
 });
 it('rejects malformed batch envelopes and bounds internal calls',async()=>{
  const f=fixture();f.api.mockResolvedValueOnce({body:{code:200,[detailRoute]:{code:200,songs:[]},[urlRoute]:{code:403,data:[]}}} as any);
- await expect(f.netease.songBatch(['1'])).rejects.toThrow('NETEASE_INVALID_RESPONSE');
+ await expect(f.netease.songBatch(['1'])).rejects.toThrow('NETEASE_UNAVAILABLE');
  for(const ids of [[],['1','1'],Array.from({length:51},(_,i)=>String(i+1)),['/api/private']])await expect(f.netease.songBatch(ids)).rejects.toThrow('INVALID_REQUEST');
  expect(f.api).toHaveBeenCalledOnce();
 });
@@ -95,4 +95,29 @@ it('accepts QQ batches through the project endpoint without pretending QQ suppor
  expect(result?.results.every(item=>item.ok)).toBe(true);expect(audio).toHaveBeenCalledTimes(2);expect(f.api).not.toHaveBeenCalled();expect(f.request).not.toHaveBeenCalled();
  expect(f.engine.snapshot(f.room.id).playlist.map(track=>track.qqId)).toEqual(['001ABC','002ABC']);
  await controller.addQqBatch(f.room.id,{items},'Bearer test');expect(audio).toHaveBeenCalledTimes(2);expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(2);
+});
+
+it.each([
+ [{code:400,msg:'private upstream body'},'NETEASE_UNAVAILABLE','business_rejected','batch'],
+ [{code:200,[detailRoute]:{code:200,songs:[]},[urlRoute]:{code:-460,msg:'private upstream body'}},'NETEASE_UNAVAILABLE','business_rejected','song_url_v1'],
+ [{code:200,[detailRoute]:{code:301},[urlRoute]:{code:200,data:[]}},'NETEASE_LOGIN_REQUIRED','business_rejected','song_detail'],
+ [{code:200,[detailRoute]:{code:200,songs:{}},[urlRoute]:{code:200,data:[]}},'NETEASE_INVALID_RESPONSE','response_shape','song_detail'],
+ [{code:200,[detailRoute]:{code:200,songs:[]},[urlRoute]:'private unexpected string'},'NETEASE_INVALID_RESPONSE','response_shape','song_url_v1'],
+])('distinguishes business rejection from shape errors using only sanitized batch diagnostics',async(body,error,phase,stage)=>{
+ const f=fixture();f.api.mockResolvedValueOnce({body} as any);
+ await expect(f.netease.songBatch(['1'])).rejects.toThrow(error);
+ expect(f.log).toHaveBeenCalledOnce();const line=f.log.mock.calls[0][0] as string;
+ expect(line.startsWith('网易云 batch 响应校验失败 ')).toBe(true);
+ expect(JSON.parse(line.slice('网易云 batch 响应校验失败 '.length))).toMatchObject({phase,stage});
+ expect(line).not.toContain('private');expect(line).not.toContain('http');expect(f.api).toHaveBeenCalledOnce();
+});
+it('does not mark all nested -460 failures as invalid response or issue fifty extra requests',async()=>{
+ const f=fixture();f.api.mockResolvedValueOnce({body:{code:200,[detailRoute]:{code:200,songs:[]},[urlRoute]:{code:-460,msg:'private',cookie:'private'}}} as any);
+ const items=Array.from({length:50},(_,i)=>({songId:String(i+1),requestId:randomUUID()}));
+ const result=await f.service.addBatch(f.room.id,f.user,items);
+ expect(result).toHaveLength(50);expect(result.every(item=>!item.ok&&item.error==='NETEASE_UNAVAILABLE')).toBe(true);
+ expect(f.api).toHaveBeenCalledOnce();expect(f.log).toHaveBeenCalledOnce();
+ const diagnostic=JSON.parse((f.log.mock.calls[0][0] as string).slice('网易云 batch 响应校验失败 '.length));
+ expect(diagnostic).toMatchObject({phase:'business_rejected',stage:'song_url_v1',rootCode:200,sourceCode:-460});
+ expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(0);
 });

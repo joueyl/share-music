@@ -14,7 +14,7 @@ function publicBody(value: any): any {
 export class NeteaseService {
   private attempt?: { id: string; key: string; expiresAt: number; lastCheck: number; code: number; pending?: Promise<{ code: number }> };
   private generation = 0;
-  constructor(private db: DatabaseStore, private api: MusicInvoker = invokeHana, private now = Date.now) {}
+  constructor(private db: DatabaseStore, private api: MusicInvoker = invokeHana, private now = Date.now, private log:(message:string)=>void=message=>console.warn(message)) {}
   private async request(name: string, params: Record<string, unknown> = {}, credential?:string) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -64,7 +64,25 @@ export class NeteaseService {
       [urlRoute]:{ids:'['+ids.join(',')+']',level:'standard',encodeType:'flac'}
     })).body);
     const detail=body[detailRoute],source=body[urlRoute];
-    if(body.code!==200||detail?.code!==200||source?.code!==200||!Array.isArray(detail.songs)||!Array.isArray(source.data))throw new DomainError('NETEASE_INVALID_RESPONSE');
+    const checks=[
+      {stage:'batch',value:body,valid:body.code===200},
+      {stage:'song_detail',value:detail,valid:detail?.code===200&&Array.isArray(detail.songs)},
+      {stage:'song_url_v1',value:source,valid:source?.code===200&&Array.isArray(source.data)}
+    ];
+    const numeric=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)&&Math.abs(value)<=100000?value:undefined;
+    const rejected=checks.find(check=>numeric(check.value?.code)!==undefined&&check.value.code!==200);
+    const failed=rejected??checks.find(check=>!check.valid);
+    if(failed){
+      const type=(value:unknown)=>value===null?'null':Array.isArray(value)?'array':typeof value;
+      // The batch HTTP response may be 200 while a nested business request was rejected.
+      // Log only fixed labels, numeric codes and types; never bodies, URLs or credentials.
+      this.log('网易云 batch 响应校验失败 '+JSON.stringify({phase:rejected?'business_rejected':'response_shape',stage:failed.stage,
+        rootCode:numeric(body.code),detailCode:numeric(detail?.code),sourceCode:numeric(source?.code),
+        rootCodeType:type(body.code),detailCodeType:type(detail?.code),sourceCodeType:type(source?.code),
+        detailType:type(detail),sourceType:type(source),songsType:type(detail?.songs),dataType:type(source?.data)}));
+      const loginRequired=checks.some(check=>check.value?.code===301);
+      throw new DomainError(loginRequired?'NETEASE_LOGIN_REQUIRED':rejected?'NETEASE_UNAVAILABLE':'NETEASE_INVALID_RESPONSE');
+    }
     return {detail,source};
   }
   async call(name: string, params: Record<string, unknown>) {

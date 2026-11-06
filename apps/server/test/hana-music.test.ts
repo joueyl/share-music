@@ -29,10 +29,11 @@ it('reports module import failures without logging paths or the raw loader error
 
 it('calls the ESM Promise SDK with business input and execution config separated',async()=>{
  const invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(name,query,config){
-  return {status:200,body:{name,query,config},cookie:['MUSIC_U=fixture; Path=/']};
+  const {onRequestEvent,...safeConfig}=config;
+  return {status:200,body:{name,query,config:safeConfig,hasDiagnosticsHook:typeof onRequestEvent==='function'},cookie:['MUSIC_U=fixture; Path=/']};
  }`));
  const result=await invoke('search',{keywords:'晴天',cookie:'MUSIC_U=fixture',timestamp:123,noCookie:true});
- expect(result).toEqual({body:{name:'search',query:{keywords:'晴天'},config:{cookie:'MUSIC_U=fixture',timeoutMs:15000,retry:{retries:0,retryNonIdempotent:false}}},cookie:['MUSIC_U=fixture; Path=/']});
+ expect(result).toEqual({body:{name:'search',query:{keywords:'晴天'},hasDiagnosticsHook:true,config:{cookie:'MUSIC_U=fixture',timeoutMs:15000,retry:{retries:0,retryNonIdempotent:false}}},cookie:['MUSIC_U=fixture; Path=/']});
 });
 
 it('keeps only business login codes, never raw rejection credentials',async()=>{
@@ -122,4 +123,47 @@ it('the installed SDK accepts fixed read-only batch parameters in a single mocke
  }`));
  const result=await invoke('batch_probe',{cookie:'MUSIC_U=fixture','/api/v3/song/detail':{c:'[{"id":1},{"id":2}]'},'/api/song/enhance/player/url/v1':{ids:'[1,2]',level:'standard',encodeType:'flac'}});
  expect(result.body.count).toBe(1);expect(result.body.result.code).toBe(200);
+});
+
+it.each([
+ ['https://interface.music.163.com/eapi/song/enhance/player/url/v1?private=query','song_url_v1'],
+ ['https://music.163.com/weapi/register/anonimous?private=query','anonymous_registration'],
+ ['https://music.163.com/api/batch?private=query','batch'],
+])('records only a fixed upstream step for a -460 rejection (%s)',async(url,upstreamStep)=>{
+ const log=vi.fn(),invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(name,query,config){
+  config.onRequestEvent({type:'attempt',url:${JSON.stringify(url)},error:'private error'});
+  throw {status:400,body:{code:-460,msg:'private message',cookie:'private cookie'}};
+ }`),18000,log);
+ await expect(invoke('song_url_v1',{id:'42',cookie:'MUSIC_U=private-fixture'})).rejects.toThrow('NETEASE_UNAVAILABLE');
+ expect(log).toHaveBeenCalledExactlyOnceWith('网易云 SDK 调用失败 '+JSON.stringify({method:'song_url_v1',phase:'request',status:400,bodyCode:-460,upstreamStep}));
+ expect(log.mock.calls.flat().join(' ')).not.toContain('private');
+});
+it.each(['https://private.example/credential?token=private','not a URL'])('does not log unrecognized or malformed upstream targets (%s)',async(url)=>{
+ const log=vi.fn(),invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(_,query,config){
+  config.onRequestEvent({url:${JSON.stringify(url)}});throw {status:400,body:{code:-460}};
+ }`),18000,log);
+ await expect(invoke('song_url_v1',{})).rejects.toThrow('NETEASE_UNAVAILABLE');
+ expect(log).toHaveBeenCalledExactlyOnceWith('网易云 SDK 调用失败 {"method":"song_url_v1","phase":"request","status":400,"bodyCode":-460}');
+});
+it('does not permit URL-like module names in diagnostic output',async()=>{
+ const log=vi.fn(),invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(){throw {status:400,body:{code:-460}};}`),18000,log);
+ await expect(invoke('https://private.example/token',{})).rejects.toThrow('NETEASE_UNAVAILABLE');
+ expect(log).toHaveBeenCalledExactlyOnceWith('网易云 SDK 调用失败 {"method":"unknown","phase":"request","status":400,"bodyCode":-460}');
+});
+
+it.each([['MUSIC_U=fixture','song_url_v1'],['','anonymous_registration']])('classifies actual installed SDK request events with mocked -460 transport (%s)',async(cookie,upstreamStep)=>{
+ const entry=pathToFileURL(require.resolve('hana-music-api')).href,log=vi.fn();
+ const invoke=createHanaInvoker(moduleUrl(`import {invokeModule as call} from ${JSON.stringify(entry)};
+ export async function invokeModule(name,query,config){
+  return call(name,query,{...config,fetcher:async()=>new Response(JSON.stringify({code:-460,msg:'private upstream rejection'}),{status:400,headers:{'content-type':'application/json'}})});
+ }`),18000,log);
+ await expect(invoke('song_url_v1',{id:'42',br:128000,cookie})).rejects.toThrow('NETEASE_UNAVAILABLE');
+ expect(log).toHaveBeenCalledExactlyOnceWith('网易云 SDK 调用失败 '+JSON.stringify({method:'song_url_v1',phase:'request',status:400,bodyCode:-460,upstreamStep}));
+});
+
+
+it('retains numeric module identifiers in diagnostics without enabling a v1 music route',async()=>{
+ const log=vi.fn(),invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(){throw {status:400,body:{code:-460}};}`),18000,log);
+ await expect(invoke('test_v2',{})).rejects.toThrow('NETEASE_UNAVAILABLE');
+ expect(log).toHaveBeenCalledExactlyOnceWith('网易云 SDK 调用失败 {"method":"test_v2","phase":"request","status":400,"bodyCode":-460}');
 });

@@ -58,3 +58,7 @@ Nginx `/loginServe` 转发需覆盖 `Host $http_host` 和 `X-Forwarded-Proto $sc
 - 这些副作用方法只允许服务端内部固定参数调用，`/api/netease/:method` 仍保持只读白名单。每日任务日志仅输出固定任务名和确认状态；听歌打卡不打印响应 body、歌曲 ID、来源 ID 或上报时长，成功时保持安静，仅保留失败/超时和队列满等固定异常提示，不输出凭据或上游原始异常。SDK 失败诊断仍按前述脱敏规则保留。只有真实账号联调才能验收签到、领取或排行结果，单元测试不代表已获得奖励。
 
 已核对 hana-music-api 3.2.0 的 daily_signin、yunbei_sign、vip_tasks、vip_growthpoint_get、scrobble 实现。新 SDK 的 scrobble 在一次模块调用内依次发送 startplay 和 play 两个请求，使用 SDK 内置的 clientlog/eapi 路径及客户端身份参数；队列、总时长上报与凭据隔离不变，禁用自动重试。返回 200 仍不证明排行、时长或奖励实际入账，必须真实账号核验；不额外增加第三方 HTTP 服务或定时框架。
+
+## SDK 与 batch 脱敏诊断
+
+SDK 日志允许含数字后缀的方法名，不再误记 unknown；仅映射匿名初始化、播放器取链及 batch 的固定步骤标签，不输出 URL、Cookie 或原始消息。batch 顶层或子请求的数值业务拒绝按不可用/登录错误返回，只有缺字段或类型错误才是 NETEASE_INVALID_RESPONSE；校验失败仅打印一条固定阶段、数值代码及字段类型日志，不额外重试。
