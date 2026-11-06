@@ -2,7 +2,9 @@ listening-port=3478
 realm=music-share
 fingerprint
 use-auth-secret
-# Must match apps/server/.env TURN_SECRET. Never commit the real configuration.
+# Legacy relay compatibility only; not required for current direct-URL playback.
+# If explicitly enabled, set TURN_SECRET manually to match this secret; it is not in the standard .env.example.
+# Never commit the real configuration.
 static-auth-secret=replace-with-a-different-long-random-secret
 external-ip=YOUR_PUBLIC_IP
 min-port=49160

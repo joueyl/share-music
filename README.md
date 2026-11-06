@@ -117,6 +117,8 @@ CloudPlayer 控制唯一 HTML Audio 实例。后端从网易云接口读取 MD5 
 
 复制 `apps/server/.env.example` 为 `apps/server/.env`，配置 MySQL `DATABASE_URL`、独立随机 `TOKEN_SECRET` 和实际前端 `ALLOWED_ORIGINS`。生产使用 MySQL 8.0+，连接失败时启动失败，不回退到 SQLite。开发时未设置 TOKEN_SECRET 会生成临时密钥，重启后原会话失效。
 
+常规示例仅保留当前服务配置，直链播放与 WebSocket 同步无需填写旧版 WebRTC/STUN/TURN 字段。服务端的旧协议兼容代码仍保留，但不属于当前客户端部署要求；本次模板清理不会自动修改已有 `.env`，也不删除兼容实现。`TRUST_PROXY`、可选 MySQL TLS CA 和 QQ 音乐配置仍有效，不能作为失效变量一并删除。
+
 公网管理 `/loginServe` 需设置 `NETEASE_ADMIN_TOKEN` 与实际访问的 `NETEASE_LOGIN_ORIGIN`，可切换网易云（二维码、手机号或邮箱密码）与 QQ 音乐（扫码），凭据仅保存在服务端。QQ Music API 已作为固定版本服务端依赖安装，首次使用时在服务端自动启动，无需单独部署；`QQ_MUSIC_API_URL` 仅用于可选外部服务，支持 128K MP3 搜索、入队、歌词、封面及音乐库复用，不包含 QQ 歌单/相似推荐。详情见 [网易云管理登录](docs/NETEASE.md)、[QQ 音乐接入](docs/QQ-MUSIC.md)。
 
 ```sh
