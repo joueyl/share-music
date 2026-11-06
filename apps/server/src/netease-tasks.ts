@@ -49,15 +49,16 @@ export class NeteaseAccountTasks {
   try{
    const session=await this.netease.accountSessionKey();if(!session||this.stopped)return;
    const day=shanghaiDay(this.now());
-   await Promise.all(['android','yunbei','vip'].map(async job=>{
+   const runJob=async(job:'android'|'pc'|'yunbei'|'vip')=>{
     try{
      const key=`netease.daily.${session}.${job}`;
      if(await this.db.getSetting(key)===day||this.stopped)return;
      // Mark the attempt before a side effect: timeout/restart must not duplicate an ambiguous reward.
      await this.db.setSetting(key,day);if(this.stopped)return;
-     if(job==='android'){
-      const body=await this.netease.accountCall('daily_signin',{type:0},session);
-      if(Number(body?.code)!==-2&&Number(body?.android?.code)!==-2)accepted(body?.android??body);
+     if(job==='android'||job==='pc'){
+      const body=await this.netease.accountCall('daily_signin',{type:job==='android'?0:1},session);
+      const result=body?.[job]??body;
+      if(Number(body?.code)!==-2&&Number(result?.code)!==-2)accepted(result);
      }else if(job==='yunbei')accepted(await this.netease.accountCall('yunbei_sign',{},session));
      else {
       const tasks=await this.netease.accountCall('vip_tasks',{},session);accepted(tasks);
@@ -66,7 +67,10 @@ export class NeteaseAccountTasks {
      }
      this.log(`网易云后台任务 ${job} 已完成或无待领取奖励`);
     }catch{this.log(`网易云后台任务 ${job} 未确认成功，当日不自动重复领取`);}
-   }));
+   };
+   // Wait for all three attempts (including failures/timeouts) before inspecting rewards.
+   await Promise.all((['android','pc','yunbei'] as const).map(runJob));
+   if(!this.stopped)await runJob('vip');
   }catch{this.log('网易云后台任务无法读取登录态');}
   finally{this.dailyBusy=false;}
  }

@@ -38,7 +38,9 @@ export class NeteaseService {
     if(!expectedSession||this.credentialKey(cookie)!==expectedSession)throw new DomainError('NETEASE_LOGIN_REPLACED');
     let clean:Record<string,unknown>;
     switch(name){
-      case 'daily_signin':clean={type:0};break;
+      case 'daily_signin':
+        if(params.type!==undefined&&params.type!==0&&params.type!==1)throw new DomainError('INVALID_REQUEST');
+        clean={type:params.type??0};break;
       case 'yunbei_sign':case 'vip_tasks':clean={};break;
       case 'vip_growthpoint_get':
         if(typeof params.ids!=='string'||params.ids.length>4000||!/^\d{1,20}(?:_\d{1,10})?(?:,\d{1,20}(?:_\d{1,10})?){0,99}$/.test(params.ids))throw new DomainError('INVALID_REQUEST');
