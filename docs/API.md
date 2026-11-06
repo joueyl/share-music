@@ -121,7 +121,7 @@ members[], playlist[], playbackMode, playback, pending, requests[], serverNow
 ## 3. 歌曲：只保存音乐直链
 
 MySQL 保存音乐来源 ID、直链、过期时间和元数据，音频文件不在服务端持久化。
-导入和续链使用 `song_url_v1` 返回的 `md5`、`size` 与链接，不下载音频或计算哈希。MD5 必须为 32 位十六进制（统一转小写），大小为 1–100 MiB 的整数字节数；缺少或无效元数据时拒绝导入。前端下载后计算 MD5、比对大小，通过后才创建播放 Blob。
+导入和续链使用 `song_url_v1` 返回的链接、`size` 与有效期，不下载音频或计算哈希；大小必须为 1–100 MiB 的整数字节数。`md5` 可作为新记录的缓存键候选，缺失或无效时生成随机键，已有键保持不变；不校验音频摘要。
 
 ### TrackMetadata
 
@@ -138,7 +138,7 @@ MySQL 保存音乐来源 ID、直链、过期时间和元数据，音频文件�
 | sizeBytes | 音频字节数；实际下载限制 100 MiB |
 | spec | 可选 `{sampleRate,bits,channels}`；直链 MP3 导入不读取音频推测规格，未取得时省略 |
 | lossless / bitrateBps | boolean；码率 1–20000000；当前在线导入仅支持完整 MP3 |
-| contentHash | 新歌曲使用上游接口 MD5，32 位小写十六进制；64 位 SHA-256 仅兼容已有记录 |
+| contentHash | 稳定缓存/音乐库键，32 或 64 位小写十六进制；沿用历史键，新 QQ 记录使用随机 32 位键，不代表音频摘要 |
 
 ### GET /api/music/uploaded
 
@@ -169,7 +169,7 @@ body：`{"songId":"123","requestId":"UUID"}`。
 ### POST /api/rooms/:id/music/uploaded
 
 从音乐库按内容哈希查找稳定歌曲 ID，再复用/刷新音乐链接入队。
-body：`{"hash":"32位小写MD5（也接受已有记录的64位SHA-256）","requestId":"UUID"}`，返回 `{ok:true,track}`，track.id 为新队列 UUID。
+body：`{"hash":"32或64位小写十六进制缓存键","requestId":"UUID"}`，返回 `{ok:true,track}`，track.id 为新队列 UUID。
 权限和限流同上；不存在可续期来源时返回 TRACK_NOT_FOUND。
 
 ### POST /api/rooms/:id/music/play
@@ -179,11 +179,11 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 
 ### GET /api/rooms/:id/music/:trackId?refresh=0
 
-需当前在线成员，返回 `{url,contentHash,sizeBytes}`（同一次取链的 MD5 和大小），`Cache-Control: private, no-store`；每用户每分钟 60 次。
+需当前在线成员，返回 `{url,contentHash,sizeBytes}`（链接、稳定缓存键及文件大小），`Cache-Control: private, no-store`；每用户每分钟 60 次。
 - 已保存链接距离过期不足 30 秒时，按稳定歌曲 ID 重新取链，成功后更新数据库。
-- `refresh=1` 强制重新获取，供客户端发现链接提前失效或 MD5/大小不一致时调用。
-- 桌面及 Web 客户端下载失败或校验不一致时，自动强制取链、采用配套 MD5/大小并重新下载校验一次，成功后继续播放；重试失败才报错，不无限循环。
-- 同一稳定歌曲 ID 刷新后的 MD5 或长度变化时，返回新的元数据用于校验和缓存，不沿用旧摘要，不要求手动重新添加，也不修改队列 UUID、状态版本或播放时间轴。
+- `refresh=1` 强制重新获取，供客户端收到 403 等链接失效或下载失败时静默调用。
+- 桌面及 Web 客户端静默强制取链并重新下载一次，不弹续链提示、不无限循环；保留文件大小与下载上限检查，不计算或比较音频摘要。
+- 同一稳定歌曲 ID 续链保留原缓存键，更新 URL、大小与过期时间，不修改队列 UUID、状态版本或播放时间轴，不要求手动重新添加。
 
 ### GET /api/rooms/:id/music/:trackId/metadata
 
@@ -196,7 +196,7 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 ### GET /api/rooms/:id/music/:trackId/audio
 
 网页端返回 `application/octet-stream` 原始音频，`Cache-Control: private, no-store`。
-服务端代理当前音源链接，遇到 HTTP 401/403/404/410 时最多刷新并重试一次；限制总大小、超时和重定向，读取前后检查成员身份，不计算音频哈希。前端按歌曲元数据校验大小与 MD5。
+服务端代理当前音源链接，遇到 HTTP 401/403/404/410 时最多刷新并重试一次；限制总大小、超时和重定向，读取前后检查成员身份。前后端不计算音频摘要，客户端仅检查大小。
 单次最多 100 MiB，每用户每分钟 30 次，进程最多两个不同下载任务。所有重定向逐跳校验允许域名，不接受本机、私网或任意 URL。
 需要对应音源的管理员登录状态仍有效；被下架、无权限或仅试听的歌曲不会因重试而绕过限制。
 
@@ -300,7 +300,7 @@ QQ API 默认作为服务端依赖内置运行，无需外部地址；`QQ_MUSIC_
 - `GET /api/qq/lyrics/:mid`：返回 `{lrc:{lyric},tlyric:{lyric}}`；MID 为 1–80 位字母数字。
 - `POST /api/rooms/:id/music/qq`：严格请求 `{songId: MID,requestId: UUID}`，返回 `{ok:true,track}`，沿用房间权限、容量、幂等 ID、异步过期保护和数据库持久化。只导入完整 128K MP3，拒绝无权播放或明确试听结果。
 
-QQ 上游没有 MD5；首次导入或续链在服务端有界读取完整音频，计算 MD5 与实际大小，并校验上游声明大小（若有），不保存音频文件。客户端仍完整下载并校验 MD5/大小。链接与哈希成套更新，不关闭校验。仅允许既有网易云 CDN 或 QQ 的 HTTPS 单层 `*.stream.qqmusic.qq.com`，逐跳重新验证，100 MiB/60 秒限制不变。音乐库通过现有接口复用，qqId 保存在 track JSON，无数据库结构迁移。
+QQ 导入和续链只读取上游链接及 `detail.file.size_128mp3`，缺少有效大小时明确失败；不下载音频计算 MD5，不持久化音频。已有 `contentHash` 缓存键保留，新记录使用随机 32 位稳定键，客户端不作摘要校验。HTTPS 单层 CDN 白名单、100 MiB/60 秒限制、导入并发与权限检查不变；无数据库结构迁移，需同步更新后端和客户端并重建安装包。
 
 ### 管理接口（沿用 Basic/本机鉴权、同源检查、限流和 no-store）
 

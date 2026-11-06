@@ -1,6 +1,7 @@
 import { expect, it, vi } from 'vitest';
 import type { Playback, RoomSnapshot } from '@music-share/shared';
 import { CloudPlayer } from '../src/cloud-player';
+import { loadPlaybackSource } from '../src/playback-source';
 
 class FakeAudio {
   crossOrigin: string | null = null;
@@ -148,4 +149,25 @@ it('does not retry a failed download on every same-epoch room snapshot', async (
  const player=new CloudPlayer(new FakeAudio() as unknown as HTMLAudioElement,load,vi.fn(),vi.fn());
  await player.sync(room(),0);await player.sync(room(),0);player.tick();
  expect(load).toHaveBeenCalledOnce();
+});
+
+it('silently renews an expired link before reporting ready without changing the queue or target seek',async()=>{
+ const audio=new FakeAudio(),emit=vi.fn(),send=vi.fn(async()=>{}),active=room(1,90000);
+ const bytes=new Uint8Array([255,251,144,0]),track={...active.playlist[0],contentHash:'a'.repeat(32),sizeBytes:4,name:'song.mp3'};
+ active.playlist[0]=track;
+ const before=structuredClone(active),link=vi.fn(async(refresh=false)=>({url:`https://m801.music.126.net/${refresh?'fresh':'expired'}.mp3`,contentHash:track.contentHash,sizeBytes:4}));
+ let finish!:(bytes:ArrayBuffer)=>void;
+ const download=vi.fn().mockRejectedValueOnce(new Error('MUSIC_LINK_EXPIRED')).mockImplementationOnce(()=>new Promise<ArrayBuffer>(resolve=>{finish=resolve;}));
+ const create=vi.spyOn(URL,'createObjectURL').mockReturnValue('blob:renewed-song'),revoke=vi.spyOn(URL,'revokeObjectURL').mockImplementation(()=>{});
+ const player=new CloudPlayer(audio as unknown as HTMLAudioElement,()=>loadPlaybackSource(link,false,track,download),send,emit,()=>100000);
+ try {
+  const loading=player.sync(active,0);
+  for(let i=0;i<20&&!finish;i++)await Promise.resolve();
+  expect(link.mock.calls).toEqual([[false],[true]]);
+  expect(emit).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();expect(audio.src).toBe('');
+  finish(bytes.buffer);await loading;
+  expect(emit).not.toHaveBeenCalled();expect(active).toEqual(before);expect(audio.src).toBe('blob:renewed-song');
+  audio.buffered();expect(audio.seeks).toEqual([90]);expect(send).not.toHaveBeenCalled();
+  audio.seeked();expect(send).toHaveBeenCalledWith({type:'ready',roomId:'room',transitionId:'transition-1',sourceEpoch:1});
+ } finally {player.clear();create.mockRestore();revoke.mockRestore();}
 });

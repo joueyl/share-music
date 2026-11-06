@@ -1,5 +1,3 @@
-use md5::Md5;
-use sha2::{Digest, Sha256};
 use std::{
     collections::HashMap,
     future::Future,
@@ -40,13 +38,8 @@ impl MusicCache {
     fn file(&self, hash: &str) -> PathBuf {
         self.root.join(format!("{hash}.audio"))
     }
-    fn valid(bytes: &[u8], hash: &str, size: u64) -> bool {
+    fn valid(bytes: &[u8], _key: &str, size: u64) -> bool {
         bytes.len() as u64 == size
-            && if hash.len() == 32 {
-                format!("{:x}", Md5::digest(bytes)) == hash
-            } else {
-                format!("{:x}", Sha256::digest(bytes)) == hash
-            }
     }
     pub async fn read(&self, hash: &str, size: u64) -> Result<Option<Vec<u8>>, String> {
         Self::validate(hash, size)?;
@@ -165,18 +158,17 @@ mod tests {
     }
     fn sample() -> (Vec<u8>, String) {
         let bytes = b"test audio bytes".to_vec();
-        let hash = format!("{:x}", Md5::digest(&bytes));
+        let hash = "a".repeat(32);
         (bytes, hash)
     }
     #[test]
-    fn md5_and_legacy_sha256_have_distinct_validated_keys() {
-        let (bytes, md5) = sample();
+    fn legacy_and_new_keys_do_not_validate_audio_digests() {
+        let (bytes, key) = sample();
         let size = bytes.len() as u64;
-        let sha = format!("{:x}", Sha256::digest(&bytes));
-        assert!(MusicCache::valid(&bytes, &md5, size));
-        assert!(MusicCache::valid(&bytes, &sha, size));
-        assert!(!MusicCache::valid(b"corrupt audio!!", &md5, size));
-        assert!(!MusicCache::valid(&bytes, &"0".repeat(32), size));
+        assert!(MusicCache::valid(&bytes, &key, size));
+        assert!(MusicCache::valid(&bytes, &"b".repeat(64), size));
+        assert!(MusicCache::valid(&vec![0; bytes.len()], &key, size));
+        assert!(!MusicCache::valid(&bytes[..bytes.len() - 1], &key, size));
     }
     #[tokio::test]
     async fn cache_survives_restart_and_does_not_download_on_second_play() {
@@ -207,7 +199,7 @@ mod tests {
         let (bytes, hash) = sample();
         let size = bytes.len() as u64;
         std::fs::create_dir_all(&fixture.0).unwrap();
-        std::fs::write(cache.file(&hash), vec![0; bytes.len()]).unwrap();
+        std::fs::write(cache.file(&hash), vec![0; bytes.len() - 1]).unwrap();
         assert!(cache.read(&hash, size).await.unwrap().is_none());
         assert!(cache
             .load_with(&hash, size, || async { Err("offline".into()) })
@@ -215,7 +207,7 @@ mod tests {
             .is_err());
         assert!(!cache.file(&hash).exists());
         assert!(cache
-            .load_with(&hash, size, || async { Ok(vec![0; bytes.len()]) })
+            .load_with(&hash, size, || async { Ok(vec![0; bytes.len() - 1]) })
             .await
             .is_err());
         assert!(!cache.file(&hash).exists());

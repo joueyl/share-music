@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { Database } from '../src/database';
 import { QqMusicService } from '../src/qq';
 import { RoomEngine } from '../src/engine';
@@ -8,7 +8,7 @@ import { normalizeAlbumCover, trackSchema } from '../../../packages/shared/src';
 const mid='001TestSong';
 function fixture(){
  const db=new Database(':memory:');let code=801,time=1000;
- const song={mid,name:'测试歌曲',singer:[{name:'测试歌手'}],album:{mid:'001Album',name:'专辑'},interval:120};
+ const song={file:{size_128mp3:1004},mid,name:'测试歌曲',singer:[{name:'测试歌手'}],album:{mid:'001Album',name:'专辑'},interval:120};
  const request=vi.fn(async(input:any,options:any)=>{
   const url=new URL(String(input));
   const body=url.pathname==='/login/channels'?{code:200,data:{channels:['qq','wechat'],sessionMode:'stored'}}:
@@ -94,21 +94,21 @@ it('does not retry rate limits, credential failures or explicit non-retryable bu
   expect(JSON.stringify(warn.mock.calls)).not.toMatch(/private|bad-shape|https?:/);
  }finally{warn.mockRestore();f.db.close();}
 });
-it('hashes a bounded QQ download, shares jobs, persists MID and reuses existing enqueue permissions/idempotency',async()=>{
+it('never downloads QQ audio to hash it, shares jobs, persists MID and reuses existing enqueue permissions/idempotency',async()=>{
  const f=fixture();try{
-  const bytes=Buffer.concat([Buffer.from([255,251,144,0]),Buffer.alloc(1000)]),hash=createHash('md5').update(bytes).digest('hex');
+  const bytes=Buffer.concat([Buffer.from([255,251,144,0]),Buffer.alloc(1000)]);
   const ref:{value?:MusicImport}={},engine=new RoomEngine(undefined,undefined,()=>1000,(url,digest)=>ref.value?.registered(url,digest)??false);
   const user=randomUUID(),room=engine.create('测试',user);engine.join(room.id,{id:user,name:'房主'});
   const download=vi.fn(async()=>new Response(bytes));
   const service=new MusicImport(engine,{call:vi.fn()},download as typeof fetch,f.db,()=>1000,f.service);ref.value=service;
   const requestId=randomUUID();const [a,b]=await Promise.all([service.addQq(room.id,user,mid,requestId),service.addQq(room.id,user,mid,requestId)]);
-  expect(a).toEqual(b);expect(a).toMatchObject({qqId:mid,contentHash:hash,sizeBytes:bytes.length});
-  expect(download).toHaveBeenCalledOnce();expect(engine.snapshot(room.id).playlist).toHaveLength(1);
+  expect(a).toEqual(b);expect(a).toMatchObject({qqId:mid,contentHash:expect.stringMatching(/^[a-f0-9]{32}$/),sizeBytes:bytes.length});
+  expect(download).not.toHaveBeenCalled();expect(engine.snapshot(room.id).playlist).toHaveLength(1);
   expect(()=>service.add(room.id,user,'123',requestId)).toThrow('COMMAND_ID_REUSED');
   expect(f.db.musicLibrary('',0,20).songs[0]).toMatchObject({qqId:mid,canAdd:true});
-  const prior=engine.snapshot(room.id);await service.playbackSource(room.id,user,a.id,true);
-  expect(download).toHaveBeenCalledTimes(2);expect(engine.snapshot(room.id)).toEqual(prior);
-  await service.addUploaded(room.id,user,hash,randomUUID());expect(engine.snapshot(room.id).playlist).toHaveLength(2);
+  const prior=engine.snapshot(room.id);expect((await service.playbackSource(room.id,user,a.id,true)).contentHash).toBe(a.contentHash);
+  expect(download).not.toHaveBeenCalled();expect(engine.snapshot(room.id)).toEqual(prior);
+  await service.addUploaded(room.id,user,a.contentHash,randomUUID());expect(engine.snapshot(room.id).playlist).toHaveLength(2);
   expect(()=>service.addQq(room.id,randomUUID(),mid,randomUUID())).toThrow('NOT_IN_ROOM');
  }finally{f.db.close();}
 });
@@ -146,4 +146,15 @@ it('normalizes real QQ suggestions anonymously and only treats explicit no-match
   f.request.mockResolvedValueOnce(Response.json({errorKey:'resource.not-found'},{status:422}));expect(await f.service.suggest('无结果')).toEqual({suggestions:[]});
   f.request.mockResolvedValueOnce(Response.json({retryable:false},{status:502}));await expect(f.service.suggest('故障')).rejects.toThrow('QQ_MUSIC_UNAVAILABLE');
  }finally{f.db.close();}
+});
+
+it('rejects unavailable QQ file sizes without downloading audio or saving a source',async()=>{
+ for(const size of [undefined,0,101*1024*1024]) {
+  const f=fixture();try {
+   f.song.file.size_128mp3=size as number;
+   const download=vi.fn(),service=new MusicImport(new RoomEngine(),{call:vi.fn()},download,f.db,()=>1000,f.service);
+   await expect(service.importQqSong(mid)).rejects.toThrow(/MUSIC_SOURCE_INVALID|MUSIC_TOO_LARGE/);
+   expect(download).not.toHaveBeenCalled();expect(f.db.getMusicSource('qq',`qq:128:${mid}`)).toBeUndefined();
+  } finally {f.db.close();}
+ }
 });

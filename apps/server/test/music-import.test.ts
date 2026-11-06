@@ -57,11 +57,11 @@ it('does not loop when refreshed links are also invalid and sanitizes transport 
  const secret=vi.fn(async()=>{throw Error('https://secret-provider-url/token');});
  await expect(downloadMusic('https://m801.music.126.net/a',secret)).rejects.toThrow(/^MUSIC_DOWNLOAD_FAILED$/);
 });
-it('refreshes URL and MD5 together without changing the queue or playback state',async()=>{
+it('refreshes URL while preserving the persistent cache key without changing the queue or playback state',async()=>{
  const f=fixture(),track=await f.service.add(f.room.id,f.user,'123',randomUUID());f.time(140000);
  f.call.mockImplementation(async method=>method==='song_detail'?{songs:[{id:123,name:'test',dt:120000}]}:{data:[{id:123,url:'https://m801.music.126.net/song.mp3',md5:'f'.repeat(32),size:bytes.length,type:'mp3'}]});
  const before=f.engine.snapshot(f.room.id);
- expect(await f.service.playbackSource(f.room.id,f.user,track.id,true)).toEqual({url:'https://m801.music.126.net/song.mp3',contentHash:'f'.repeat(32),sizeBytes:bytes.length});
+ expect(await f.service.playbackSource(f.room.id,f.user,track.id,true)).toEqual({url:'https://m801.music.126.net/song.mp3',contentHash:track.contentHash,sizeBytes:bytes.length});
  expect(f.engine.snapshot(f.room.id)).toEqual(before);expect(f.request).not.toHaveBeenCalled();
 });
 it('rechecks membership after awaiting remote work and retains a reusable database record',async()=>{
@@ -98,19 +98,19 @@ it('bounds downloads and rejects empty or non-audio responses',async()=>{
  expect(songCover({al:{picUrl:'http://p1.music.126.net/cover.jpg'}})).toBe('https://p1.music.126.net/cover.jpg');expect(songFilename({name:'曲名',ar:[{name:'歌手'}]})).toBe('曲名 - 歌手.mp3');
 });
 
-it('rejects missing/malformed provider checksums and sizes without fetching audio',async()=>{
- for(const metadata of [{size:4},{md5:'bad',size:4},{md5,size:0},{md5,size:'1004'},{md5,size:101*1024*1024}]){
+it('rejects missing/malformed provider sizes without fetching audio',async()=>{
+ for(const metadata of [{md5,size:0},{md5,size:'1004'},{md5,size:101*1024*1024}]){
   const f=fixture();f.call.mockImplementation(async method=>method==='song_detail'?{songs:[{id:123,name:'test',dt:120000}]}:{data:[{id:123,url:'https://m801.music.126.net/song.mp3',type:'mp3',...metadata}]});
   await expect(f.service.importSong('123')).rejects.toThrow(/MUSIC_SOURCE_INVALID|MUSIC_TOO_LARGE/);expect(f.request).not.toHaveBeenCalled();
  }
 });
-it('normalizes provider MD5 and replaces saved SHA metadata on reimport without downloading',async()=>{
+it('preserves legacy cache keys across reimport without downloading',async()=>{
  const f=fixture();const first=await f.service.importSong('123');
  f.db.saveMusicSource('netease','netease:standard:123',{...first,contentHash:'f'.repeat(64)});
  const call=f.call.getMockImplementation()!;f.call.mockImplementation(async method=>{const result=await call(method);if(method!=='song_detail')result.data[0].md5=md5.toUpperCase();return result;});
- expect((await f.service.importSong('123')).contentHash).toBe(md5);expect(f.call).toHaveBeenCalledTimes(4);expect(f.request).not.toHaveBeenCalled();
+ expect((await f.service.importSong('123')).contentHash).toBe('f'.repeat(64));expect(f.call).toHaveBeenCalledTimes(2);expect(f.request).not.toHaveBeenCalled();
 });
-it('leaves byte checksum verification to the client while rechecking proxy membership',async()=>{
+it('does not hash proxy bytes and still rechecks membership',async()=>{
  const f=fixture(),track=await f.service.add(f.room.id,f.user,'123',randomUUID());
  const corrupt=Buffer.alloc(bytes.length);f.request.mockResolvedValueOnce(new Response(corrupt));
  expect(await f.service.readAudio(f.room.id,f.user,track.id)).toEqual(corrupt);
@@ -118,7 +118,7 @@ it('leaves byte checksum verification to the client while rechecking proxy membe
  await expect(f.service.readAudio(f.room.id,f.user,track.id)).rejects.toThrow('NOT_IN_ROOM');
 });
 
-it('resolves an existing SHA queue entry to current MD5 metadata automatically',async()=>{
+it('resolves a legacy queue to the current persisted source key',async()=>{
  const f=fixture(),track=await f.service.add(f.room.id,f.user,'123',randomUUID());
  const room=f.engine.snapshot(f.room.id);const queued=room.playlist.find(t=>t.id===track.id)!;
  // Model a persisted pre-upgrade queue without mutating the engine snapshot.
@@ -149,4 +149,14 @@ it('checks room membership before and after a stage cover download and coalesces
  finish(new Response(new Uint8Array([1,2]),{headers:{'content-type':'image/jpeg'}}));expect((await first).bytes.length).toBe(2);await second;
  const late=f.service.coverImage(f.room.id,f.user,track.id);for(let i=0;i<12;i++)await Promise.resolve();f.engine.leave(f.room.id,f.user);
  finish(new Response(new Uint8Array([1,2]),{headers:{'content-type':'image/jpeg'}}));await expect(late).rejects.toThrow('NOT_IN_ROOM');
+});
+
+it('accepts missing or malformed upstream MD5 and keeps the cache key on refresh',async()=>{
+ for(const md5 of [undefined,'invalid']) {
+  const f=fixture(),call=f.call.getMockImplementation()!;
+  f.call.mockImplementation(async method=>{const result=await call(method);if(method!=='song_detail')result.data[0].md5=md5;return result;});
+  const first=await f.service.importSong('123'),next=await f.service.importSong('123',true);
+  expect(first.contentHash).toMatch(/^[a-f0-9]{32}$/);expect(next.contentHash).toBe(first.contentHash);
+  expect(f.request).not.toHaveBeenCalled();
+ }
 });

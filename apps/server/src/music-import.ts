@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { DomainError, RoomEngine } from './engine';
 import type { TrackMetadata } from '../../../packages/shared/src';
 import { musicAudioHost, normalizeAlbumCover, trackSchema } from '../../../packages/shared/src';
@@ -126,7 +126,7 @@ export class MusicImport {
   }
   private async asset(songId:string,force:boolean):Promise<TrackMetadata> {
     const sourceId=`netease:standard:${songId}`,cached=await this.db?.getMusicSource('netease',sourceId);
-    if(!force&&cached?.sourceUrl&&/^[a-f0-9]{32}$/.test(cached.contentHash)&&(cached.sourceExpiresAt??0)>this.now()+30000) {
+    if(!force&&cached?.sourceUrl&&(cached.sourceExpiresAt??0)>this.now()+30000) {
       const track=trackSchema.parse(cached);musicDownloadUrl(track.sourceUrl!);this.remember(track.sourceUrl!,track.contentHash);return track;
     }
     const fetchedAt=this.now();
@@ -136,9 +136,9 @@ export class MusicImport {
     if(audio.freeTrialInfo)throw new DomainError('MUSIC_TRIAL_ONLY');
     if(audio.type&&audio.type.toLowerCase()!=='mp3')throw new DomainError('MUSIC_AUDIO_UNSUPPORTED');
     const sourceUrl=musicDownloadUrl(audio.url).href;
-    // Trust only validated provider metadata here; the client verifies the downloaded bytes.
-    const contentHash=typeof audio.md5==='string'?audio.md5.toLowerCase():'',sizeBytes=audio.size,durationMs=Math.round(Number(song.dt??song.duration));
-    if(!/^[a-f0-9]{32}$/.test(contentHash)||!Number.isSafeInteger(sizeBytes)||sizeBytes<1)throw new DomainError('MUSIC_SOURCE_INVALID');
+    // contentHash is a persistent cache/library key, not a downloaded-byte checksum.
+    const contentHash=cached?.contentHash??(typeof audio.md5==='string'&&/^[a-f0-9]{32}$/i.test(audio.md5)?audio.md5.toLowerCase():randomUUID().replaceAll('-','')),sizeBytes=audio.size,durationMs=Math.round(Number(song.dt??song.duration));
+    if(!Number.isSafeInteger(sizeBytes)||sizeBytes<1)throw new DomainError('MUSIC_SOURCE_INVALID');
     if(sizeBytes>MAX)throw new DomainError('MUSIC_TOO_LARGE');
     if(typeof song.name!=='string'||!song.name.trim()||!Number.isFinite(durationMs)||durationMs<1||durationMs>86400000)throw new DomainError('MUSIC_SOURCE_INVALID');
     const ttl=Number(audio.expi),seconds=Number.isFinite(ttl)&&ttl>0?Math.min(ttl,86400):300;
@@ -162,13 +162,13 @@ export class MusicImport {
       const track=trackSchema.parse(cached);musicDownloadUrl(track.sourceUrl!);this.remember(track.sourceUrl!,track.contentHash);return track;
     }
     const {song,url,detail}=await this.qq.audio(mid),sourceUrl=musicDownloadUrl(url).href;
-    // QQ's documented vkey response has no checksum. Hash a bounded download;
-    // never invent a digest or weaken the existing client integrity checks.
-    const bytes=await downloadMusic(sourceUrl,this.request),declared=detail?.file?.size_128mp3;
-    if(Number.isSafeInteger(declared)&&declared>0&&declared!==bytes.length)throw new DomainError('MUSIC_SOURCE_INVALID');
+    // Import/refresh only reads provider metadata; never download a song to hash it.
+    const sizeBytes=detail?.file?.size_128mp3;
+    if(!Number.isSafeInteger(sizeBytes)||sizeBytes<1)throw new DomainError('MUSIC_SOURCE_INVALID');
+    if(sizeBytes>MAX)throw new DomainError('MUSIC_TOO_LARGE');
     const track=trackSchema.parse({id:cached?.id??randomUUID(),name:song.name.slice(0,200),artists:song.artists.slice(0,1000),album:song.album.slice(0,500),coverUrl:normalizeAlbumCover(song.coverUrl),
-      durationMs:song.durationMs,sizeBytes:bytes.length,lossless:false,bitrateBps:Math.max(1,Math.min(20000000,Math.round(bytes.length*8000/song.durationMs))),
-      contentHash:createHash('md5').update(bytes).digest('hex'),sourceUrl,sourceExpiresAt:this.now()+300000,qqId:mid});
+      durationMs:song.durationMs,sizeBytes,lossless:false,bitrateBps:Math.max(1,Math.min(20000000,Math.round(sizeBytes*8000/song.durationMs))),
+      contentHash:cached?.contentHash??randomUUID().replaceAll('-',''),sourceUrl,sourceExpiresAt:this.now()+300000,qqId:mid});
     await this.db?.saveMusicDetail('qq',sourceId,detail);await this.db?.saveMusicSource('qq',sourceId,track);
     this.remember(sourceUrl,track.contentHash);return track;
   }
@@ -204,7 +204,7 @@ export class MusicImport {
     let current=track,bytes:Buffer;
     try{bytes=await downloadMusic(current.sourceUrl!,this.request);}
     catch(e){if(!(e instanceof DomainError)||e.code!=='MUSIC_LINK_EXPIRED')throw e;current=await this.resolve(track,true);bytes=await downloadMusic(current.sourceUrl!,this.request);}
-    // The proxy bounds traffic and rechecks membership; checksum comparison belongs to the client.
+    // The proxy bounds traffic and rechecks membership; no audio digest is computed.
     return bytes;
   }
 }

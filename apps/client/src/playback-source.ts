@@ -16,7 +16,7 @@ export async function loadPlaybackSource(source: string | ((refresh?:boolean) =>
   const resolve = async (refresh:boolean) => {
     const result=typeof source==='string'?source:await source(refresh);
     const link=typeof result==='string'?{url:result}:result;
-    // URL and checksum are a single provider response, never mix a new URL with an old MD5.
+    // Refresh URL and transfer metadata together; contentHash is only a cache key.
     if((link.contentHash===undefined)!==(link.sizeBytes===undefined))throw new Error('PLAYBACK_AUDIO_METADATA_INVALID');
     current={...track,sourceUrl:link.url,...(link.contentHash!==undefined?{contentHash:link.contentHash,sizeBytes:link.sizeBytes!}:{})};
     return link.url;
@@ -35,8 +35,8 @@ export async function loadPlaybackSource(source: string | ((refresh?:boolean) =>
     } catch(error) {
       const code=error instanceof Error?error.message:String(error);
       if(attempt===1||typeof source==='string'||!['PLAYBACK_AUDIO_DOWNLOAD_FAILED','PLAYBACK_AUDIO_INTEGRITY_FAILED','MUSIC_LINK_EXPIRED','MUSIC_DOWNLOAD_FAILED','MUSIC_CONTENT_CHANGED'].includes(code))throw error;
-      // Refresh once for failed/expired or checksum-mismatched downloads, including Web audio.
-      // Do not allocate a playback Blob or report ready until the retry has verified successfully.
+      // Silently ask the backend for a fresh link once after expiry (including HTTP 403).
+      // Do not allocate a playback Blob or report ready before the transfer completes.
     }
   }
   if(!data)throw new Error('PLAYBACK_AUDIO_DOWNLOAD_FAILED');

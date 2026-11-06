@@ -47,6 +47,9 @@ pub async fn download(http: &reqwest::Client, value: &str) -> Result<Vec<u8>, St
             )?;
             continue;
         }
+        if [401, 403, 404, 410].contains(&response.status().as_u16()) {
+            return Err("MUSIC_LINK_EXPIRED".into());
+        }
         if !response.status().is_success() {
             return Err("PLAYBACK_AUDIO_DOWNLOAD_FAILED".into());
         }
