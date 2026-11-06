@@ -54,7 +54,7 @@ export class MusicImport {
   private reads=new Map<string,Promise<Buffer>>();
   private coverReads=new Map<string,ReturnType<typeof downloadCoverImage>>();
   private registeredSources=new Set<string>();
-  constructor(private engine:RoomEngine,private netease:Pick<NeteaseService,'call'>&Partial<Pick<NeteaseService,'songBatch'>>,private request:typeof fetch=fetch,private db?:DatabaseStore,private now=Date.now,private qq?:Pick<QqMusicService,'audio'>) {}
+  constructor(private engine:RoomEngine,private netease:Pick<NeteaseService,'call'|'songBatch'>,private request:typeof fetch=fetch,private db?:DatabaseStore,private now=Date.now,private qq?:Pick<QqMusicService,'audio'>) {}
   private remember(url:string,hash:string){this.registeredSources.add(hash+':'+url);if(this.registeredSources.size>10000)this.registeredSources.delete(this.registeredSources.values().next().value!);}
   registered(url:string,hash:string){return this.registeredSources.has(hash+':'+url);}
   async authorize(track:TrackMetadata) {
@@ -185,7 +185,9 @@ export class MusicImport {
       const track=trackSchema.parse(cached);musicDownloadUrl(track.sourceUrl!);this.remember(track.sourceUrl!,track.contentHash);return track;
     }
     const fetchedAt=prepared?.fetchedAt??this.now();
-    const [detail,source]=prepared?[prepared.detail,prepared.source]:await Promise.all([this.netease.call('song_detail',{ids:songId}),this.netease.call('song_url_v1',{id:songId,level:'standard'})]);
+    // Single-song imports and renewals use the same validated batch wire format.
+    // Use the same non-v1 source request without extra route retries or fallbacks.
+    const {detail,source}=prepared??await this.netease.songBatch([songId]);
     const song=detail.songs?.find((s:any)=>String(s.id)===songId),audio=source.data?.find((s:any)=>String(s.id)===songId);
     if(!song||!audio?.url||(audio.code&&audio.code!==200))throw new DomainError('MUSIC_NOT_AVAILABLE');
     if(audio.freeTrialInfo)throw new DomainError('MUSIC_TRIAL_ONLY');

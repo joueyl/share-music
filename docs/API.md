@@ -121,7 +121,7 @@ members[], playlist[], playbackMode, playback, pending, requests[], serverNow
 ## 3. 歌曲：只保存音乐直链
 
 MySQL 保存音乐来源 ID、直链、过期时间和元数据，音频文件不在服务端持久化。
-导入和续链使用 `song_url_v1` 返回的链接、`size` 与有效期，不下载音频或计算哈希；大小必须为 1–100 MiB 的整数字节数。`md5` 可作为新记录的缓存键候选，缺失或无效时生成随机键，已有键保持不变；不校验音频摘要。
+房间单首导入、播放取链、强制续链及批量添加统一通过固定 `/api/batch` 的播放器子请求取得链接、`size` 与有效期，播放器子请求为非 v1 `song_url`（`br=128000`），不调用或回退 v1，不下载音频或计算哈希；大小必须为 1–100 MiB 的整数字节数。`md5` 可作为新记录的缓存键候选，缺失或无效时生成随机键，已有键保持不变；不校验音频摘要。
 
 ### TrackMetadata
 
@@ -175,7 +175,7 @@ body：`{"songId":"123","requestId":"UUID"}`。
 ```
 
 - 每批 1–50 首，songId 与 requestId 各自不可重复；每项使用独立 UUID，不接受上游路由、Cookie 或 URL。
-- 服务端对未缓存/接近过期的歌曲通过 Hana 公开 `createRequest` 调用固定 `/api/batch`（子请求参数序列化为 JSON 字符串），合并 `/api/v3/song/detail` 与 `/api/song/enhance/player/url/v1` 两个多歌曲只读请求；有效链接仍复用，不下载音频。
+- 服务端对未缓存/接近过期的歌曲通过 Hana 公开 `createRequest` 调用一次固定 `/api/batch`（每个子请求参数编码为 JSON 字符串），合并 `/api/v3/song/detail` 与 `/api/song/enhance/player/url` 两个多歌曲只读请求；播放器参数为 `ids` 字符串数组的 JSON 与 `br=128000`，不使用 v1 的 level/encodeType。有效链接仍复用，不下载音频。
 - 返回 `{results:[{songId,requestId,ok:true,track}|{songId,requestId,ok:false,error}]}`，结果和入队顺序与输入一致；逐首检查权限、容量及幂等。非原子事务，成功项不因其他歌曲失败回滚。
 - batch 顶层或子请求的数值业务拒绝返回 `NETEASE_UNAVAILABLE`（明确 301 为 `NETEASE_LOGIN_REQUIRED`）；缺字段或字段类型异常才是 `NETEASE_INVALID_RESPONSE`。服务端只打印固定阶段、数值代码及类型的脱敏诊断，不输出原始响应或对失败歌曲追加上游请求。
 - 每用户每 10 分钟 200 首，按歌曲数而非 HTTP 请求数计费；同时最多两个批量任务，其他单曲导入限制不变。
@@ -223,7 +223,7 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 ## 4. 网易云与管理
 
 `GET /api/netease/:method` 使用 query，`POST /api/netease/:method` 使用 JSON；均需 Bearer token。
-允许方法：search、search_suggest、cloudsearch、simi_song、song_detail、song_url、song_url_v1、lyric、lyric_new、playlist_detail、playlist_track_all、user_playlist、user_account、user_cloud、login_status、album。
+允许方法：search、search_suggest、cloudsearch、simi_song、song_detail、song_url、lyric、lyric_new、playlist_detail、playlist_track_all、user_playlist、user_account、user_cloud、login_status、album。
 
 相似推荐：`GET /api/netease/simi_song?id=歌曲网易云ID&limit=12&offset=0`，返回上游 `songs` 列表。id 必须为 1–20 位数字，limit 为 1–100，offset 为 0–100000 的整数。客户端根据当前播放加载，过滤当前歌曲、重复结果和队列已有歌曲；点选后通过既有音乐添加接口入队，不自动播放。此功能需要同步更新服务端白名单。
 仅转发白名单参数，禁止注入 Cookie、代理和地址。详情见 [NETEASE.md](NETEASE.md)、[MUSIC-SEARCH.md](MUSIC-SEARCH.md)。

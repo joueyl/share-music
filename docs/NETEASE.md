@@ -1,6 +1,6 @@
 # 网易云服务端登录
 
-服务端使用固定版本 `hana-music-api` 3.2.0，通过公开 Promise SDK `invokeModule(identifier, query, config)` 编程式调用，不部署或连接独立的 hana HTTP 服务。参考 [API 文档](https://hana-music-api.netlify.app/api/)及[编程式调用](https://hana-music-api.netlify.app/guide/programmatic-api)。SDK 要求 **Node.js 24+、ESM**；项目仍使用 NestJS CommonJS，通过原生 Worker 内的动态 `import()` 加载 SDK，避免编译器把导入转换成 require。
+服务端使用固定版本 `hana-music-api` 3.2.0，通常通过公开 Promise SDK `invokeModule(identifier, query, config)` 编程式调用；固定只读批量请求使用 SDK 的公开 `createRequest`，不部署或连接独立的 hana HTTP 服务。参考 [API 文档](https://hana-music-api.netlify.app/api/)及[编程式调用](https://hana-music-api.netlify.app/guide/programmatic-api)。SDK 要求 **Node.js 24+、ESM**；项目仍使用 NestJS CommonJS，通过原生 Worker 内的动态 `import()` 加载 SDK，避免编译器把导入转换成 require。
 
 ## 从旧依赖升级
 
@@ -23,7 +23,7 @@
 
 ## 自动携带凭据
 
-业务代码通过 `app.netease.call(method, params)` 统一调用，始终从数据库取最新 Cookie 注入，不依赖进程内缓存，重启仍有效。已开放的只读方法：search、search_suggest、cloudsearch、simi_song、song_detail、song_url、song_url_v1、lyric、lyric_new、playlist_detail、playlist_track_all、user_playlist、user_account、user_cloud、login_status、album。
+业务代码通过 `app.netease.call(method, params)` 统一调用，始终从数据库取最新 Cookie 注入，不依赖进程内缓存，重启仍有效。已开放的只读方法：search、search_suggest、cloudsearch、simi_song、song_detail、song_url、lyric、lyric_new、playlist_detail、playlist_track_all、user_playlist、user_account、user_cloud、login_status、album。
 
 HTTP 路径 `GET /api/netease/:method`（查询参数）或 `POST /api/netease/:method`（JSON）。调用者必须携带本项目登录获得的 `Authorization: Bearer ...`。例如 `/api/netease/song_detail?ids=123`。服务端内部再携带网易云 Cookie，客户端不需要知道该凭据。客户端提供的 cookie、代理、IP、域名等覆盖参数不会被转发。没有开放第三方包中的账号修改、登出和任意模块调用接口；需要更多接口时明确扩展方法及参数白名单。
 
@@ -48,6 +48,24 @@ Nginx `/loginServe` 转发需覆盖 `Host $http_host` 和 `X-Forwarded-Proto $sc
 
 `/loginServe` 也可切换 QQ 音乐扫码，两种音源会话独立；网易云原有配置和操作不变。QQ 部署与范围见 [QQ-MUSIC.md](QQ-MUSIC.md)。
 
+## 批量请求的参数适配
+
+Hana 3.2.0 的 `batch` 模块输入要求子请求参数为对象，但默认加密请求直接保留嵌套对象；网易云 `/api/batch` 要求每个子请求参数为 JSON 字符串。房间单首添加、播放取链、强制续链与批量添加统一使用这条 batch 路径；播放器子请求使用非 v1 `song_url`（`br=128000`），不调用或回退 v1，不在失败后追加接口轮询。项目仅对固定的 `/api/v3/song/detail` 和 `/api/song/enhance/player/url`，在 Worker 内序列化参数，再调用公开 `createRequest('/api/batch', data, config)`。不修改 node_modules，不开放任意上游路径，继续沿用 Cookie 注入、超时、无自动重试及逐项权限/缓存规则。
+
+此前空 Cookie 对照确认了对象参数的业务码 400 与 JSON 字符串参数的正确编码；当前播放器子请求已改为非 v1 `song_url`，ids 使用 JSON 字符串数组、br 固定 128000，不再使用 level/encodeType。新接口的一次空 Cookie 对照返回子请求 200，但所测歌曲音频项为 404、无链接，未证明完整歌曲可播放。该验证不代表登录歌曲的完整播放权限；隔离入队验证中试听音源仍会被 `MUSIC_TRIAL_ONLY` 拦截，不绕过试听限制。修复仅需更新、构建并重启后端，客户端批量接口不变。
+
+### batch 响应校验失败
+
+batch 的 HTTP/SDK 返回成功不代表所有子请求成功。服务端出现 `网易云 batch 响应校验失败` 时，仅记录固定 `phase`（`business_rejected` 或 `response_shape`）、`stage`（batch / song_detail / song_url）、有限数值代码，以及代码/详情/列表字段的类型；不记录完整响应、歌曲 ID、URL、Cookie 或上游消息。
+
+已存在的数值业务拒绝（如根响应 400、播放器子请求 -460）返回 `NETEASE_UNAVAILABLE`，明确的 301 返回 `NETEASE_LOGIN_REQUIRED`；缺少字段或类型不匹配才返回 `NETEASE_INVALID_RESPONSE`。整批只记录一次对应的上游失败，不按 50 首重新请求或自动回退；有错误不视为已恢复。定位线上失败需取得这条脱敏日志，仅有客户端错误名不足以确认原因。
+
+## 单曲取链失败的脱敏定位
+
+`网易云 SDK 调用失败` 中的方法名允许数字后缀，不会误显示为 `unknown`。保留阶段、数值状态及业务码；SDK 请求事件仅映射为固定 `upstreamStep` 标签：`anonymous_registration`（匿名初始化）、`song_url`（非 v1 播放器取链）、`batch`（批量读取）。未知路径不输出标签，不记录事件原始 URL、查询、请求头、Cookie 或错误消息。
+
+`phase=request` 和 `bodyCode=-460` 只能用于定位 SDK 请求阶段的拒绝，不能仅凭此认定 Cookie 失效、批量接口故障或服务器 IP 已被封。先结合具体操作及固定步骤标签核对；当前不为此错误额外自动重试，不伪造来源 IP、不自动清空登录态。诊断修复本身不代表恢复取链；房间音乐业务现改为统一使用上述固定 batch 路径，播放器子请求及通用代理均改用非 v1 `song_url`；原 `song_url_v1` 代理调用现返回 `NETEASE_METHOD_NOT_ALLOWED`。需要更新、构建并重启后端，由线上实际进程验证；若 batch 同样被拒绝则返回真实失败，不保证解除任何上游限制，无需升级客户端。
+
 ## 服务端每日任务与播放打卡
 
 - 使用数据库 `netease.cookie` 中的 MUSIC_U 登录态，不是项目 Bearer token、TOKEN_SECRET 或 QQ 会话。Asia/Shanghai 每天 **08:00** 并行尝试安卓签到（`daily_signin`，`type=0`）、PC 签到（`daily_signin`，`type=1`）、云贝签到（`yunbei_sign`）；等待三项均结束（包括失败或超时）后，再读取 `vip_tasks` 的 `data.taskList[].taskItems[]`，仅领取 `needReceive === true` 的真实 taskId；同时兼容带 unGetIds 的响应。调用 `vip_growthpoint_get` 时去重并有界校验 ID；无待领取 ID 不伪造奖励，不做任务刷取或付费操作。
@@ -58,11 +76,3 @@ Nginx `/loginServe` 转发需覆盖 `Host $http_host` 和 `X-Forwarded-Proto $sc
 - 这些副作用方法只允许服务端内部固定参数调用，`/api/netease/:method` 仍保持只读白名单。每日任务日志仅输出固定任务名和确认状态；听歌打卡不打印响应 body、歌曲 ID、来源 ID 或上报时长，成功时保持安静，仅保留失败/超时和队列满等固定异常提示，不输出凭据或上游原始异常。SDK 失败诊断仍按前述脱敏规则保留。只有真实账号联调才能验收签到、领取或排行结果，单元测试不代表已获得奖励。
 
 已核对 hana-music-api 3.2.0 的 daily_signin、yunbei_sign、vip_tasks、vip_growthpoint_get、scrobble 实现。新 SDK 的 scrobble 在一次模块调用内依次发送 startplay 和 play 两个请求，使用 SDK 内置的 clientlog/eapi 路径及客户端身份参数；队列、总时长上报与凭据隔离不变，禁用自动重试。返回 200 仍不证明排行、时长或奖励实际入账，必须真实账号核验；不额外增加第三方 HTTP 服务或定时框架。
-
-## SDK 与 batch 脱敏诊断
-
-SDK 日志允许含数字后缀的方法名，不再误记 unknown；仅映射匿名初始化、播放器取链及 batch 的固定步骤标签，不输出 URL、Cookie 或原始消息。batch 顶层或子请求的数值业务拒绝按不可用/登录错误返回，只有缺字段或类型错误才是 NETEASE_INVALID_RESPONSE；校验失败仅打印一条固定阶段、数值代码及字段类型日志，不额外重试。
-
-## batch 参数编码
-
-Hana 3.2.0 batch 模块输入为对象，但上游需要 JSON 字符串。固定两项只读子请求在 Worker 内序列化后，通过公开 createRequest('/api/batch') 调用；不开放任意上游路径，不修改依赖源码，保留凭据注入、超时及禁用重试。

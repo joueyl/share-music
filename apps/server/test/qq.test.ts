@@ -100,7 +100,7 @@ it('never downloads QQ audio to hash it, shares jobs, persists MID and reuses ex
   const ref:{value?:MusicImport}={},engine=new RoomEngine(undefined,undefined,()=>1000,(url,digest)=>ref.value?.registered(url,digest)??false);
   const user=randomUUID(),room=engine.create('测试',user);engine.join(room.id,{id:user,name:'房主'});
   const download=vi.fn(async()=>new Response(bytes));
-  const service=new MusicImport(engine,{call:vi.fn()},download as typeof fetch,f.db,()=>1000,f.service);ref.value=service;
+  const service=new MusicImport(engine,{call:vi.fn(),songBatch:vi.fn()},download as typeof fetch,f.db,()=>1000,f.service);ref.value=service;
   const requestId=randomUUID();const [a,b]=await Promise.all([service.addQq(room.id,user,mid,requestId),service.addQq(room.id,user,mid,requestId)]);
   expect(a).toEqual(b);expect(a).toMatchObject({qqId:mid,contentHash:expect.stringMatching(/^[a-f0-9]{32}$/),sizeBytes:bytes.length});
   expect(download).not.toHaveBeenCalled();expect(engine.snapshot(room.id).playlist).toHaveLength(1);
@@ -152,7 +152,7 @@ it('rejects unavailable QQ file sizes without downloading audio or saving a sour
  for(const size of [undefined,0,101*1024*1024]) {
   const f=fixture();try {
    f.song.file.size_128mp3=size as number;
-   const download=vi.fn(),service=new MusicImport(new RoomEngine(),{call:vi.fn()},download,f.db,()=>1000,f.service);
+   const download=vi.fn(),service=new MusicImport(new RoomEngine(),{call:vi.fn(),songBatch:vi.fn()},download,f.db,()=>1000,f.service);
    await expect(service.importQqSong(mid)).rejects.toThrow(/MUSIC_SOURCE_INVALID|MUSIC_TOO_LARGE/);
    expect(download).not.toHaveBeenCalled();expect(f.db.getMusicSource('qq',`qq:128:${mid}`)).toBeUndefined();
   } finally {f.db.close();}

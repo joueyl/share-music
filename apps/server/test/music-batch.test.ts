@@ -6,7 +6,7 @@ import { MusicImport } from '../src/music-import';
 import { NeteaseService, musicMethods } from '../src/netease';
 import { ApiController } from '../src/controller';
 import { createHanaInvoker } from '../src/hana-music';
-const detailRoute='/api/v3/song/detail',urlRoute='/api/song/enhance/player/url/v1';
+const detailRoute='/api/v3/song/detail',urlRoute='/api/song/enhance/player/url';
 const databases:Database[]=[];afterEach(()=>databases.splice(0).forEach(db=>db.close()));
 function fixture(){
  const db=new Database(':memory:');databases.push(db);
@@ -27,7 +27,7 @@ it('uses one actual SDK batch with two fixed multi-song read routes and preserve
  const f=fixture(),result=await f.controller.addNeteaseBatch(f.room.id,{items:f.items},'Bearer test');
  expect(result?.results.every(item=>item.ok)).toBe(true);expect(f.api).toHaveBeenCalledOnce();expect(f.api.mock.calls[0][0]).toBe('batch');
  const params=f.api.mock.calls[0][1];expect(params[detailRoute]).toEqual({c:'[{"id":1},{"id":2},{"id":3}]'});
- expect(params[urlRoute]).toEqual({ids:'[1,2,3]',level:'standard',encodeType:'flac'});
+ expect(params[urlRoute]).toEqual({ids:'["1","2","3"]',br:128000});
  expect(f.engine.snapshot(f.room.id).playlist.map(track=>track.neteaseId)).toEqual(['1','2','3']);
  expect(f.request).not.toHaveBeenCalled();expect(f.flush).toHaveBeenCalledTimes(2);expect(f.limit).toHaveBeenCalledTimes(3);
  expect(musicMethods.has('batch')).toBe(false);await expect(f.netease.call('batch',{'/api/private/write':'{}'})).rejects.toThrow('NETEASE_METHOD_NOT_ALLOWED');
@@ -46,7 +46,7 @@ it('returns per-song failures while keeping successful items in order, and retri
  expect(result.map(item=>item.ok)).toEqual([true,false,true]);expect(result[1]).toMatchObject({songId:'2',error:'MUSIC_NOT_AVAILABLE'});
  expect(f.engine.snapshot(f.room.id).playlist.map(track=>track.neteaseId)).toEqual(['1','3']);
  const retried=await f.service.addBatch(f.room.id,f.user,[f.items[1]]);expect(retried[0].ok).toBe(true);expect(f.api).toHaveBeenCalledTimes(2);
- expect((f.api.mock.calls[1][1][urlRoute] as {ids:string}).ids).toBe('[2]');
+ expect((f.api.mock.calls[1][1][urlRoute] as {ids:string}).ids).toBe('["2"]');
 });
 it('validates input, authentication, capacity and membership before contacting upstream',async()=>{
  const f=fixture();
@@ -98,12 +98,52 @@ it('accepts QQ batches through the project endpoint without pretending QQ suppor
  await controller.addQqBatch(f.room.id,{items},'Bearer test');expect(audio).toHaveBeenCalledTimes(2);expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(2);
 });
 
+it('regresses the all-50-invalid-response failure through the actual worker serialization boundary',async()=>{
+ const f=fixture();
+ const module='data:text/javascript;base64,'+Buffer.from(`
+ export async function invokeModule(){return {status:200,body:{code:400},cookie:[]};}
+ export async function createRequest(path,data){
+  if(path!=='/api/batch'||typeof data['/api/v3/song/detail']!=='string'||typeof data['/api/song/enhance/player/url']!=='string')return {status:200,body:{code:400},cookie:[]};
+  const ids=JSON.parse(JSON.parse(data['/api/song/enhance/player/url']).ids);
+  return {status:200,cookie:[],body:{code:200,'/api/v3/song/detail':{code:200,songs:ids.map(id=>({id,name:'song '+id,dt:120000}))},'/api/song/enhance/player/url':{code:200,data:ids.map(id=>({id,url:'https://m801.music.126.net/'+id+'.mp3',size:4,type:'mp3',code:200,expi:300}))}}};
+ }`).toString('base64');
+ const api=vi.fn(createHanaInvoker(module)),netease=new NeteaseService(f.db,api,()=>1000);
+ const importer=new MusicImport(f.engine,netease,f.request,f.db,()=>1000);
+ vi.spyOn(f.service,'registered').mockImplementation((url,key)=>importer.registered(url,key));
+ const items=Array.from({length:50},(_,i)=>({songId:String(i+1),requestId:randomUUID()}));
+ const results=await importer.addBatch(f.room.id,f.user,items);
+ expect(results.every(result=>result.ok)).toBe(true);expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(50);
+ expect(api).toHaveBeenCalledOnce();expect(api.mock.calls[0][0]).toBe('batch');expect(f.request).not.toHaveBeenCalled();
+});
+
+it('single enqueue and forced renewal both use one fixed batch instead of a direct song_url call',async()=>{
+ const f=fixture(),track=await f.service.add(f.room.id,f.user,'1',randomUUID());
+ expect(track.neteaseId).toBe('1');expect(f.api).toHaveBeenCalledOnce();
+ expect(f.api.mock.calls[0][0]).toBe('batch');expect((f.api.mock.calls[0][1][urlRoute] as {ids:string}).ids).toBe('["1"]');
+ const prior=f.engine.snapshot(f.room.id),source=await f.service.playbackSource(f.room.id,f.user,track.id,true);
+ expect(source.contentHash).toBe(track.contentHash);expect(f.api).toHaveBeenCalledTimes(2);
+ expect(f.api.mock.calls.every(([name])=>name==='batch')).toBe(true);expect(f.engine.snapshot(f.room.id)).toEqual(prior);
+ expect(f.request).not.toHaveBeenCalled();
+});
+it('renews a proxy CDN 403 via the fixed batch once without retrying the direct endpoint',async()=>{
+ const f=fixture(),track=await f.service.add(f.room.id,f.user,'1',randomUUID());
+ f.request.mockResolvedValueOnce(new Response(null,{status:403})).mockResolvedValueOnce(new Response(new Uint8Array([1,2,3,4])));
+ const before=f.engine.snapshot(f.room.id);expect(await f.service.readAudio(f.room.id,f.user,track.id)).toEqual(Buffer.from([1,2,3,4]));
+ expect(f.api.mock.calls.map(([name])=>name)).toEqual(['batch','batch']);expect(f.request).toHaveBeenCalledTimes(2);
+ expect(f.engine.snapshot(f.room.id)).toEqual(before);
+});
+it('does not fall back or loop when the batch route is itself rejected for a single song',async()=>{
+ const f=fixture();f.api.mockRejectedValueOnce({status:400,body:{code:-460}});
+ await expect(f.service.add(f.room.id,f.user,'1',randomUUID())).rejects.toThrow('NETEASE_UNAVAILABLE');
+ expect(f.api).toHaveBeenCalledOnce();expect(f.api.mock.calls[0][0]).toBe('batch');expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(0);
+});
+
 it.each([
  [{code:400,msg:'private upstream body'},'NETEASE_UNAVAILABLE','business_rejected','batch'],
- [{code:200,[detailRoute]:{code:200,songs:[]},[urlRoute]:{code:-460,msg:'private upstream body'}},'NETEASE_UNAVAILABLE','business_rejected','song_url_v1'],
+ [{code:200,[detailRoute]:{code:200,songs:[]},[urlRoute]:{code:-460,msg:'private upstream body'}},'NETEASE_UNAVAILABLE','business_rejected','song_url'],
  [{code:200,[detailRoute]:{code:301},[urlRoute]:{code:200,data:[]}},'NETEASE_LOGIN_REQUIRED','business_rejected','song_detail'],
  [{code:200,[detailRoute]:{code:200,songs:{}},[urlRoute]:{code:200,data:[]}},'NETEASE_INVALID_RESPONSE','response_shape','song_detail'],
- [{code:200,[detailRoute]:{code:200,songs:[]},[urlRoute]:'private unexpected string'},'NETEASE_INVALID_RESPONSE','response_shape','song_url_v1'],
+ [{code:200,[detailRoute]:{code:200,songs:[]},[urlRoute]:'private unexpected string'},'NETEASE_INVALID_RESPONSE','response_shape','song_url'],
 ])('distinguishes business rejection from shape errors using only sanitized batch diagnostics',async(body,error,phase,stage)=>{
  const f=fixture();f.api.mockResolvedValueOnce({body} as any);
  await expect(f.netease.songBatch(['1'])).rejects.toThrow(error);
@@ -119,25 +159,17 @@ it('does not mark all nested -460 failures as invalid response or issue fifty ex
  expect(result).toHaveLength(50);expect(result.every(item=>!item.ok&&item.error==='NETEASE_UNAVAILABLE')).toBe(true);
  expect(f.api).toHaveBeenCalledOnce();expect(f.log).toHaveBeenCalledOnce();
  const diagnostic=JSON.parse((f.log.mock.calls[0][0] as string).slice('网易云 batch 响应校验失败 '.length));
- expect(diagnostic).toMatchObject({phase:'business_rejected',stage:'song_url_v1',rootCode:200,sourceCode:-460});
+ expect(diagnostic).toMatchObject({phase:'business_rejected',stage:'song_url',rootCode:200,sourceCode:-460});
  expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(0);
 });
 
-
-it('regresses the all-50-invalid-response failure through the actual worker serialization boundary',async()=>{
+it('disables v1 direct-link proxy calls and sends only the non-v1 source route with 128K bitrate',async()=>{
  const f=fixture();
- const module='data:text/javascript;base64,'+Buffer.from(`
- export async function invokeModule(){return {status:200,body:{code:400},cookie:[]};}
- export async function createRequest(path,data){
-  if(path!=='/api/batch'||typeof data['/api/v3/song/detail']!=='string'||typeof data['/api/song/enhance/player/url/v1']!=='string')return {status:200,body:{code:400},cookie:[]};
-  const ids=JSON.parse(JSON.parse(data['/api/song/enhance/player/url/v1']).ids);
-  return {status:200,cookie:[],body:{code:200,'/api/v3/song/detail':{code:200,songs:ids.map(id=>({id,name:'song '+id,dt:120000}))},'/api/song/enhance/player/url/v1':{code:200,data:ids.map(id=>({id,url:'https://m801.music.126.net/'+id+'.mp3',size:4,type:'mp3',code:200,expi:300}))}}};
- }`).toString('base64');
- const api=vi.fn(createHanaInvoker(module)),netease=new NeteaseService(f.db,api,()=>1000);
- const importer=new MusicImport(f.engine,netease,f.request,f.db,()=>1000);
- vi.spyOn(f.service,'registered').mockImplementation((url,key)=>importer.registered(url,key));
- const items=Array.from({length:50},(_,i)=>({songId:String(i+1),requestId:randomUUID()}));
- const results=await importer.addBatch(f.room.id,f.user,items);
- expect(results.every(result=>result.ok)).toBe(true);expect(f.engine.snapshot(f.room.id).playlist).toHaveLength(50);
- expect(api).toHaveBeenCalledOnce();expect(api.mock.calls[0][0]).toBe('batch');expect(f.request).not.toHaveBeenCalled();
+ expect(musicMethods.has('song_url_v1')).toBe(false);
+ await expect(f.netease.call('song_url_v1',{id:'1',level:'standard'})).rejects.toThrow('NETEASE_METHOD_NOT_ALLOWED');
+ expect(f.api).not.toHaveBeenCalled();
+ await f.service.addBatch(f.room.id,f.user,f.items);
+ const payload=f.api.mock.calls[0][1];expect(payload[urlRoute]).toEqual({ids:'["1","2","3"]',br:128000});
+ expect(payload).not.toHaveProperty('/api/song/enhance/player/url/v1');
+ expect(Object.values(payload).some(value=>value&&typeof value==='object'&&('level' in value||'encodeType' in value))).toBe(false);
 });

@@ -23,7 +23,7 @@ const reply=message=>parentPort.postMessage({kind:'music-share:hana-result',...m
     try {
      const path=new URL(event.url).pathname;
      upstreamStep=/^\\/(?:api|weapi|eapi)\\/register\\/anonimous$/.test(path)?'anonymous_registration':
-      /^\\/(?:api|weapi|eapi)\\/song\\/enhance\\/player\\/url\\/v1$/.test(path)?'song_url_v1':
+      /^\\/(?:api|weapi|eapi)\\/song\\/enhance\\/player\\/url$/.test(path)?'song_url':
       /^\\/(?:api|weapi|eapi)\\/batch$/.test(path)?'batch':undefined;
     }catch{upstreamStep=undefined;}
    }
@@ -32,7 +32,7 @@ const reply=message=>parentPort.postMessage({kind:'music-share:hana-result',...m
   if(workerData.name==='batch'){
    // Hana 3.2.0 batch input accepts objects, but the upstream batch wire format
    // requires JSON strings. Use its public request API for only our two read routes.
-   const routes=['/api/v3/song/detail','/api/song/enhance/player/url/v1'];
+   const routes=['/api/v3/song/detail','/api/song/enhance/player/url'];
    if(Object.keys(query).length!==routes.length||routes.some(route=>!query[route]||typeof query[route]!=='object'||Array.isArray(query[route])))throw Error('Invalid internal batch input');
    const data=Object.fromEntries(routes.map(route=>[route,JSON.stringify(query[route])]));
    result=await createRequest('/api/batch',data,config);
@@ -78,7 +78,7 @@ export function createHanaInvoker(moduleUrl?: string, timeoutMs = 18000, log:(me
     const shapePath=typeof diagnostic?.shapePath==='string'&&/^[$a-zA-Z_][\w$.\[\]-]{0,160}$/.test(diagnostic.shapePath)?diagnostic.shapePath:undefined;
     log('网易云 SDK 调用失败 '+JSON.stringify({method:/^[a-z][a-z0-9_]{0,49}$/.test(name)?name:'unknown',phase,
      status:numeric(diagnostic?.status),bodyCode:numeric(diagnostic?.bodyCode),shapePath,
-     upstreamStep:['anonymous_registration','song_url_v1','batch'].includes(String(diagnostic?.upstreamStep))?diagnostic!.upstreamStep:undefined}));
+     upstreamStep:['anonymous_registration','song_url','batch'].includes(String(diagnostic?.upstreamStep))?diagnostic!.upstreamStep:undefined}));
     reject(new DomainError('NETEASE_UNAVAILABLE'));
    }
   };

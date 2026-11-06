@@ -14,8 +14,9 @@ function fixture(){
  const user=randomUUID(),room=engine.create('test',user);engine.join(room.id,{id:user,name:'host'});
  const call=vi.fn(async(method:string)=>method==='song_detail'?{songs:[{id:123,name:'测试歌曲',ar:[{name:'测试歌手'}],dt:120000,al:{name:'专辑',picUrl:'http://p1.music.126.net/cover.jpg'}}]}:{data:[{id:123,url:`https://m801.music.126.net/song.mp3?version=${version}`,code:200,type:'mp3',br:128000,expi:60,md5,size:bytes.length}]} as any);
  const request=vi.fn(async(_url:unknown)=>new Response(bytes));
- const service=new MusicImport(engine,{call},request as typeof fetch,db,()=>now);ref.value=service;
- return {db,engine,user,room,call,request,service,ref,time:(value:number)=>now=value,version:(value:number)=>version=value};
+ const songBatch=vi.fn(async(_ids:string[])=>{const [detail,source]=await Promise.all([call('song_detail'),call('song_url')]);return {detail,source};});
+ const service=new MusicImport(engine,{call,songBatch},request as typeof fetch,db,()=>now);ref.value=service;
+ return {db,engine,user,room,call,songBatch,request,service,ref,time:(value:number)=>now=value,version:(value:number)=>version=value};
 }
 it('accepts a provider MD5 library reference through the authenticated enqueue endpoint',async()=>{
  const f=fixture(),track=await f.service.importSong('123');
@@ -35,7 +36,7 @@ it('persists the original music link and expiry, never an OSS object, using prov
 it('coalesces parallel imports, rejects request reuse and reuses saved links after service recreation',async()=>{
  const f=fixture(),id=randomUUID();const [a,b]=await Promise.all([f.service.add(f.room.id,f.user,'123',id),f.service.add(f.room.id,f.user,'123',id)]);
  expect(a).toEqual(b);expect(()=>f.service.add(f.room.id,f.user,'124',id)).toThrow('COMMAND_ID_REUSED');
- const restarted=new MusicImport(f.engine,{call:f.call},f.request as typeof fetch,f.db,()=>100000);f.ref.value=restarted;
+ const restarted=new MusicImport(f.engine,{call:f.call,songBatch:f.songBatch},f.request as typeof fetch,f.db,()=>100000);f.ref.value=restarted;
  const other=await restarted.add(f.room.id,f.user,'123',randomUUID());expect(other.id).not.toBe(a.id);expect(other.sourceUrl).toBe(a.sourceUrl);expect(f.request).not.toHaveBeenCalled();
 });
 it('refreshes expired links by stable song id and persists the new URL without uploading',async()=>{

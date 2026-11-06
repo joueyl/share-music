@@ -5,7 +5,7 @@ import type { DatabaseStore } from './database';
 import { DomainError } from './engine';
 
 export type PasswordLogin = { type: 'phone'; phone: string; countrycode: string; password: string } | { type: 'email'; email: string; password: string };
-export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'simi_song', 'song_detail', 'song_url', 'song_url_v1', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_account', 'user_cloud', 'login_status', 'album']);
+export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'simi_song', 'song_detail', 'song_url', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_account', 'user_cloud', 'login_status', 'album']);
 function publicBody(value: any): any {
   if (Array.isArray(value)) return value.map(publicBody);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([k]) => !/^(cookie|token|accessToken|refreshToken|__csrf|MUSIC_U)$/i.test(k)).map(([k, v]) => [k, publicBody(v)]));
@@ -58,16 +58,16 @@ export class NeteaseService {
   /** Fixed read-only batch for imports; never expose arbitrary batch routes to browsers. */
   async songBatch(ids:string[]) {
     if(!Array.isArray(ids)||ids.length<1||ids.length>50||ids.some(id=>!/^\d{1,20}$/.test(id))||new Set(ids).size!==ids.length)throw new DomainError('INVALID_REQUEST');
-    const detailRoute='/api/v3/song/detail',urlRoute='/api/song/enhance/player/url/v1';
+    const detailRoute='/api/v3/song/detail',urlRoute='/api/song/enhance/player/url';
     const body=publicBody((await this.request('batch',{
       [detailRoute]:{c:'['+ids.map(id=>'{"id":'+id+'}').join(',')+']'},
-      [urlRoute]:{ids:'['+ids.join(',')+']',level:'standard',encodeType:'flac'}
+      [urlRoute]:{ids:JSON.stringify(ids),br:128000}
     })).body);
     const detail=body[detailRoute],source=body[urlRoute];
     const checks=[
       {stage:'batch',value:body,valid:body.code===200},
       {stage:'song_detail',value:detail,valid:detail?.code===200&&Array.isArray(detail.songs)},
-      {stage:'song_url_v1',value:source,valid:source?.code===200&&Array.isArray(source.data)}
+      {stage:'song_url',value:source,valid:source?.code===200&&Array.isArray(source.data)}
     ];
     const numeric=(value:unknown)=>typeof value==='number'&&Number.isSafeInteger(value)&&Math.abs(value)<=100000?value:undefined;
     const rejected=checks.find(check=>numeric(check.value?.code)!==undefined&&check.value.code!==200);
@@ -88,7 +88,7 @@ export class NeteaseService {
   async call(name: string, params: Record<string, unknown>) {
     if (!musicMethods.has(name)) throw new DomainError('NETEASE_METHOD_NOT_ALLOWED');
     // Do not allow browser callers to inject credentials, proxies or network addresses.
-    const allowed = new Set(['keywords', 'limit', 'offset', 'type', 'id', 'ids', 'uid', 'level', 'br']);
+    const allowed = new Set(['keywords', 'limit', 'offset', 'type', 'id', 'ids', 'uid', 'br']);
     const clean = Object.fromEntries(Object.entries(params).filter(([key]) => allowed.has(key)));
     if(['simi_song','lyric_new','playlist_track_all','playlist_detail','user_playlist','album'].includes(name)){
       const key=name==='user_playlist'?'uid':'id';
