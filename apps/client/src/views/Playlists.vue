@@ -101,17 +101,25 @@ async function add(play=false){
  if(items.length>200-app.room.playlist.length){message.value=`房间最多 200 首，还可加入 ${200-app.room.playlist.length} 首，请减少勾选`;return;}
  busy.value=true;let success=0,fail=0,first=true;const errors:string[]=[];
  try{
-  for(const song of items){
+  for(let offset=0;offset<items.length;offset+=50){
    if(!alive||app.user?.id!==ownerId||app.room?.id!==roomId||!app.connected||!app.permission.enqueue)break;
-   message.value=`正在处理 ${success+fail+1}/${items.length}：${song.name}`;
-   try{
+   const chunk=items.slice(offset,offset+50),requests=chunk.map(song=>{
     const key=roomId+':'+song.id,id=requestIds.get(key)??crypto.randomUUID();requestIds.set(key,id);
-    const track=await bridge.addSearchedMusic(roomId,song.id,id,song.coverUrl);
-    if(!alive||app.user?.id!==ownerId||app.room?.id!==roomId)break;success++;
-    requestIds.delete(key);
-    selected.value=new Set([...selected.value].filter(id=>id!==song.id));
-    if(play&&first&&alive&&app.room?.id===roomId){first=false;try{await bridge.playMusic(roomId,track.id,crypto.randomUUID());}catch(e){errors.push(`已加入，但立即播放失败：${report(e)}`);}}
-   }catch(e){if(!alive||app.user?.id!==ownerId||app.room?.id!==roomId)break;fail++;errors.push(`${song.name}：${report(e)}`);}
+    return {songId:song.id,requestId:id,coverUrl:song.coverUrl};
+   });
+   message.value=`正在处理 ${offset+1}–${offset+chunk.length}/${items.length} 首`;
+   try{
+    const results=await bridge.addSearchedMusicBatch(roomId,requests);
+    if(!alive||app.user?.id!==ownerId||app.room?.id!==roomId)break;
+    for(let i=0;i<results.length;i++){
+     if(!alive||app.user?.id!==ownerId||app.room?.id!==roomId)break;
+     const result=results[i],song=chunk[i];
+     if(result.ok){
+      success++;requestIds.delete(roomId+':'+song.id);selected.value=new Set([...selected.value].filter(id=>id!==song.id));
+      if(play&&first&&alive&&app.room?.id===roomId){first=false;try{await bridge.playMusic(roomId,result.track.id,crypto.randomUUID());}catch(e){errors.push(`已加入，但立即播放失败：${report(e)}`);}}
+     }else{fail++;errors.push(`${song.name}：${report(result.error)}`);}
+    }
+   }catch(e){if(!alive||app.user?.id!==ownerId||app.room?.id!==roomId)break;fail+=chunk.length;errors.push(report(e));}
   }
   if(alive&&app.user?.id===ownerId&&app.room?.id===roomId)message.value=`已加入 ${success} 首，失败 ${fail} 首${success+fail<items.length?'，其余已停止':''}。${errors.slice(0,3).join('；')}`;
  }finally{if(alive&&app.user?.id===ownerId)busy.value=false;}

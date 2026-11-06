@@ -3324,6 +3324,398 @@
           }
         ]
       }
+    },
+    "/api/rooms/{id}/music/netease/batch": {
+      "post": {
+        "summary": "批量添加网易云歌曲，每批最多 50 首，逐首返回真实结果",
+        "operationId": "post_api_rooms_id_music_netease_batch",
+        "tags": [
+          "歌曲"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "songId": {
+                                "type": "string"
+                              },
+                              "requestId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "ok": {
+                                "type": "boolean",
+                                "enum": [
+                                  true
+                                ]
+                              },
+                              "track": {
+                                "$ref": "#/components/schemas/TrackMetadata"
+                              }
+                            },
+                            "required": [
+                              "songId",
+                              "requestId",
+                              "ok",
+                              "track"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "songId": {
+                                "type": "string"
+                              },
+                              "requestId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "ok": {
+                                "type": "boolean",
+                                "enum": [
+                                  false
+                                ]
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "songId",
+                              "requestId",
+                              "ok",
+                              "error"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "results"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "songId": {
+                          "type": "string",
+                          "pattern": "^\\d{1,20}$"
+                        },
+                        "requestId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      },
+                      "required": [
+                        "songId",
+                        "requestId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "items"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "description": "按歌曲数计入每用户每 10 分钟 200 首限流。在线成员及 enqueue 权限校验；固定内部 Hana batch 合并详情与音源读取，不接受客户端提供的上游路由、URL 或凭据。已有有效链接复用；每项独立幂等，顺序入队，非原子事务；部分成功不回滚，失败项可使用原 requestId 重试。需同步更新后端和客户端。"
+      }
+    },
+    "/api/rooms/{id}/music/qq/batch": {
+      "post": {
+        "summary": "批量添加 QQ 音乐歌曲，每批最多 50 首",
+        "operationId": "post_api_rooms_id_music_qq_batch",
+        "tags": [
+          "歌曲"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "songId": {
+                                "type": "string"
+                              },
+                              "requestId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "ok": {
+                                "type": "boolean",
+                                "enum": [
+                                  true
+                                ]
+                              },
+                              "track": {
+                                "$ref": "#/components/schemas/TrackMetadata"
+                              }
+                            },
+                            "required": [
+                              "songId",
+                              "requestId",
+                              "ok",
+                              "track"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "songId": {
+                                "type": "string"
+                              },
+                              "requestId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "ok": {
+                                "type": "boolean",
+                                "enum": [
+                                  false
+                                ]
+                              },
+                              "error": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "songId",
+                              "requestId",
+                              "ok",
+                              "error"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "results"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "See docs/API.md for error codes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 50,
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "songId": {
+                          "type": "string",
+                          "pattern": "^[A-Za-z0-9]{1,80}$"
+                        },
+                        "requestId": {
+                          "type": "string",
+                          "format": "uuid"
+                        }
+                      },
+                      "required": [
+                        "songId",
+                        "requestId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "items"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "description": "客户端一次提交，服务端沿用既有 QQ 元数据接口逐项有界读取；QQ 不使用 Hana 上游 batch。在线成员、enqueue 权限、容量及逐项幂等校验，顺序入队并返回部分成功结果；按歌曲数计入每用户每 10 分钟 200 首限流。"
+      }
     }
   },
   "components": {

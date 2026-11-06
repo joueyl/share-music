@@ -42,17 +42,19 @@ export function songFilename(song:{name?:unknown;ar?:unknown;artists?:unknown}):
   if(typeof song.name!=='string'||!song.name.trim()||!artists.length)throw new DomainError('MUSIC_SOURCE_INVALID');
   return `${song.name.trim()} - ${artists.join('、')}.mp3`;
 }
+export type MusicBatchItem={songId:string;requestId:string};
+export type MusicBatchResult=MusicBatchItem&({ok:true;track:TrackMetadata}|{ok:false;error:string});
 type Job={songId:string;roomId:string;promise:Promise<TrackMetadata>;at:number};
 export function songCover(song:any):string|null {
   return normalizeAlbumCover(song?.al?.picUrl??song?.album?.picUrl);
 }
 export class MusicImport {
-  private jobs=new Map<string,Job>();private active=0;
+  private jobs=new Map<string,Job>();private active=0;private batchActive=0;
   private sources=new Map<string,Promise<TrackMetadata>>();
   private reads=new Map<string,Promise<Buffer>>();
   private coverReads=new Map<string,ReturnType<typeof downloadCoverImage>>();
   private registeredSources=new Set<string>();
-  constructor(private engine:RoomEngine,private netease:Pick<NeteaseService,'call'>,private request:typeof fetch=fetch,private db?:DatabaseStore,private now=Date.now,private qq?:Pick<QqMusicService,'audio'>) {}
+  constructor(private engine:RoomEngine,private netease:Pick<NeteaseService,'call'>&Partial<Pick<NeteaseService,'songBatch'>>,private request:typeof fetch=fetch,private db?:DatabaseStore,private now=Date.now,private qq?:Pick<QqMusicService,'audio'>) {}
   private remember(url:string,hash:string){this.registeredSources.add(hash+':'+url);if(this.registeredSources.size>10000)this.registeredSources.delete(this.registeredSources.values().next().value!);}
   registered(url:string,hash:string){return this.registeredSources.has(hash+':'+url);}
   async authorize(track:TrackMetadata) {
@@ -93,6 +95,59 @@ export class MusicImport {
   add(roomId:string,userId:string,songId:string,requestId:string):Promise<TrackMetadata> {
     return this.enqueueJob(roomId,userId,songId,requestId,async()=>this.enqueue(roomId,userId,await this.importSong(songId),requestId));
   }
+  private batchItems(roomId:string,userId:string,items:MusicBatchItem[],source:'netease'|'qq') {
+    if(!Array.isArray(items)||!items.length||items.length>50||items.some(item=>!(source==='qq'?qqMid:/^\d{1,20}$/).test(item.songId)||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(item.requestId))||new Set(items.map(item=>item.songId)).size!==items.length||new Set(items.map(item=>item.requestId)).size!==items.length)throw new DomainError('INVALID_REQUEST');
+    const fresh=items.filter(item=>{
+      const prior=this.jobs.get(userId+':'+item.requestId);
+      if(prior&&(prior.songId!==(source==='qq'?'qq:':'')+item.songId||prior.roomId!==roomId))throw new DomainError('COMMAND_ID_REUSED');
+      return !prior;
+    });
+    if(fresh.length){const room=this.room(roomId,userId);if(fresh.length>200-room.playlist.length)throw new DomainError('PLAYLIST_FULL');}
+    return fresh;
+  }
+  async addQqBatch(roomId:string,userId:string,items:MusicBatchItem[]):Promise<MusicBatchResult[]> {
+    this.batchItems(roomId,userId,items,'qq');
+    if(this.batchActive>=2)throw new DomainError('MUSIC_IMPORT_BUSY');this.batchActive++;
+    try {
+      const results:MusicBatchResult[]=[];
+      // QQ has no Hana batch endpoint: retain bounded existing provider calls server-side.
+      for(const item of items)try{results.push({...item,ok:true,track:await this.addQq(roomId,userId,item.songId,item.requestId)});}
+      catch(error){results.push({...item,ok:false,error:error instanceof DomainError?error.code:'MUSIC_IMPORT_FAILED'});}
+      return results;
+    }finally{this.batchActive--;}
+  }
+  async addBatch(roomId:string,userId:string,items:MusicBatchItem[]):Promise<MusicBatchResult[]> {
+    const fresh=this.batchItems(roomId,userId,items,'netease');
+    if(this.batchActive>=2)throw new DomainError('MUSIC_IMPORT_BUSY');this.batchActive++;
+    try {
+      const missing=new Set<string>(),cachedAssets=new Map<string,TrackMetadata>();
+      for(const item of fresh){
+        const cached=await this.db?.getMusicSource('netease',`netease:standard:${item.songId}`);
+        if(!cached?.sourceUrl||(cached.sourceExpiresAt??0)<=this.now()+30000)missing.add(item.songId);
+        else cachedAssets.set(item.songId,cached);
+      }
+      let prepared:{detail:any;source:any;fetchedAt?:number}|undefined,batchError:unknown;
+      if(missing.size)try{
+        this.room(roomId,userId);
+        if(!this.netease.songBatch)throw new DomainError('NETEASE_UNAVAILABLE');
+        const fetchedAt=this.now();prepared={...await this.netease.songBatch([...missing]),fetchedAt};
+      }catch(error){batchError=error;}
+      const results:MusicBatchResult[]=[];
+      for(const item of items){
+        try {
+          const track=await this.enqueueJob(roomId,userId,item.songId,item.requestId,async()=>{
+            this.room(roomId,userId);
+            if(missing.has(item.songId)&&batchError)throw batchError;
+            const cached=cachedAssets.get(item.songId),asset=cached?trackSchema.parse(cached):await this.asset(item.songId,false,prepared);
+            musicDownloadUrl(asset.sourceUrl!);this.remember(asset.sourceUrl!,asset.contentHash);
+            return this.enqueue(roomId,userId,asset,item.requestId);
+          });
+          results.push({...item,ok:true,track});
+        }catch(error){results.push({...item,ok:false,error:error instanceof DomainError?error.code:'MUSIC_IMPORT_FAILED'});}
+      }
+      return results;
+    }finally{this.batchActive--;}
+  }
   addQq(roomId:string,userId:string,mid:string,requestId:string):Promise<TrackMetadata>{
     return this.enqueueJob(roomId,userId,'qq:'+mid,requestId,async()=>this.enqueue(roomId,userId,await this.importQqSong(mid),requestId));
   }
@@ -124,13 +179,13 @@ export class MusicImport {
     if(this.sources.size>=2)return Promise.reject(new DomainError('MUSIC_IMPORT_BUSY'));
     const job=this.asset(songId,force).finally(()=>this.sources.delete(key));this.sources.set(key,job);return job;
   }
-  private async asset(songId:string,force:boolean):Promise<TrackMetadata> {
+  private async asset(songId:string,force:boolean,prepared?:{detail:any;source:any;fetchedAt?:number}):Promise<TrackMetadata> {
     const sourceId=`netease:standard:${songId}`,cached=await this.db?.getMusicSource('netease',sourceId);
     if(!force&&cached?.sourceUrl&&(cached.sourceExpiresAt??0)>this.now()+30000) {
       const track=trackSchema.parse(cached);musicDownloadUrl(track.sourceUrl!);this.remember(track.sourceUrl!,track.contentHash);return track;
     }
-    const fetchedAt=this.now();
-    const [detail,source]=await Promise.all([this.netease.call('song_detail',{ids:songId}),this.netease.call('song_url_v1',{id:songId,level:'standard'})]);
+    const fetchedAt=prepared?.fetchedAt??this.now();
+    const [detail,source]=prepared?[prepared.detail,prepared.source]:await Promise.all([this.netease.call('song_detail',{ids:songId}),this.netease.call('song_url_v1',{id:songId,level:'standard'})]);
     const song=detail.songs?.find((s:any)=>String(s.id)===songId),audio=source.data?.find((s:any)=>String(s.id)===songId);
     if(!song||!audio?.url||(audio.code&&audio.code!==200))throw new DomainError('MUSIC_NOT_AVAILABLE');
     if(audio.freeTrialInfo)throw new DomainError('MUSIC_TRIAL_ONLY');

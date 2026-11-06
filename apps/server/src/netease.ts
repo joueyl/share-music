@@ -53,6 +53,18 @@ export class NeteaseService {
     }
     return publicBody((await this.request(name,clean,cookie)).body);
   }
+  /** Fixed read-only batch for imports; never expose arbitrary batch routes to browsers. */
+  async songBatch(ids:string[]) {
+    if(!Array.isArray(ids)||ids.length<1||ids.length>50||ids.some(id=>!/^\d{1,20}$/.test(id))||new Set(ids).size!==ids.length)throw new DomainError('INVALID_REQUEST');
+    const detailRoute='/api/v3/song/detail',urlRoute='/api/song/enhance/player/url/v1';
+    const body=publicBody((await this.request('batch',{
+      [detailRoute]:{c:'['+ids.map(id=>'{"id":'+id+'}').join(',')+']'},
+      [urlRoute]:{ids:'['+ids.join(',')+']',level:'standard',encodeType:'flac'}
+    })).body);
+    const detail=body[detailRoute],source=body[urlRoute];
+    if(body.code!==200||detail?.code!==200||source?.code!==200||!Array.isArray(detail.songs)||!Array.isArray(source.data))throw new DomainError('NETEASE_INVALID_RESPONSE');
+    return {detail,source};
+  }
   async call(name: string, params: Record<string, unknown>) {
     if (!musicMethods.has(name)) throw new DomainError('NETEASE_METHOD_NOT_ALLOWED');
     // Do not allow browser callers to inject credentials, proxies or network addresses.

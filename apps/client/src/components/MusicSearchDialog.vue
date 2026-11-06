@@ -15,7 +15,30 @@ const history=ref<string[]>([]),allBusy=ref(false);
 const historyKey=`tone.search-history:${app.user?.id??'guest'}`;
 try{const saved=JSON.parse(localStorage.getItem(historyKey)??'[]');if(Array.isArray(saved))history.value=saved.filter((v:unknown):v is string=>typeof v==='string'&&v.length<=100).slice(0,8);}catch{}
 function saveHistory(term?:string){history.value=term?[term,...history.value.filter(t=>t!==term)].slice(0,8):[];try{localStorage.setItem(historyKey,JSON.stringify(history.value));}catch{}}
-async function addAll(){if(!props.roomId||!app.permission.enqueue||!app.connected||allBusy.value||adding.value)return;if(songs.value.filter(s=>!added.value.has(s.id)).length>200-(app.room?.playlist.length??0)){message.value='房间队列容量不足，请逐首添加';return;}allBusy.value=true;try{for(const song of songs.value){if(!alive||app.room?.id!==props.roomId||!app.connected)break;if(!added.value.has(song.id))await add(song);}}finally{allBusy.value=false;}}
+async function addAll(){
+ if(!props.roomId||app.room?.id!==props.roomId||!app.permission.enqueue||!app.connected||allBusy.value||adding.value)return;
+ const items=songs.value.filter(song=>!added.value.has(song.id));
+ if(items.length>200-(app.room?.playlist.length??0)){message.value='房间队列容量不足，请逐首添加';return;}
+ const roomId=props.roomId,ownerId=app.user?.id,provider=source.value,current=generation;
+ const valid=()=>alive&&app.user?.id===ownerId&&app.room?.id===roomId&&current===generation;
+ allBusy.value=true;app.notice='';let success=0,fail=0;
+ try {
+  for(let offset=0;offset<items.length;offset+=50){
+   if(!valid()||!app.connected||!app.permission.enqueue)break;
+   const chunk=items.slice(offset,offset+50),requests=chunk.map(song=>{
+    const requestId=requestIds.get(song.id)??crypto.randomUUID();requestIds.set(song.id,requestId);
+    return {songId:song.id,requestId,coverUrl:song.coverUrl};
+   });
+   message.value=`正在批量添加 ${offset+1}–${offset+chunk.length}/${items.length} 首`;
+   try {
+    const results=await bridge.addSearchedMusicBatch(roomId,requests,provider);
+    if(!valid())break;
+    for(const result of results){if(result.ok){success++;added.value=new Set([...added.value,result.songId]);requestIds.delete(result.songId);}else fail++;}
+   }catch(e){if(!valid())break;fail+=chunk.length;app.error(e);}
+  }
+  if(valid())message.value=`已加入 ${success} 首，失败 ${fail} 首${success+fail<items.length?'，其余已停止':''}`;
+ }finally{if(alive)allBusy.value=false;}
+}
 function roomSearch(){if(!keywords.value.trim())return;emit('rooms',keywords.value.trim());visible.value=false;}
 const focused=ref(false),composing=ref(false),suggestionsSuppressed=ref(false);
 const failedCovers=ref(new Set<string>());

@@ -166,6 +166,25 @@ body：`{"songId":"123","requestId":"UUID"}`。
 重试复用 requestId，同一用户 requestId 不得换歌曲或房间；成功入队后才返回成功。
 链接有效则跨房间、跨用户、重启后复用，避免重复请求。
 
+### POST /api/rooms/:id/music/netease/batch
+
+批量添加网易云歌曲，body：
+
+```json
+{"items":[{"songId":"123","requestId":"UUID"},{"songId":"456","requestId":"另一个UUID"}]}
+```
+
+- 每批 1–50 首，songId 与 requestId 各自不可重复；每项使用独立 UUID，不接受上游路由、Cookie 或 URL。
+- 服务端对未缓存/接近过期的歌曲调用一次内部 Hana `batch`，合并 `/api/v3/song/detail` 与 `/api/song/enhance/player/url/v1` 两个多歌曲只读请求；有效链接仍复用，不下载音频。
+- 返回 `{results:[{songId,requestId,ok:true,track}|{songId,requestId,ok:false,error}]}`，结果和入队顺序与输入一致；逐首检查权限、容量及幂等。非原子事务，成功项不因其他歌曲失败回滚。
+- 每用户每 10 分钟 200 首，按歌曲数而非 HTTP 请求数计费；同时最多两个批量任务，其他单曲导入限制不变。
+- 我的音乐及搜索“添加全部”每 50 首串行分组，失败项保留选择及原 requestId；请求中切换账号/房间或离页时忽略过期结果。仅“立即播放”额外对首个成功歌曲发送播放命令，普通批量添加不打断播放。
+- 需要同步更新后端与客户端；旧单曲接口保留，普通浏览器代理不开放任意 `batch` 调用。
+
+### POST /api/rooms/:id/music/qq/batch
+
+请求/逐项响应、1–50 首限制、权限、容量、幂等、按歌曲数限流及两项批量并发上限同网易云 batch，songId 改为 QQ 歌曲 MID。搜索“添加全部”按当前音源调用对应项目 batch；QQ 上游不使用 Hana batch，服务端顺序复用既有 QQ 详情/播放链接接口，只读元数据，不下载音频。旧 QQ 单曲接口保持不变。
+
 ### POST /api/rooms/:id/music/uploaded
 
 从音乐库按内容哈希查找稳定歌曲 ID，再复用/刷新音乐链接入队。

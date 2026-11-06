@@ -111,3 +111,15 @@ it('the installed SDK recognizes all existing read-only, login and maintenance m
  expect(result.body.results.map((item:any)=>item.name)).toEqual(names);
  for(const item of result.body.results)expect(item.recognized,`${item.name}: ${JSON.stringify(item)}`).toBe(true);
 },30000);
+
+it('the installed SDK accepts fixed read-only batch parameters in a single mocked transport call',async()=>{
+ const entry=pathToFileURL(require.resolve('hana-music-api')).href;
+ const invoke=createHanaInvoker(moduleUrl(`import {invokeModule as call} from ${JSON.stringify(entry)};
+ export async function invokeModule(_,query,config){
+  let count=0;
+  const result=await call('batch',query,{...config,e_r:false,fetcher:async()=>{count++;return new Response(JSON.stringify({code:200,'/api/v3/song/detail':{code:200,songs:[]},'/api/song/enhance/player/url/v1':{code:200,data:[]}}),{status:200,headers:{'content-type':'application/json'}});}});
+  return {status:200,body:{count,result:result.body},cookie:[]};
+ }`));
+ const result=await invoke('batch_probe',{cookie:'MUSIC_U=fixture','/api/v3/song/detail':{c:'[{"id":1},{"id":2}]'},'/api/song/enhance/player/url/v1':{ids:'[1,2]',level:'standard',encodeType:'flac'}});
+ expect(result.body.count).toBe(1);expect(result.body.result.code).toBe(200);
+});

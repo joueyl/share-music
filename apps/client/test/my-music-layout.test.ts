@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs';
 const f=vi.hoisted(()=>({app:null as any,detail:vi.fn(),resolve:vi.fn(),users:vi.fn(),songs:vi.fn(),favorites:vi.fn(),favorite:vi.fn(),album:vi.fn(),add:vi.fn(),play:vi.fn()}));
 vi.mock('../src/store',()=>({useApp:()=>f.app}));
 vi.mock('../src/server-config',()=>({getServerUrl:()=> 'http://localhost:3000'}));
-vi.mock('../src/bridge',()=>({playlistDetail:f.detail,resolveMusicLink:f.resolve,userPlaylists:f.users,playlistSongs:f.songs,musicFavorites:f.favorites,setMusicFavorite:f.favorite,albumDetail:f.album,addSearchedMusic:f.add,playMusic:f.play}));
+vi.mock('../src/bridge',()=>({playlistDetail:f.detail,resolveMusicLink:f.resolve,userPlaylists:f.users,playlistSongs:f.songs,musicFavorites:f.favorites,setMusicFavorite:f.favorite,albumDetail:f.album,addSearchedMusicBatch:f.add,playMusic:f.play}));
 let mounted:ReturnType<typeof renderer.createApp>;
 const settle=async()=>{for(let i=0;i<8;i++){await Promise.resolve();await nextTick();}};
 const saved=Array.from({length:30},(_,i)=>({id:String(i+1),name:`最近歌单${i+1}`}));
@@ -17,7 +17,7 @@ beforeEach(()=>{
  f.app=reactive({user:{id:'user'},room:{id:'room',playlist:[]},connected:true,permission:{enqueue:true,skip:true}});
  vi.stubGlobal('localStorage',{getItem:vi.fn(()=>JSON.stringify(saved)),setItem:vi.fn()});
  f.resolve.mockReset().mockImplementation(async(input:string)=>parseMusicReference(input));
- f.favorites.mockReset().mockResolvedValue([]);f.favorite.mockReset().mockResolvedValue([]);f.add.mockReset().mockResolvedValue({id:'added'});
+ f.favorites.mockReset().mockResolvedValue([]);f.favorite.mockReset().mockResolvedValue([]);f.add.mockReset().mockImplementation(async(_room:string,items:any[])=>items.map(item=>({...item,ok:true,track:{id:'added-'+item.songId}})));
  f.play.mockReset().mockResolvedValue({});
  f.album.mockReset().mockResolvedValue({collection:{kind:'album',id:'38306',name:'测试专辑',trackCount:1,creatorId:'',coverUrl:''},songs:[{id:'8',name:'专辑歌曲',artists:'歌手',album:'专辑'}]});
  f.detail.mockReset().mockResolvedValue({id:'1',name:'测试歌单',creatorId:'123',trackCount:100});
@@ -88,7 +88,7 @@ it('album paths with userid open album details, never a profile or a playlist',a
  const root=await mount();await importPlaylist(root,'https://music.163.com/#/album/38306/?userid=274950922');
  expect(f.album).toHaveBeenCalledWith('38306');expect(f.detail).not.toHaveBeenCalled();expect(f.users).not.toHaveBeenCalled();
  expect(text(root)).toContain('专辑 ID：38306');expect(text(root)).toContain('专辑歌曲');
- await all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·')).props.onClick();await settle();expect(f.add).toHaveBeenCalledWith('room','8',expect.any(String),undefined);expect(f.play).not.toHaveBeenCalled();
+ await all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·')).props.onClick();await settle();expect(f.add).toHaveBeenCalledWith('room',[{songId:'8',requestId:expect.any(String),coverUrl:undefined}]);expect(f.play).not.toHaveBeenCalled();
 });
 it('favorites are confirmed by the server, shown in the favorites tab, and may be reopened',async()=>{
  const saved={kind:'playlist',id:'1',name:'收藏歌单',trackCount:1,creatorId:'123',coverUrl:''};
@@ -213,14 +213,14 @@ it('keeps explicit immediate playback separate from batch enqueue and still adds
  f.album.mockResolvedValueOnce({collection:{kind:'album',id:'38306',name:'专辑',trackCount:2},songs:[{id:'1',name:'歌曲1'},{id:'2',name:'歌曲2'}]});
  f.play.mockImplementationOnce(async()=>{f.app.room.pending={};});
  const root=await mount();await importPlaylist(root,'https://music.163.com/album/38306');
- await all(root).find(n=>n.type==='button'&&text(n)==='立即播放').props.onClick();await settle();expect(f.add).toHaveBeenCalledTimes(2);expect(f.play).toHaveBeenCalledOnce();
+ await all(root).find(n=>n.type==='button'&&text(n)==='立即播放').props.onClick();await settle();expect(f.add).toHaveBeenCalledOnce();expect(f.add.mock.calls[0][1]).toHaveLength(2);expect(f.play).toHaveBeenCalledOnce();
 });
 
 it('preserves selection on failures, reuses the idempotency key on retry and enforces room capacity',async()=>{
  const root=await mount();await importPlaylist(root,'https://music.163.com/album/38306');f.app.room.playlist=Array(200).fill({});
  let button=all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·'));await button.props.onClick();await settle();expect(f.add).not.toHaveBeenCalled();expect(text(root)).toContain('房间最多 200 首');
  f.app.room.playlist=[];f.add.mockRejectedValueOnce(Error('TEMPORARY_FAILURE'));await button.props.onClick();await settle();expect(text(root)).toContain('已选 1 首');
- const key=f.add.mock.calls[0][2];button=all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·'));await button.props.onClick();await settle();expect(f.add.mock.calls[1][2]).toBe(key);expect(text(root)).toContain('已选 0 首');
+ const key=f.add.mock.calls[0][1][0].requestId;button=all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·'));await button.props.onClick();await settle();expect(f.add.mock.calls[1][1][0].requestId).toBe(key);expect(text(root)).toContain('已选 0 首');
 });
 
 it('inherits the theme accent instead of forcing a separate blue palette',()=>{
@@ -246,4 +246,15 @@ it('keeps motion finite and cancels it for reduced-motion without losing the sel
  const reduce=css.slice(css.lastIndexOf('@media(prefers-reduced-motion:reduce)'));
  expect(reduce).toContain('animation:none!important;transition:none!important');expect(reduce).not.toContain('.collection-tabs.favorites-active::before');expect(reduce).toContain('transform:none');
  expect(css).toContain('.collection-tabs.favorites-active::before{transform:translateX(calc(100% + 4px))}');
+});
+
+it('chunks 51 selected songs into batch requests of 50 and 1, retaining only failures for retry',async()=>{
+ f.album.mockResolvedValueOnce({collection:{kind:'album',id:'38306',name:'专辑',trackCount:51},songs:Array.from({length:51},(_,i)=>({id:String(i+1),name:'歌曲'+(i+1)}))});
+ f.add.mockImplementationOnce(async(_room:string,items:any[])=>items.map(item=>item.songId==='2'?{...item,ok:false,error:'MUSIC_NOT_AVAILABLE'}:{...item,ok:true,track:{id:'added-'+item.songId}}));
+ const root=await mount();await importPlaylist(root,'https://music.163.com/album/38306');
+ await all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·')).props.onClick();await settle();
+ expect(f.add.mock.calls.map(call=>call[1].length)).toEqual([50,1]);expect(text(root)).toContain('已加入 50 首，失败 1 首');expect(text(root)).toContain('已选 1 首');
+ const failed=f.add.mock.calls[0][1][1];
+ await all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·')).props.onClick();await settle();
+ expect(f.add.mock.calls[2][1]).toEqual([failed]);expect(text(root)).toContain('已选 0 首');
 });

@@ -263,6 +263,20 @@ export async function addSearchedMusic(roomId:string,songId:string,requestId:str
  rememberTrackArtwork(base,result.track.contentHash,albumCover(result.track.coverUrl)||coverUrl);
  return result.track as TrackMetadata;
 }
+export type MusicBatchItem={songId:string;requestId:string;coverUrl?:string};
+export type MusicBatchResult={songId:string;requestId:string}&({ok:true;track:TrackMetadata}|{ok:false;error:string});
+export async function addSearchedMusicBatch(roomId:string,items:MusicBatchItem[],source:'netease'|'qq'='netease'):Promise<MusicBatchResult[]> {
+ if(items.length<1||items.length>50)throw new Error('INVALID_REQUEST');
+ const data=await browserRequest(`/rooms/${roomId}/music/${source}/batch`,{items:items.map(({songId,requestId})=>({songId,requestId}))});
+ if(!Array.isArray(data.results)||data.results.length!==items.length)throw new Error('MUSIC_IMPORT_FAILED');
+ const results:MusicBatchResult[]=data.results;
+ for(let i=0;i<items.length;i++){
+  const result=results[i],item=items[i];
+  if(result.songId!==item.songId||result.requestId!==item.requestId||typeof result.ok!=='boolean'||(result.ok?!result.track?.sourceUrl:typeof result.error!=='string'))throw new Error('MUSIC_IMPORT_FAILED');
+ }
+ for(let i=0;i<items.length;i++){const result=results[i];if(result.ok)rememberTrackArtwork(base,result.track.contentHash,albumCover(result.track.coverUrl)||items[i].coverUrl);}
+ return results;
+}
 export function playingTrackCover(track:TrackMetadata|null|undefined) { return trackArtwork(base,track); }
 export async function loadTrackCover(roomId:string,track:TrackMetadata):Promise<string> {
  const known=playingTrackCover(track);if(known)return known;

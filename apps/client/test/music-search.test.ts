@@ -130,3 +130,17 @@ it('loads real album details and persists favorites only through authenticated T
  request.mockResolvedValueOnce(Response.json({code:200,album:{id:1,name:'错误专辑'},songs:[]}));await expect(bridge.albumDetail('38306')).rejects.toThrow('NETEASE_INVALID_RESPONSE');
  request.mockResolvedValueOnce(Response.json({ok:true}));await expect(bridge.musicFavorites()).rejects.toThrow('MUSIC_FAVORITES_INVALID');
 });
+
+it('sends one authenticated batch with only song IDs and request IDs, and preserves partial failures',async()=>{
+ const {bridge,request}=await session();
+ const items=[{songId:'1',requestId:'first',coverUrl:'http://p1.music.126.net/cover.jpg'},{songId:'2',requestId:'second'}];
+ const track={id:'added',sourceUrl:'https://m801.music.126.net/1.mp3',contentHash:'a'.repeat(32)};
+ request.mockResolvedValueOnce(Response.json({results:[{songId:'1',requestId:'first',ok:true,track},{songId:'2',requestId:'second',ok:false,error:'MUSIC_NOT_AVAILABLE'}]}));
+ const result=await bridge.addSearchedMusicBatch('room',items);
+ expect(result.map(item=>item.ok)).toEqual([true,false]);expect(bridge.playingTrackCover(track as any)).toBe('https://p1.music.126.net/cover.jpg');
+ const [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];
+ expect(new URL(url).pathname).toBe('/api/rooms/room/music/netease/batch');expect(options.headers).toMatchObject({Authorization:'Bearer project-token'});
+ expect(JSON.parse(String(options.body))).toEqual({items:[{songId:'1',requestId:'first'},{songId:'2',requestId:'second'}]});
+ request.mockResolvedValueOnce(Response.json({results:[{songId:'other',requestId:'first',ok:false,error:'wrong'}]}));
+ await expect(bridge.addSearchedMusicBatch('room',[items[0]])).rejects.toThrow('MUSIC_IMPORT_FAILED');
+});

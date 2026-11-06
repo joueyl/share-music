@@ -53,6 +53,22 @@ export class ApiController {
       await this.app.flush();return {ok:true,track};
     } catch(e) {httpError(e);}
   }
+  @Post('rooms/:id/music/netease/batch') async addNeteaseBatch(@Param('id') id:string,@Body() body:unknown,@Headers('authorization') header?:string){
+    return this.addMusicBatch(id,body,header,'netease');
+  }
+  @Post('rooms/:id/music/qq/batch') async addQqBatch(@Param('id') id:string,@Body() body:unknown,@Headers('authorization') header?:string){
+    return this.addMusicBatch(id,body,header,'qq');
+  }
+  private async addMusicBatch(id:string,body:unknown,header:string|undefined,source:'netease'|'qq'){
+    try {
+      const user=await this.user(header),roomId=z.string().uuid().parse(id);
+      const {items}=z.object({items:z.array(z.object({songId:z.string().regex(source==='qq'?qqMid:/^\d{1,20}$/),requestId:z.string().uuid()}).strict()).min(1).max(50)}).strict().parse(body);
+      if(new Set(items.map(item=>item.songId)).size!==items.length||new Set(items.map(item=>item.requestId)).size!==items.length)throw new DomainError('INVALID_REQUEST');
+      for(const _ of items)this.app.limit(`music-import:${user.id}`,200,600000);
+      const results=await (source==='qq'?this.app.musicImport.addQqBatch(roomId,user.id,items):this.app.musicImport.addBatch(roomId,user.id,items));
+      await this.app.flush();return {results};
+    }catch(e){httpError(e);}
+  }
   @Post('rooms/:id/music/qq') async addQq(@Param('id') id:string,@Body() body:unknown,@Headers('authorization') header?:string){
     try{const user=await this.user(header);this.app.limit(`music-import:${user.id}`,200,600000);
       const {songId,requestId}=z.object({songId:z.string().regex(qqMid),requestId:z.string().uuid()}).strict().parse(body);
