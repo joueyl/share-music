@@ -1,7 +1,9 @@
 import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { randomBytes } from 'node:crypto';
 import type { ChatMessage, RoomSnapshot } from '../../../packages/shared/src';
+import { FavoriteSongs } from './favorite-songs';
 import { MusicFavorites } from './music-favorites';
+import { MusicProfile } from './music-profile';
 import { MusicImport } from './music-import';
 import { NeteaseAccountTasks } from './netease-tasks';
 import { NeteaseService } from './netease';
@@ -27,8 +29,10 @@ export class AppService implements OnModuleDestroy, OnModuleInit {
   readonly database = configuredDatabase();
   readonly netease = new NeteaseService(this.database);
   readonly musicFavorites = new MusicFavorites(this.database,this.netease);
+  readonly musicProfile = new MusicProfile(this.database,this.netease);
   readonly neteaseTasks = new NeteaseAccountTasks(this.netease,this.database);
   readonly qq = new QqMusicService(this.database);
+  readonly favoriteSongs = new FavoriteSongs(this.database,this.netease,this.qq);
   readonly auth: Auth;
   readonly capacity = new Capacity();
   readonly turn = new PublicTurn();

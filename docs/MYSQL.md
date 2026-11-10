@@ -24,8 +24,9 @@ Compose 保留旧 SQLite 数据卷作为回退资料，不自动部署或清空 
 
 | 表 | 关键字段 / Brilliant 设计 |
 |---|---|
-| users | id、name（唯一用户名，注册/登录使用）、display_name、avatar_url、password_hash、salt、last_login_ip（最近一次成功登录 IP）、created_at、updated_at |
+| users | id、name（唯一用户名，注册/登录使用）、display_name、avatar_url、password_hash、salt、last_login_ip（最近一次成功登录 IP）、netease_profile_url（当前账号绑定的规范化网易云主页链接）、created_at、updated_at |
 | rooms | id、name、host_id（当前房主）、creator_id（原始创建者）、creator_name、creator_display_name、creator_avatar_url（创建时用户名/显示名/头像）、description、atmosphere（日落/深夜/周末/自定义）、visibility（公开/邀请）、category、cover_url、invite_code、defaults_json、overrides_json、created_at、updated_at |
+| user_favorite_songs | user_id、source、song_id（联合主键）、name、artists、album、cover_url、duration_ms、saved_at；当前用户的单曲收藏，用户外键级联删除，用户/收藏时间索引 |
 | songs | sequence、scope、source、content_hash、name、artists、album、cover_url、duration_ms、size_bytes、lossless、bitrate_bps、sample_rate、bits、channels、netease_id、source_url、source_expires_at、track_json、detail_json、created_at、updated_at |
 
 辅助表：room_tracks 保存房间歌曲 UUID、排序、添加者及完整队列元数据；settings 保存服务端配置；schema_migrations 记录版本。
@@ -110,3 +111,17 @@ npm run db:cleanup-room-songs -w @music-share/server -- --confirm
 版本 2 为 songs 增加 source_url（TEXT）与 source_expires_at（BIGINT 毫秒）。新增和刷新歌曲都会更新 URL、过期时间及完整 JSON，scope 为 netease；房间队列使用独立歌曲 UUID。
 
 链接按使用需求获取，不在迁移时批量访问音乐提供商。两种音源导入和续链均只读取链接与大小等元数据，不下载音频计算摘要；网页播放代理临时转发，不在服务端保存音频。桌面保留原有本地缓存，`contentHash` 仅作稳定键，无数据库结构迁移。
+
+## 单曲收藏增量（版本 5）
+
+启动时幂等创建 `user_favorite_songs` 并记录 schema_migrations=5；不清空/回填旧歌单收藏，不保存音频地址、凭据或文件。升级先备份数据库，使用可建表/索引的账号重启新版后端并同步升级客户端。未在此开发任务中连接或执行生产迁移；MySQL DDL/索引/外键需在目标环境验收。SQLite 隔离测试也使用独立收藏表；手动旧库迁移会导入并核对单曲收藏，仍要求空目标和显式确认，不自动运行。
+
+## 个人信息中的网易云绑定（版本 6）
+
+`users.netease_profile_url VARCHAR(255) NULL` 保存规范化 `https://music.163.com/user?id=<网易云ID>`；NULL 表示未绑定。服务端先验证真实网易云主页身份，再按已认证同频用户 ID 更新，不覆盖用户名、昵称和头像，不保存 Cookie、分享追踪参数或账号密码。该字段不加入登录/token 验证的公开用户响应；绑定不是网易云登录或所有权认证。
+
+启动时幂等加列并记录版本 6；旧 `settings` 的 `music.profile.<用户UUID>` 引用由个人主页接口首次读取时兼容迁移。绑定/解除时用户列更新与旧记录清理在一个事务中完成，异常回滚，防止解除后旧绑定恢复。规范化列优先于旧引用；损坏存量数据保留并报错，不猜测回填。
+
+升级需先备份数据库、提供相应 ALTER TABLE 权限并重启后端；本次代码任务不执行生产迁移。SQLite 内存/临时文件隔离测试覆盖字段、旧值迁移、回滚与关闭重开；旧 SQLite→MySQL 手动迁移会保留并核对已有用户绑定列，继续要求空目标和显式确认。真实 MySQL 实机升级仍需验收。
+
+版本 6 验证：个人绑定/数据库相关 27 项隔离回归通过，全仓 662 项通过、1 项按配置跳过；类型检查、完整构建及 diff 空白检查通过。SQLite 已验证真实临时文件关闭重开和密码重登恢复，MySQL 使用模拟执行器验证参数化、幂等迁移及事务回滚；未执行真实 MySQL/生产迁移或真实网易云接口联调。新绑定不再写旧 settings，不能混跑新旧后端；回滚旧服务端前需单独处理绑定数据兼容，不自动回填旧格式。

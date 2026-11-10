@@ -1,3 +1,4 @@
+import { createPinia } from 'pinia';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { h, nextTick, reactive } from 'vue';
 import { all, node, renderer, text } from './helpers/vue-host';
@@ -7,7 +8,7 @@ import { readFileSync } from 'node:fs';
 import { parse } from '@vue/compiler-sfc';
 const f=vi.hoisted(()=>({app:null as any,target:null as any}));
 vi.mock('../src/store',()=>({useApp:()=>f.app}));
-vi.mock('../src/bridge',()=>({__v_isRef:false,playingTrackCover:()=>''}));
+vi.mock('../src/bridge',()=>({favoriteSongs:vi.fn(async()=>[]),setFavoriteSong:vi.fn(async()=>[]),favoriteTrackReference:(t:any)=>t?.neteaseId?{source:'netease',id:t.neteaseId}:t?.qqId?{source:'qq',id:t.qqId}:null,__v_isRef:false,playingTrackCover:()=>''}));
 vi.mock('../src/useDialogFocus',()=>({useDialogFocus:()=>{}}));
 vi.mock('vue',async original=>{const vue=await original<typeof import('vue')>();const Pass={setup(_:unknown,{slots}:{slots:any}){return()=>vue.h('div',slots.default?.());}};return {...vue,Teleport:Pass,Transition:Pass};});
 let mounted:ReturnType<typeof renderer.createApp>;
@@ -17,7 +18,7 @@ beforeEach(()=>{
  f.app=reactive({host:true,connected:true,pendingActions:0,user:{id:'host'},permission:{skip:true,enqueue:true,playbackMode:true},room:{id:'room',playbackMode:'queue',stateVersion:1,pending:null,members:[],playback:{sourceId:'b'},playlist:['a','b','c','d'].map(id=>({id,name:id,available:true,providerId:'host',durationMs:100000}))},act:vi.fn().mockResolvedValue(undefined)});
 });
 afterEach(()=>{mounted?.unmount();vi.unstubAllGlobals();});
-async function mount(){const root=node('root');mounted=renderer.createApp(QueueDrawer);mounted.mount(root);await settle();
+async function mount(){const root=node('root');mounted=renderer.createApp(QueueDrawer);mounted.use(createPinia());mounted.mount(root);await settle();
  const dialog=all(root).find(n=>n.props.role==='dialog'),list=all(root).find(n=>n.props['aria-label']==='播放队列');
  Object.assign(dialog,{setPointerCapture:vi.fn(),hasPointerCapture:()=>false});Object.assign(list,{contains:()=>true,getBoundingClientRect:()=>({top:0,bottom:400}),scrollTop:0});
  return {root,dialog,list};}
@@ -144,4 +145,9 @@ it('mode controls remain allowed when playback is denied but mode modification i
  const {root}=await mount();f.app.permission.skip=false;f.app.permission.enqueue=false;f.app.permission.playbackMode=true;await settle();
  const control=all(root).find(n=>n.props['aria-label']==='房间播放模式'||String(n.props['aria-label']).startsWith('播放模式：'));
  expect(control.props.disabled).toBe(false);
+});
+
+it('shows the current users saved songs in a separate queue tab without replacing or playing the room queue',async()=>{
+ const {root}=await mount();all(root).find(n=>n.type==='button'&&text(n)==='收藏单曲').props.onClick();await settle();await Promise.resolve();await settle();
+ expect(text(root)).toContain('还没有收藏的单曲');expect(all(root).some(n=>n.props['data-track-id'])).toBe(false);expect(f.app.room.playlist).toHaveLength(4);expect(f.app.act).not.toHaveBeenCalled();
 });

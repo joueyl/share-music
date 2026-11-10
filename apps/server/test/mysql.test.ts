@@ -11,13 +11,13 @@ function fixture() {
   return {db:new MySqlDatabase(pool as unknown as Pool),pool,connection};
 }
 it('applies only additive schema and binds untrusted input as SQL parameters',async()=>{
-  const {db,pool}=fixture();await db.initialize();expect(pool.query).toHaveBeenCalledTimes(MYSQL_SCHEMA.length+15);
+  const {db,pool}=fixture();await db.initialize();expect(pool.query).toHaveBeenCalledTimes(MYSQL_SCHEMA.length+18);
   const input="' OR 1=1 --";await db.findUser(input);
   expect(pool.execute).toHaveBeenLastCalledWith(expect.not.stringContaining(input),[input]);
 });
 it('does not repeat additive migrations when the columns and foreign key exist',async()=>{
  const {db,pool}=fixture();
- pool.query.mockImplementation(async(sql:any)=>[String(sql).includes('TABLE_CONSTRAINTS')?[{CONSTRAINT_NAME:'fk_rooms_creator'}]:String(sql).includes('information_schema.COLUMNS')?['source_url','source_expires_at','last_login_ip','creator_id','creator_name','creator_display_name','creator_avatar_url'].map(COLUMN_NAME=>({COLUMN_NAME})):[],[]] as any);
+ pool.query.mockImplementation(async(sql:any)=>[String(sql).includes('TABLE_CONSTRAINTS')?[{CONSTRAINT_NAME:'fk_rooms_creator'}]:String(sql).includes('information_schema.COLUMNS')?['source_url','source_expires_at','last_login_ip','netease_profile_url','creator_id','creator_name','creator_display_name','creator_avatar_url'].map(COLUMN_NAME=>({COLUMN_NAME})):[],[]] as any);
  await db.initialize();await db.initialize();
  expect(pool.query.mock.calls.some(args=>String(args[0]).startsWith('ALTER TABLE'))).toBe(false);
  expect(MYSQL_SCHEMA.join('\n')).toContain('FOREIGN KEY(creator_id) REFERENCES users(id)');
@@ -85,4 +85,25 @@ it('restores room playback modes and defaults legacy rooms to queue mode',async(
  const {db,pool}=fixture();
  pool.execute.mockImplementation(async(sql:any)=>[String(sql).includes('SELECT rooms.*')?[{id:'a',playback_mode:'loop',defaults_json:'{}',overrides_json:'{}'},{id:'b',defaults_json:'{}',overrides_json:'{}'}]:[],[]] as any);
  expect((await db.rooms()).map(r=>r.playbackMode)).toEqual(['loop','queue']);
+});
+
+it('parameterizes song favorite writes and filters reads/deletes by user and source',async()=>{
+ const {db,pool}=fixture(),song={source:'netease' as const,id:'1',name:"name'",artists:'歌手',album:'专辑',coverUrl:'',durationMs:180000,savedAt:100};
+ await db.saveFavoriteSong('user',song);expect(pool.execute).toHaveBeenLastCalledWith(expect.stringContaining('ON DUPLICATE KEY UPDATE'),['user','netease','1',"name'",'歌手','专辑','',180000,100]);
+ await db.listFavoriteSongs('user');expect(pool.execute).toHaveBeenLastCalledWith(expect.stringContaining('WHERE user_id=?'),['user']);
+ await db.removeFavoriteSong('user','qq','1');expect(pool.execute).toHaveBeenLastCalledWith(expect.stringContaining('WHERE user_id=? AND source=? AND song_id=?'),['user','qq','1']);
+});
+
+it('stores private profile links on the user and atomically clears legacy settings with the same user scope',async()=>{
+ const {db,pool,connection}=fixture();
+ connection.execute.mockImplementation(async(sql:any)=>[String(sql).includes('SELECT id FROM users')?[{id:'a'}]:[],[]] as any);
+ await db.setUserMusicProfileUrl('a','https://music.163.com/user?id=123');
+ expect(connection.execute).toHaveBeenCalledWith('SELECT id FROM users WHERE id=? FOR UPDATE',['a']);
+ expect(connection.execute).toHaveBeenCalledWith('UPDATE users SET netease_profile_url=? WHERE id=?',['https://music.163.com/user?id=123','a']);
+ expect(connection.execute).toHaveBeenCalledWith('DELETE FROM settings WHERE setting_key=?',['music.profile.a']);expect(connection.commit).toHaveBeenCalledOnce();
+ await db.getUserMusicProfileUrl('a');expect(pool.execute).toHaveBeenLastCalledWith('SELECT netease_profile_url AS url FROM users WHERE id=?',['a']);
+});
+it('rolls back the profile link when clearing the legacy binding fails',async()=>{
+ const {db,connection}=fixture();connection.execute.mockImplementation(async(sql:any)=>{if(String(sql).startsWith('DELETE FROM settings'))throw Error('write failed');return [String(sql).includes('SELECT id FROM users')?[{id:'a'}]:[],[]] as any;});
+ await expect(db.setUserMusicProfileUrl('a',null)).rejects.toThrow('DATABASE_UNAVAILABLE');expect(connection.rollback).toHaveBeenCalledOnce();expect(connection.commit).not.toHaveBeenCalled();
 });

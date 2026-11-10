@@ -1,7 +1,7 @@
 import { createPool, type Pool, type PoolConnection, type RowDataPacket } from 'mysql2/promise';
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { trackSchema, roomSettingsSchema, playbackModeSchema, type TrackMetadata, type Track } from '../../../packages/shared/src';
+import { trackSchema, roomSettingsSchema, playbackModeSchema, type FavoriteSong, type TrackMetadata, type Track } from '../../../packages/shared/src';
 import { songInfo, type DatabaseStore, type UserRecord } from './database';
 import type { RoomRecord } from './engine';
 import { MYSQL_SCHEMA } from './mysql-schema';
@@ -30,6 +30,7 @@ export class MySqlDatabase implements DatabaseStore {
     await this.executor.query('INSERT IGNORE INTO schema_migrations(version) VALUES(2)');
     const [userColumns] = await this.executor.query<RowDataPacket[]>("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='users'");
     if (!userColumns.some(c => c.COLUMN_NAME === 'last_login_ip')) await this.executor.query('ALTER TABLE users ADD COLUMN last_login_ip VARCHAR(45) NULL');
+    if (!userColumns.some(c => c.COLUMN_NAME === 'netease_profile_url')) await this.executor.query('ALTER TABLE users ADD COLUMN netease_profile_url VARCHAR(255) NULL');
     const [roomColumns] = await this.executor.query<RowDataPacket[]>("SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='rooms'");
     if (!roomColumns.some(c => c.COLUMN_NAME === 'creator_id')) await this.executor.query('ALTER TABLE rooms ADD COLUMN creator_id CHAR(36) NULL');
     const [constraints] = await this.executor.query<RowDataPacket[]>("SELECT CONSTRAINT_NAME FROM information_schema.TABLE_CONSTRAINTS WHERE CONSTRAINT_SCHEMA=DATABASE() AND TABLE_NAME='rooms' AND CONSTRAINT_NAME='fk_rooms_creator'");
@@ -40,6 +41,8 @@ export class MySqlDatabase implements DatabaseStore {
       if (!roomColumns.some(c => c.COLUMN_NAME === column)) await this.executor.query(`ALTER TABLE rooms ADD COLUMN ${column} ${type} NULL`);
     }
     await this.executor.query('INSERT IGNORE INTO schema_migrations(version) VALUES(4)');
+    await this.executor.query('INSERT IGNORE INTO schema_migrations(version) VALUES(5)');
+    await this.executor.query('INSERT IGNORE INTO schema_migrations(version) VALUES(6)');
   }
   private async rows(sql:string, params:any[] = []):Promise<RowDataPacket[]> {
     try {const [rows] = await this.executor.execute<RowDataPacket[]>(sql,params); return rows;}catch{throw new DomainError('DATABASE_UNAVAILABLE');}
@@ -93,11 +96,31 @@ export class MySqlDatabase implements DatabaseStore {
     const rows=await this.rows(`${cte} SELECT * ${where} ORDER BY sequence DESC LIMIT ? OFFSET ?`,[query,limit,offset]);
     return {total,songs:rows.map(r=>{const track=json(r.track_json),neteaseId=/^netease:standard:(\d{1,20})$/.exec(r.source)?.[1];return {id:String(r.content_hash??''),name:r.name,artists:r.artists,album:r.album,coverUrl:r.cover_url??'',durationMs:r.duration_ms??null,sizeBytes:r.size_bytes===null?null:Number(r.size_bytes),canAdd:!!neteaseId||!!track.qqId,neteaseId,...(track.qqId?{qqId:track.qqId}:{})};})};
   }
+  async listFavoriteSongs(userId:string):Promise<FavoriteSong[]> {
+    const rows=await this.rows('SELECT source,song_id AS id,name,artists,album,cover_url AS coverUrl,duration_ms AS durationMs,saved_at AS savedAt FROM user_favorite_songs WHERE user_id=? ORDER BY saved_at DESC,source,song_id',[userId]);
+    return rows.map(row=>({...row,durationMs:Number(row.durationMs),savedAt:Number(row.savedAt)})) as FavoriteSong[];
+  }
+  async saveFavoriteSong(userId:string,song:FavoriteSong) {
+    await this.run('INSERT INTO user_favorite_songs(user_id,source,song_id,name,artists,album,cover_url,duration_ms,saved_at) VALUES(?,?,?,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE song_id=VALUES(song_id)',[userId,song.source,song.id,song.name,song.artists,song.album,song.coverUrl,song.durationMs,song.savedAt]);
+  }
+  async removeFavoriteSong(userId:string,source:FavoriteSong['source'],id:string) {
+    await this.run('DELETE FROM user_favorite_songs WHERE user_id=? AND source=? AND song_id=?',[userId,source,id]);
+  }
   async getSetting(key:string) { return (await this.rows('SELECT value FROM settings WHERE setting_key=?',[key]))[0]?.value as string|undefined; }
   async setSetting(key:string,value:string) { await this.run('INSERT INTO settings(setting_key,value) VALUES(?,?) ON DUPLICATE KEY UPDATE value=VALUES(value)',[key,value]); }
+  async getUserMusicProfileUrl(userId:string):Promise<string|null> {
+    return (await this.rows('SELECT netease_profile_url AS url FROM users WHERE id=?',[userId]))[0]?.url??null;
+  }
+  async setUserMusicProfileUrl(userId:string,url:string|null):Promise<void> {
+    if(this.executor===this.pool)return this.transaction(db=>db.setUserMusicProfileUrl(userId,url));
+    const rows=await this.rows('SELECT id FROM users WHERE id=? FOR UPDATE',[userId]);
+    if(!rows.length)throw new DomainError('UNAUTHORIZED');
+    await this.run('UPDATE users SET netease_profile_url=? WHERE id=?',[url,userId]);
+    await this.run('DELETE FROM settings WHERE setting_key=?',['music.profile.'+userId]);
+  }
   async findUser(name:string):Promise<UserRecord|undefined> { return (await this.rows('SELECT id,name,email,display_name AS displayName,avatar_url AS avatarUrl,password_hash AS passwordHash,salt,last_login_ip AS lastLoginIp FROM users WHERE name=? LIMIT 1',[name]))[0] as UserRecord|undefined; }
   async getUser(id:string):Promise<UserRecord|undefined> { return (await this.rows('SELECT id,name,email,display_name AS displayName,avatar_url AS avatarUrl,password_hash AS passwordHash,salt,last_login_ip AS lastLoginIp FROM users WHERE id=?',[id]))[0] as UserRecord|undefined; }
-  async insertUser(user:UserRecord) { await this.run('INSERT INTO users(id,name,email,display_name,avatar_url,password_hash,salt,last_login_ip) VALUES(?,?,?,?,?,?,?,?)',[user.id,user.name,user.email??null,user.displayName??user.name,user.avatarUrl??null,user.passwordHash,user.salt,user.lastLoginIp??null]); }
+  async insertUser(user:UserRecord) { await this.run('INSERT INTO users(id,name,email,display_name,avatar_url,password_hash,salt,last_login_ip,netease_profile_url) VALUES(?,?,?,?,?,?,?,?,?)',[user.id,user.name,user.email??null,user.displayName??user.name,user.avatarUrl??null,user.passwordHash,user.salt,user.lastLoginIp??null,user.neteaseProfileUrl??null]); }
   async updateLoginIp(id:string, ip:string|null) { await this.run('UPDATE users SET last_login_ip=? WHERE id=?',[ip,id]); }
   async saveRoom(record:RoomRecord):Promise<void> {
     // A room row and its ordered queue always commit together.

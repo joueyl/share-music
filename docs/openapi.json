@@ -3716,6 +3716,252 @@
         },
         "description": "客户端一次提交，服务端沿用既有 QQ 元数据接口逐项有界读取；QQ 不使用 Hana 上游 batch。在线成员、enqueue 权限、容量及逐项幂等校验，顺序入队并返回部分成功结果；按歌曲数计入每用户每 10 分钟 200 首限流。"
       }
+    },
+    "/api/music/profile": {
+      "get": {
+        "summary": "读取当前同频账号绑定的网易云主页资料（每分钟30次）",
+        "operationId": "get_music_profile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "真实网易云资料或未绑定。仅保存公开主页引用，不代表所有权认证。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "profile"
+                  ],
+                  "properties": {
+                    "profile": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "source",
+                        "id",
+                        "nickname",
+                        "avatarUrl",
+                        "signature"
+                      ],
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "netease"
+                          ]
+                        },
+                        "id": {
+                          "type": "string",
+                          "pattern": "^\\d{1,20}$"
+                        },
+                        "nickname": {
+                          "type": "string"
+                        },
+                        "avatarUrl": {
+                          "type": "string"
+                        },
+                        "signature": {
+                          "type": "string"
+                        }
+                      },
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "UNAUTHORIZED"
+          },
+          "400": {
+            "description": "MUSIC_PROFILE_INVALID / MUSIC_PROFILE_UNAVAILABLE 或上游错误"
+          },
+          "503": {
+            "description": "DATABASE_UNAVAILABLE，数据库失败不冒充未绑定"
+          }
+        },
+        "description": "从已认证同频用户个人信息中的 netease_profile_url 读取绑定；旧 settings 引用首次读取时迁移，损坏数据报错不清空。按链接中验证过的网易云ID读取实时头像、昵称、签名；上游暂时失败不会删除绑定。仅本人可读，不输出用户数据库原始字段或凭据。"
+      },
+      "put": {
+        "summary": "绑定/更换网易云个人主页或解除绑定（每用户每分钟10次，全局120次）",
+        "description": "验证真实网易云资料后，将规范化 https://music.163.com/user?id=<ID> 写入当前已认证用户的 users.netease_profile_url 个人信息绑定字段，不保存分享追踪参数或凭据。MySQL 启动版本6幂等加列；旧 settings 引用首次读取时兼容迁移。更换/解除与旧记录清理同事务，失败保留旧绑定；null解除。按用户串行写入，不代表上游登录/所有权验证，不覆盖同频账号昵称/头像。QQ 任意主页仍返回 QQ_PUBLIC_PROFILE_UNSUPPORTED 且保留旧绑定。",
+        "operationId": "set_music_profile",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "input"
+                ],
+                "properties": {
+                  "input": {
+                    "type": "string",
+                    "nullable": true,
+                    "minLength": 1,
+                    "maxLength": 4096,
+                    "description": "网易云个人主页链接；null解除绑定"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "真实网易云资料或未绑定。仅保存公开主页引用，不代表所有权认证。",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "profile"
+                  ],
+                  "properties": {
+                    "profile": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "source",
+                        "id",
+                        "nickname",
+                        "avatarUrl",
+                        "signature"
+                      ],
+                      "properties": {
+                        "source": {
+                          "type": "string",
+                          "enum": [
+                            "netease"
+                          ]
+                        },
+                        "id": {
+                          "type": "string",
+                          "pattern": "^\\d{1,20}$"
+                        },
+                        "nickname": {
+                          "type": "string"
+                        },
+                        "avatarUrl": {
+                          "type": "string"
+                        },
+                        "signature": {
+                          "type": "string"
+                        }
+                      },
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "INVALID_REQUEST / MUSIC_PROFILE_LINK_REQUIRED / MUSIC_PROFILE_UNAVAILABLE / QQ_PUBLIC_PROFILE_UNSUPPORTED 或链接/上游错误"
+          },
+          "401": {
+            "description": "UNAUTHORIZED"
+          },
+          "429": {
+            "description": "RATE_LIMITED"
+          },
+          "503": {
+            "description": "DATABASE_UNAVAILABLE，数据库失败不冒充未绑定"
+          }
+        }
+      }
+    },
+    "/api/music/favorite-songs": {
+      "get": {
+        "summary": "读取当前同频账号收藏的单曲",
+        "operationId": "get_favorite_songs",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FavoriteSongsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or upstream data"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "503": {
+            "description": "Database unavailable"
+          }
+        },
+        "description": "仅当前认证同频用户；独立 user_favorite_songs 表按用户/音源/ID 去重，最多 5000 首，按收藏时间倒序。只保存元数据，不读取播放直链，不改变上游喜欢，不保证播放权限。GET 每用户60次/分钟；PUT 每用户60次/分钟、全局300次/分钟。写操作按用户串行，重复收藏/取消幂等；请求不能携带用户ID或元数据。"
+      },
+      "put": {
+        "summary": "收藏或取消收藏单曲，元数据由服务端验证",
+        "operationId": "set_favorite_song",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FavoriteSongRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FavoriteSongsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input or upstream data"
+          },
+          "401": {
+            "description": "Authentication required"
+          },
+          "429": {
+            "description": "Rate limited"
+          },
+          "503": {
+            "description": "Database unavailable"
+          }
+        },
+        "description": "仅当前认证同频用户；独立 user_favorite_songs 表按用户/音源/ID 去重，最多 5000 首，按收藏时间倒序。只保存元数据，不读取播放直链，不改变上游喜欢，不保证播放权限。GET 每用户60次/分钟；PUT 每用户60次/分钟、全局300次/分钟。写操作按用户串行，重复收藏/取消幂等；请求不能携带用户ID或元数据。"
+      }
     }
   },
   "components": {
@@ -4441,6 +4687,130 @@
           "total"
         ],
         "additionalProperties": false
+      },
+      "FavoriteSong": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "source",
+          "id",
+          "name",
+          "artists",
+          "album",
+          "coverUrl",
+          "durationMs",
+          "savedAt"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "enum": [
+              "netease",
+              "qq"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "网易云 1–20 位数字；QQ 1–80 位字母数字 songmid"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "artists": {
+            "type": "string",
+            "maxLength": 1000
+          },
+          "album": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "coverUrl": {
+            "type": "string",
+            "maxLength": 2048
+          },
+          "durationMs": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 86400000
+          },
+          "savedAt": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "收藏时间，Unix 毫秒"
+          }
+        }
+      },
+      "FavoriteSongsResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "songs"
+        ],
+        "properties": {
+          "songs": {
+            "type": "array",
+            "maxItems": 5000,
+            "items": {
+              "$ref": "#/components/schemas/FavoriteSong"
+            }
+          }
+        }
+      },
+      "FavoriteSongRequest": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "id",
+              "saved"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "netease"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^\\d{1,20}$"
+              },
+              "saved": {
+                "type": "boolean"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "id",
+              "saved"
+            ],
+            "properties": {
+              "source": {
+                "type": "string",
+                "enum": [
+                  "qq"
+                ]
+              },
+              "id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9]{1,80}$"
+              },
+              "saved": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
       }
     }
   }

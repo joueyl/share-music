@@ -158,3 +158,7 @@ it('rejects unavailable QQ file sizes without downloading audio or saving a sour
   } finally {f.db.close();}
  }
 });
+
+it('reads verified QQ favorite metadata without fetching audio URLs',async()=>{
+ const f=fixture();try{expect(await f.service.songDetail(mid)).toMatchObject({id:mid,name:expect.any(String)});expect(f.request.mock.calls).toHaveLength(1);expect(new URL(String(f.request.mock.calls[0][0])).pathname).toBe('/getSongInfo');await expect(f.service.songDetail('invalid/id')).rejects.toThrow('INVALID_REQUEST');expect(f.request.mock.calls).toHaveLength(1);}finally{f.db.close();}
+});

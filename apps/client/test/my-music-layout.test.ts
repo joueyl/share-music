@@ -1,3 +1,4 @@
+import { createPinia } from 'pinia';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { nextTick, reactive } from 'vue';
 import { all, node, renderer, text } from './helpers/vue-host';
@@ -5,10 +6,10 @@ import Playlists from '../src/views/Playlists.vue';
 import { parseMusicReference } from '@music-share/shared';
 import { parse } from '@vue/compiler-sfc';
 import { readFileSync } from 'node:fs';
-const f=vi.hoisted(()=>({app:null as any,detail:vi.fn(),resolve:vi.fn(),users:vi.fn(),songs:vi.fn(),favorites:vi.fn(),favorite:vi.fn(),album:vi.fn(),add:vi.fn(),play:vi.fn()}));
+const f=vi.hoisted(()=>({profile:vi.fn(),bind:vi.fn(),app:null as any,detail:vi.fn(),resolve:vi.fn(),users:vi.fn(),songs:vi.fn(),favorites:vi.fn(),favorite:vi.fn(),album:vi.fn(),add:vi.fn(),play:vi.fn()}));
 vi.mock('../src/store',()=>({useApp:()=>f.app}));
 vi.mock('../src/server-config',()=>({getServerUrl:()=> 'http://localhost:3000'}));
-vi.mock('../src/bridge',()=>({playlistDetail:f.detail,resolveMusicLink:f.resolve,userPlaylists:f.users,playlistSongs:f.songs,musicFavorites:f.favorites,setMusicFavorite:f.favorite,albumDetail:f.album,addSearchedMusicBatch:f.add,playMusic:f.play}));
+vi.mock('../src/bridge',()=>({favoriteSongs:vi.fn(async()=>[]),setFavoriteSong:vi.fn(async()=>[]),musicProfile:f.profile,bindMusicProfile:f.bind,playlistDetail:f.detail,resolveMusicLink:f.resolve,userPlaylists:f.users,playlistSongs:f.songs,musicFavorites:f.favorites,setMusicFavorite:f.favorite,albumDetail:f.album,addSearchedMusicBatch:f.add,playMusic:f.play}));
 let mounted:ReturnType<typeof renderer.createApp>;
 const settle=async()=>{for(let i=0;i<8;i++){await Promise.resolve();await nextTick();}};
 const saved=Array.from({length:30},(_,i)=>({id:String(i+1),name:`最近歌单${i+1}`}));
@@ -16,18 +17,19 @@ beforeEach(()=>{
  vi.stubGlobal('Document',class{});vi.stubGlobal('ShadowRoot',class{});
  f.app=reactive({user:{id:'user'},room:{id:'room',playlist:[]},connected:true,permission:{enqueue:true,skip:true}});
  vi.stubGlobal('localStorage',{getItem:vi.fn(()=>JSON.stringify(saved)),setItem:vi.fn()});
+ f.profile.mockReset().mockResolvedValue(null);f.bind.mockReset().mockImplementation(async(input:string|null)=>input===null?null:({source:'netease',id:parseMusicReference(input).id,nickname:'真实昵称',avatarUrl:'https://p1.music.126.net/avatar.jpg',signature:'个人签名'}));
  f.resolve.mockReset().mockImplementation(async(input:string)=>parseMusicReference(input));
  f.favorites.mockReset().mockResolvedValue([]);f.favorite.mockReset().mockResolvedValue([]);f.add.mockReset().mockImplementation(async(_room:string,items:any[])=>items.map(item=>({...item,ok:true,track:{id:'added-'+item.songId}})));
  f.play.mockReset().mockResolvedValue({});
  f.album.mockReset().mockResolvedValue({collection:{kind:'album',id:'38306',name:'测试专辑',trackCount:1,creatorId:'',coverUrl:''},songs:[{id:'8',name:'专辑歌曲',artists:'歌手',album:'专辑'}]});
- f.detail.mockReset().mockResolvedValue({id:'1',name:'测试歌单',creatorId:'123',trackCount:100});
+ f.detail.mockReset().mockResolvedValue({id:'1',name:'测试歌单',creatorId:'123',trackCount:50});
  f.users.mockReset().mockResolvedValue({playlists:[],more:false});
  f.songs.mockReset().mockResolvedValue(Array.from({length:50},(_,i)=>({id:String(i+1),name:`歌曲${i+1}`,artists:'歌手',album:'专辑'})));
 });
 afterEach(()=>{mounted?.unmount();vi.unstubAllGlobals();});
-async function mount(){const root=node('root');mounted=renderer.createApp(Playlists);mounted.mount(root);await settle();return root;}
+async function mount(){const root=node('root');mounted=renderer.createApp(Playlists);mounted.use(createPinia());mounted.mount(root);await settle();return root;}
 async function importPlaylist(root:any,value='https://music.163.com/m/playlist?id=1&creatorId=999'){
- const input=all(root).find(n=>n.props['aria-label']==='网易云个人主页、歌单或专辑链接');input.props['onUpdate:modelValue'](value);await settle();
+ const input=all(root).find(n=>n.props['aria-label']==='音乐个人主页、歌单或专辑链接');input.props['onUpdate:modelValue'](value);await settle();
  await all(root).find(n=>n.type==='form').props.onSubmit({preventDefault(){}});await settle();
 }
 it('direct playlist links ignore creatorId and never load unrelated profile playlists or local history',async()=>{
@@ -37,17 +39,18 @@ it('direct playlist links ignore creatorId and never load unrelated profile play
  expect(all(root).some(n=>n.type==='select'||n.props.class==='playlist-card')).toBe(false);
  expect(text(root)).toContain('歌单 ID：1');expect(text(root)).not.toContain('用户歌单');
 });
-it('keeps load-more inside this playlist, with the import bar and instructions collapsed',async()=>{
+it('loads the complete playlist automatically with the import bar and instructions collapsed',async()=>{
+ f.detail.mockResolvedValueOnce({id:'1',name:'完整歌单',trackCount:51});
+ f.songs.mockResolvedValueOnce(Array.from({length:50},(_,i)=>({id:String(i+1),name:'歌曲'+(i+1)}))).mockResolvedValueOnce([{id:'51',name:'歌曲51'}]);
  const root=await mount();await importPlaylist(root);
  expect(all(root).some(n=>n.props.class==='music-search-form collection-import')).toBe(false);
  const list=all(root).find(n=>n.props['aria-label']==='歌单歌曲列表');
- expect(all(list).filter(n=>n.type==='label')).toHaveLength(50);
- const more=all(list).find(n=>n.type==='button'&&text(n).includes('加载更多歌曲'));
- f.songs.mockResolvedValueOnce([{id:'51',name:'歌曲51',artists:'歌手',album:'专辑'}]);await more.props.onClick();await settle();
+ expect(all(list).filter(n=>n.type==='label')).toHaveLength(51);
+ expect(text(root)).not.toContain('加载更多歌曲');expect(text(root)).toContain('已选 51 首');
  expect(f.songs).toHaveBeenLastCalledWith('1',50);expect(f.users).not.toHaveBeenCalled();
  const help=all(root).find(n=>n.type==='details'&&n.props.class==='library-help');expect(help.props.open).not.toBe(true);
  const change=all(root).find(n=>n.type==='button'&&text(n)==='更换链接');await change.props.onClick();await settle();
- expect(all(root).some(n=>n.props['aria-label']==='网易云个人主页、歌单或专辑链接')).toBe(true);
+ expect(all(root).some(n=>n.props['aria-label']==='音乐个人主页、歌单或专辑链接')).toBe(true);
  f.detail.mockResolvedValueOnce({id:'2',name:'另一个歌单',trackCount:1});f.songs.mockResolvedValueOnce([{id:'99',name:'新歌',artists:'歌手'}]);
  await importPlaylist(root,'2');expect(f.songs).toHaveBeenLastCalledWith('2',0);
  const newList=all(root).find(n=>n.props['aria-label']==='歌单歌曲列表');expect(all(newList).filter(n=>n.type==='label')).toHaveLength(1);
@@ -74,7 +77,7 @@ it('reserves remaining height for lists and compacts only the my-music controls'
 });
 
 it('shows exactly the requested two music tabs',async()=>{
- const root=await mount();expect(all(root).filter(n=>n.props.role==='tab').map(n=>text(n).trim())).toEqual(['网易云歌单','已收藏']);
+ const root=await mount();expect(all(root).filter(n=>n.props.role==='tab').map(n=>text(n).trim())).toEqual(['音乐主页','已收藏']);
 });
 it('loads all accessible profile playlist pages, then opens only the selected playlist',async()=>{
  const root=await mount();f.users.mockResolvedValueOnce({playlists:[{id:'1',name:'主页歌单一',trackCount:2},{id:'2',name:'主页歌单二',trackCount:1}],more:true}).mockResolvedValueOnce({playlists:[{id:'3',name:'主页歌单三',trackCount:1}],more:false});
@@ -100,7 +103,7 @@ it('favorites are confirmed by the server, shown in the favorites tab, and may b
 });
 it('does not replace a newer link with an old pending profile result',async()=>{
  const root=await mount();let finish!:(value:any)=>void;f.users.mockImplementationOnce(()=>new Promise(resolve=>finish=resolve));
- const first=importPlaylist(root,'https://music.163.com/user?id=123');await settle();await importPlaylist(root,'https://music.163.com/album/38306/');
+ const first=importPlaylist(root,'https://music.163.com/user?id=123');for(let i=0;i<4;i++)await settle();expect(f.users).toHaveBeenCalledWith('123',0);f.app.user={id:'another-user'};await settle();await importPlaylist(root,'https://music.163.com/album/38306/');
  finish({playlists:[{id:'9',name:'过期的主页歌单'}],more:false});await first;await settle();expect(text(root)).not.toContain('过期的主页歌单');expect(text(root)).toContain('专辑 ID：38306');
 });
 it('reports favorite read failures without presenting a fake empty successful collection',async()=>{
@@ -130,9 +133,25 @@ it('returning during detail loading ignores its late response and preserves the 
  all(root).find(n=>n.type==='button'&&text(n).includes('返回已收藏')).props.onClick();await settle();finish({collection:item,songs:[]});await pending;await settle();
  expect(all(root).some(n=>n.props.class==='collection-grid')).toBe(true);expect(text(root)).not.toContain('专辑 ID：38306');
 });
-it('anchors every collection cover to the start with a fixed square size',()=>{
+it('uses responsive square cover tiles without shrinking covers into horizontal cards',()=>{
  const {descriptor}=parse(readFileSync(new URL('../src/views/Playlists.vue',import.meta.url),'utf8'));const css=descriptor.styles[0].content;
- expect(css).toContain('justify-content:flex-start;text-align:left');expect(css).toContain('.collection-open .album-art{width:92px;height:92px;flex:0 0 92px;object-fit:cover}');expect(css).toContain('.collection-open>span{flex:1;min-width:0}');
+ expect(css).toContain('justify-content:flex-start;text-align:left');
+ expect(css).toContain('width:100%;height:auto;aspect-ratio:1;flex:0 0 auto;object-fit:cover');
+ for(const count of [5,4,3,2])expect(css).toContain(`grid-template-columns:repeat(${count},minmax(0,1fr))`);
+ expect(css).toContain('-webkit-line-clamp:2');expect(css).toContain('min-height:44px;min-width:44px');
+ expect(css).not.toContain('width:92px;height:92px');
+});
+
+it('places the real profile before navigation and opens direct links without changing the binding',async()=>{
+ f.profile.mockResolvedValueOnce({source:'netease',id:'123',nickname:'真实主页',avatarUrl:'',signature:'真实签名'});
+ f.users.mockResolvedValueOnce({playlists:[{id:'1',name:'真实歌单',trackCount:1}],more:false});
+ const root=await mount(),header=all(root).find(n=>n.props.class==='library-topbar');
+ expect(text(header).indexOf('真实主页')).toBeLessThan(text(header).indexOf('音乐主页'));
+ expect(text(root)).not.toContain('打开歌单');expect(all(root).some(n=>n.props.class==='profile-source')).toBe(false);expect(text(header)).not.toContain('公开资料说明');expect(text(header)).not.toContain('用户 ID：');
+ await all(root).find(n=>n.type==='button'&&text(n)==='打开链接').props.onClick();await settle();
+ await importPlaylist(root,'https://music.163.com/album/38306');expect(f.bind).not.toHaveBeenCalled();expect(f.album).toHaveBeenCalledWith('38306');
+ expect(all(root).some(n=>n.props.class==='music-profile')).toBe(false);
+ all(root).find(n=>n.type==='button'&&text(n)==='返回歌单列表').props.onClick();await settle();expect(text(root)).toContain('真实主页');expect(text(root)).toContain('真实歌单');
 });
 
 it('presents aligned song metadata and real durations while keeping accessible selection',async()=>{
@@ -140,7 +159,7 @@ it('presents aligned song metadata and real durations while keeping accessible s
  const root=await mount();await importPlaylist(root);expect(all(root).some(n=>n.props.class==='detail-list-columns')).toBe(false);expect(text(root)).toContain('歌手 · 专辑');expect(text(root)).toContain('3:05');expect(text(root)).toContain('未知歌手');
  const rows=all(root).filter(n=>n.props.class==='music-search-row');expect(rows[0].props['data-selected']).toBe(true);
  const checkbox=all(rows[0]).find(n=>n.type==='input');expect(checkbox.props['aria-label']).toBe('选择 长歌名');checkbox.props.onChange();await settle();expect(rows[0].props['data-selected']).toBe(false);
- const {descriptor}=parse(readFileSync(new URL('../src/views/Playlists.vue',import.meta.url),'utf8'));const css=descriptor.styles[0].content;expect(css).toContain('.tone-library .track-list{display:grid;grid-template-columns:minmax(0,1fr)');expect(css).not.toContain('min(340px,100%)');expect(css).toContain('white-space:nowrap;overflow:hidden;text-overflow:ellipsis');expect(css).toContain('background:var(--surface);border:1px solid var(--border);border-radius:16px');expect(css).not.toContain('.detail-list-columns');expect(css).toContain('focus-within');
+ const {descriptor}=parse(readFileSync(new URL('../src/views/Playlists.vue',import.meta.url),'utf8'));const css=descriptor.styles[0].content;expect(css).toContain('.tone-library .track-list{display:grid;grid-template-columns:minmax(0,1fr)');expect(css).not.toContain('min(340px,100%)');expect(css).toContain('white-space:nowrap;overflow:hidden;text-overflow:ellipsis');expect(css).toContain('background:var(--surface);border:1px solid var(--border);border-radius:16px');expect(css).not.toContain('.detail-list-columns');expect(css).toContain('focus-within');expect(css).toContain('.detail-track-main{margin:0;cursor:pointer;display:flex;flex-direction:row;align-items:center;');
 });
 
 it('removes the legacy dark border and backing from detail artwork without changing card borders',()=>{
@@ -226,7 +245,7 @@ it('preserves selection on failures, reuses the idempotency key on retry and enf
 it('inherits the theme accent instead of forcing a separate blue palette',()=>{
  const {descriptor}=parse(readFileSync(new URL('../src/views/Playlists.vue',import.meta.url),'utf8')),css=descriptor.styles[0].content;
  expect(css).not.toMatch(/--accent\s*:/);expect(css).not.toMatch(/#(?:4f80db|4272c9|edf3fa|edf3fc|b8cdec|91aacd)\b/i);
- expect(css).toContain('background:var(--accent)');expect(css).toContain('color-mix(in srgb,var(--accent) 10%,white)');expect(css).toContain('border-color:color-mix(in srgb,var(--accent)');
+ expect(css).toContain('background:var(--accent)');expect(css).toContain('color-mix(in srgb,var(--accent) 5%,white)');expect(css).toContain('border-color:color-mix(in srgb,var(--accent)');
 });
 
 it('bounds the card reveal delay and changes the tab indicator without delaying requests',async()=>{
@@ -257,4 +276,61 @@ it('chunks 51 selected songs into batch requests of 50 and 1, retaining only fai
  const failed=f.add.mock.calls[0][1][1];
  await all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·')).props.onClick();await settle();
  expect(f.add.mock.calls[2][1]).toEqual([failed]);expect(text(root)).toContain('已选 0 首');
+});
+
+it('restores the bound public profile and playlists when the page is opened',async()=>{
+ f.profile.mockResolvedValueOnce({source:'netease',id:'123',nickname:'已绑定昵称',avatarUrl:'https://p1.music.126.net/avatar.jpg',signature:'真实签名'});
+ f.users.mockResolvedValueOnce({playlists:[{id:'1',name:'绑定歌单',trackCount:1}],more:false});
+ const root=await mount();expect(text(root)).toContain('已绑定昵称');expect(text(root)).toContain('真实签名');expect(text(root)).toContain('绑定歌单');
+ expect(all(root).find(n=>n.props.alt==='已绑定昵称的头像').props.src).toContain('avatar.jpg');expect(f.users).toHaveBeenCalledWith('123',0);
+ expect(all(root).some(n=>n.type==='form')).toBe(false);
+ await all(root).find(n=>n.type==='button'&&text(n)==='解除绑定').props.onClick();await settle();expect(f.bind).toHaveBeenCalledWith(null);expect(text(root)).not.toContain('已绑定昵称');expect(text(root)).not.toContain('绑定歌单');
+});
+it('keeps the existing profile on rejected replacement and explains the QQ limitation',async()=>{
+ const root=await mount();await importPlaylist(root,'https://music.163.com/user?id=123');
+ all(root).find(n=>n.type==='button'&&text(n)==='更换主页').props.onClick();await settle();
+ f.bind.mockRejectedValueOnce(Error('QQ_PUBLIC_PROFILE_UNSUPPORTED'));await importPlaylist(root,'https://y.qq.com/n/ryqq/profile/123');
+ expect(text(root)).toContain('暂不能绑定');expect(text(root)).toContain('真实昵称');expect(f.bind).toHaveBeenLastCalledWith('https://y.qq.com/n/ryqq/profile/123');
+});
+it('distinguishes restore failure from empty data and supports retry',async()=>{
+ f.profile.mockRejectedValueOnce(Error('OFFLINE'));const root=await mount();expect(text(root)).toContain('音乐主页读取失败：OFFLINE');expect(text(root)).not.toContain('该用户暂无可访问的歌单');
+ f.profile.mockResolvedValueOnce({source:'netease',id:'123',nickname:'恢复成功',avatarUrl:'',signature:''});
+ await all(root).find(n=>n.type==='button'&&text(n)==='重试读取音乐主页').props.onClick();await settle();expect(text(root)).toContain('恢复成功');expect(text(root)).not.toContain('OFFLINE');
+});
+
+it('does not show a failed playlist fetch as a successful empty profile',async()=>{
+ const root=await mount();f.users.mockRejectedValueOnce(Error('UPSTREAM_FAILED'));await importPlaylist(root,'https://music.163.com/user?id=123');
+ expect(text(root)).toContain('UPSTREAM_FAILED');expect(text(root)).toContain('真实昵称');expect(text(root)).not.toContain('该用户暂无可访问的歌单');expect(text(root)).toContain('重试读取音乐主页');
+});
+
+it('keeps collection hover transparent, borderless and shadowless while preserving keyboard focus feedback',()=>{
+ const {descriptor}=parse(readFileSync(new URL('../src/views/Playlists.vue',import.meta.url),'utf8')),css=descriptor.styles[0].content;
+ const hoverRules=[...css.matchAll(/([^{}]*\.music-collection-card[^{}]*:hover[^{}]*)\{([^{}]*)\}/g)];
+ expect(hoverRules.length).toBeGreaterThan(0);
+ for(const rule of hoverRules)expect(rule[2]).not.toMatch(/(?:border|outline|background|box-shadow|filter)(?:-[\w-]+)?\s*:/);
+ expect(css).toContain('.music-collection-card:focus-within{border-color:var(--accent)}');
+});
+
+it('offers playlist and song favorites as separate subtabs',async()=>{
+ const root=await mount();all(root).find(n=>n.props.role==='tab'&&text(n)==='已收藏').props.onClick();await settle();
+ expect(all(root).filter(n=>n.props.role==='tab').map(n=>text(n))).toContain('已收藏的歌单');
+ all(root).find(n=>n.props.role==='tab'&&text(n)==='已收藏的单曲').props.onClick();await settle();
+ expect(text(root)).toContain('还没有收藏的单曲');expect(all(root).some(n=>n.props.class==='collection-grid')).toBe(false);
+});
+it('fades selected-song tint and border to half the previous intensity',()=>{
+ const {descriptor}=parse(readFileSync(new URL('../src/views/Playlists.vue',import.meta.url),'utf8')),css=descriptor.styles[0].content;
+ expect(css).toContain('var(--accent) 5%,white');expect(css).toContain('var(--accent) 17.5%,var(--border)');expect(css).not.toContain('var(--accent) 10%,white');
+});
+it('stops repeated upstream pages and does not continue loading after returning from details',async()=>{
+ f.detail.mockResolvedValueOnce({id:'1',name:'重复页',trackCount:101});const root=await mount();await importPlaylist(root);
+ expect(f.songs).toHaveBeenCalledTimes(2);expect(text(root)).toContain('未返回新内容');
+ all(root).find(n=>n.type==='button'&&text(n)==='返回歌单列表').props.onClick();await settle();
+});
+
+it('keeps enqueue disabled after a later song page fails and allows an explicit full retry',async()=>{
+ f.detail.mockResolvedValue({id:'1',name:'完整读取测试',trackCount:51});
+ f.songs.mockResolvedValueOnce(Array.from({length:50},(_,i)=>({id:String(i+1),name:'歌曲'+i}))).mockRejectedValueOnce(Error('OFFLINE'));
+ const root=await mount();await importPlaylist(root);expect(text(root)).toContain('OFFLINE');expect(text(root)).toContain('歌单未完整读取');expect(all(root).find(n=>n.type==='button'&&text(n).includes('加入房间 ·')).props.disabled).toBe(true);
+ f.songs.mockResolvedValueOnce(Array.from({length:50},(_,i)=>({id:String(i+1),name:'歌曲'+i}))).mockResolvedValueOnce([{id:'51',name:'最后歌曲'}]);
+ await all(root).find(n=>n.type==='button'&&text(n)==='重新加载详情').props.onClick();await settle();expect(text(root)).toContain('已选 51 首');expect(text(root)).not.toContain('歌单未完整读取');expect(text(root)).not.toContain('OFFLINE');
 });

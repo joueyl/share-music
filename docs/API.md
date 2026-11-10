@@ -223,7 +223,7 @@ body：`{"trackId":"队列UUID","requestId":"UUID"}`，返回 `{ok:true,stateVer
 ## 4. 网易云与管理
 
 `GET /api/netease/:method` 使用 query，`POST /api/netease/:method` 使用 JSON；均需 Bearer token。
-允许方法：search、search_suggest、cloudsearch、simi_song、song_detail、song_url、lyric、lyric_new、playlist_detail、playlist_track_all、user_playlist、user_account、user_cloud、login_status、album。
+允许方法：search、search_suggest、cloudsearch、simi_song、song_detail、song_url、lyric、lyric_new、playlist_detail、playlist_track_all、user_playlist、user_detail、user_account、user_cloud、login_status、album。
 
 相似推荐：`GET /api/netease/simi_song?id=歌曲网易云ID&limit=12&offset=0`，返回上游 `songs` 列表。id 必须为 1–20 位数字，limit 为 1–100，offset 为 0–100000 的整数。客户端根据当前播放加载，过滤当前歌曲、重复结果和队列已有歌曲；点选后通过既有音乐添加接口入队，不自动播放。此功能需要同步更新服务端白名单。
 仅转发白名单参数，禁止注入 Cookie、代理和地址。详情见 [NETEASE.md](NETEASE.md)、[MUSIC-SEARCH.md](MUSIC-SEARCH.md)。
@@ -350,8 +350,28 @@ QQ 封面 CDN 无 CORS 许可时不能直接用于 Canvas/WebGL。舞台使用�
 
 - `POST /api/music/reference/resolve`：Bearer 鉴权，严格 body `{input:string}`（1–4096），返回 `{kind:"user"|"playlist"|"album",id:string}`。每用户 20 次/分钟、全局 120 次/分钟。长链本地识别，短链仅请求固定 163cn.tv HTTPS，最多 5 次/10 秒，逐跳拒绝凭据、非默认端口、私网/外域与不支持资源；不获取最终网页，不转发任何认证。错误为 MUSIC_LINK_INVALID / MUSIC_LINK_RESOLVE_FAILED / MUSIC_LINK_REDIRECT_LIMIT。
 - `/api/netease/user_playlist?uid=<主页用户ID>&offset=0&limit=30`：分页获取该用户可访问的歌单，包括上游允许展示的创建/收藏列表，不保证读取私有列表。新页面逐页加载，每批最多 100 页，超大列表可继续加载；不从歌单 creatorId 或专辑 userid 推断需要加载主页。
-- `/api/netease/playlist_detail?id=<歌单ID>`、`playlist_track_all?id=...&offset=...&limit=50` 沿用原接口；新增只读 `album?id=<专辑ID>`，返回上游真实 album/songs，id 为 1–20 位数字。歌单/专辑歌曲仍通过现有房间导入接口加入播放列表，原权限、容量和 requestId 幂等规则不变。
+- `/api/netease/playlist_detail?id=<歌单ID>`、`playlist_track_all?id=...&offset=...&limit=50` 保留上游分页传输，但客户端自动连续读取整个歌单的可访问歌曲，不再显示手动分页/加载更多；超过 100000 首明确报读取上限，重复页/失败可重试，不冒充完整成功。另有只读 `album?id=<专辑ID>`，返回上游真实 album/songs，id 为 1–20 位数字。歌单/专辑歌曲仍通过现有房间导入接口加入播放列表，原权限、容量和 requestId 幂等规则不变。
 - `GET /api/music/favorites`：Bearer 鉴权，返回 `{collections:MusicCollection[]}`，仅当前同频账号可见；每用户 60 次/分钟。
 - `PUT /api/music/favorites`：Bearer 鉴权，严格 `{kind:"playlist"|"album",id:"数字ID",saved:boolean}`。true 收藏，false 取消；返回最新 `{collections}`。每用户 20 次/分钟、全局 120 次/分钟，每账号最多 200 项（MUSIC_FAVORITES_FULL）。客户端不能指定 userId 或伪造名称/封面，收藏元数据由服务端向真实网易云详情接口验证；同账号并发写串行化防止覆盖，重复收藏/取消结果幂等。损坏的存量数据返回 MUSIC_FAVORITES_INVALID，不静默清空。
 
 MusicCollection 包含 kind/id/name/coverUrl/trackCount/creatorId，可带 description。收藏保存在 settings 的 `music.favorites.<同频用户UUID>` JSON 中，跨客户端/重启保留，不更改共享网易云账号的歌单收藏；无数据库结构迁移。当前与房间一样以单服务进程为基准，不提供多实例收藏写锁。需同步更新前后端，桌面重建。
+
+## 我的音乐个人主页绑定
+
+- `GET /api/music/profile`：返回 `{profile:null}` 或 `{profile:{source:"netease",id,nickname,avatarUrl,signature}}`，从当前用户 `users.netease_profile_url` 读取规范化链接、提取网易云 ID，再读取真实上游资料，不返回原始响应或凭据。鉴权用户每分钟 30 次，响应禁止缓存。
+- `PUT /api/music/profile`：严格请求 `{input:string|null}`，链接去首尾空白后 1–4096 字；`null` 解除绑定。网易云个人主页及可安全展开的 163cn.tv 主页分享链接经 user_detail 校验后保存，将规范化 `https://music.163.com/user?id=<ID>` 存入当前同频账号个人信息字段 `users.netease_profile_url`（VARCHAR(255) NULL）。不保存原始分享文案、追踪参数、Cookie 或昵称/头像快照。MySQL 版本 6 增量加列，SQLite 同步兼容；旧 `settings.music.profile.<用户ID>` 引用在首次读取时迁移到用户字段。更换/解除时更新用户列与清除旧 settings 在同一事务提交，解除后不能从旧引用复活；坏数据明确报错不清空。每用户每分钟 10 次、全局每分钟 120 次；写操作按用户串行，失败保留旧绑定。返回同 GET。
+- 绑定是公开主页引用，不是上游登录或账号所有权验证，不覆盖同频账号头像/昵称；不授予私密数据权限。歌单仍经现有 `user_playlist` 分页读取；歌单/专辑直开和收藏接口不变。
+- 当前 QQ API 3.3.5 的 `/user/detail`、`/user/playlist` 只能读取服务端已登录账号，不支持任意主页；QQ 主页输入返回 `QQ_PUBLIC_PROFILE_UNSUPPORTED`，不保存假绑定或取服务端账号资料代替。
+- `MUSIC_PROFILE_LINK_REQUIRED`：资源不是主页；`MUSIC_PROFILE_UNAVAILABLE`：上游资料失败/身份不符；`MUSIC_PROFILE_INVALID`：保存数据异常。其他链接/上游错误保留原错误。失败不伪装为空数据。
+- 客户端和后端需同步升级才能使用绑定功能，老的直开歌单/专辑与收藏接口继续保留。
+
+## 用户收藏单曲
+
+- `GET /api/music/favorite-songs`：Bearer 鉴权，禁止缓存，返回 `{songs:FavoriteSong[]}`，仅 token 当前用户，完整返回最多 5000 首；每用户 60 次/分钟。
+- `PUT /api/music/favorite-songs`：严格 `{source:"netease"|"qq",id:string,saved:boolean}`，网易云 ID 为 1–20 位数字，QQ 为 1–80 位字母数字 songmid。返回最新 `{songs}`；每用户 60 次/分钟、全局 300 次/分钟。拒绝 userId、元数据和未知字段。
+- FavoriteSong：source/id/name/artists/album/coverUrl/durationMs/savedAt（Unix 毫秒）。收藏前由服务端 song_detail / QQ getSongInfo 验证并规范化，不向客户端接收伪造名称，不获取播放直链，不保存 Cookie 或签名 URL。取消收藏不依赖上游在线；重复收藏/取消幂等，同用户写串行，失败不移除现有记录。
+- `user_favorite_songs` 独立表以 `(user_id,source,song_id)` 为主键、用户外键级联删除，按 saved_at 倒序。与原歌单/专辑 settings 收藏独立，跨音源同 ID 不冲突、不改变上游喜欢；错误 FAVORITE_SONGS_FULL / FAVORITE_SONGS_INVALID 不冒充空收藏。当前同房间引擎一样以单服务进程为基准。
+- 我的音乐“已收藏”内分“已收藏的歌单”（包含原专辑收藏）和“已收藏的单曲”；播放列表抽屉的“收藏单曲”展示同一账号数据。歌单详情、队列和全局播放器的爱心可收藏单曲。加入队列仍走原音源 batch 导入、权限、容量、幂等和过期结果保护，不自动播放。
+- MySQL 启动增量迁移版本 5 建表，不迁移或删除原歌单收藏；SQLite 隔离测试使用同名表，旧 SQLite→MySQL 手动迁移兼容此表。需备份并同步更新前后端、重建客户端及以相应 DDL 权限重启后端；本次开发不执行生产迁移。
+
+个人绑定字段升级：先备份数据库，使用具备 ALTER TABLE 权限的账号重启新版后端，启动时幂等新增用户绑定列并记录 schema_migrations=6。接口请求/响应与客户端交互不变；数据库原有绑定字段非空时优先使用该值，旧引用迁移不依赖上游在线（资料读取失败仍保留已迁移链接）。本次开发未执行生产迁移。

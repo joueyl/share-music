@@ -1,3 +1,4 @@
+import { favoriteSongSchema, type FavoriteSong } from '@music-share/shared';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { configureRuntimeProfile, getRuntimeProfile } from './runtime-profile';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -310,6 +311,15 @@ export async function similarMusic(id:string,signal?:AbortSignal):Promise<MusicS
   });
 }
 export type MusicPlaylist={id:string;name:string;coverUrl:string;trackCount:number;creatorId:string;description?:string};
+export type MusicProfile={source:'netease';id:string;nickname:string;avatarUrl:string;signature:string};
+function checkedProfile(data:any):MusicProfile|null{
+ if(data?.profile===null)return null;
+ const p=data?.profile;
+ if(p?.source!=='netease'||typeof p.id!=='string'||!/^\d{1,20}$/.test(p.id)||typeof p.nickname!=='string'||!p.nickname.trim()||typeof p.avatarUrl!=='string'||typeof p.signature!=='string')throw new Error('MUSIC_PROFILE_INVALID');
+ return {source:'netease',id:p.id,nickname:p.nickname,avatarUrl:albumCover(p.avatarUrl),signature:p.signature};
+}
+export async function musicProfile():Promise<MusicProfile|null>{return checkedProfile(await browserRequest('/music/profile'));}
+export async function bindMusicProfile(input:string|null):Promise<MusicProfile|null>{return checkedProfile(await browserRequest('/music/profile',{input},undefined,'PUT'));}
 function playlistItem(p:any):MusicPlaylist { return {id:String(p.id),name:String(p.name??''),coverUrl:albumCover(p.coverImgUrl),trackCount:Number(p.trackCount??0),creatorId:String(p.creator?.userId??'')}; }
 export async function resolvePlaylistLink(input:string):Promise<{id:string}> {
   try{return {id:parsePlaylistLink(input).id};}catch(error){
@@ -362,3 +372,17 @@ export async function songLyrics(id:string,signal?:AbortSignal) {
 export async function playMusic(roomId:string,trackId:string,requestId:string) { return browserRequest(`/rooms/${roomId}/music/play`,{trackId,requestId}); }
 
 export async function qqLyrics(id:string,signal?:AbortSignal){return browserRequest('/qq/lyrics/'+encodeURIComponent(id),undefined,signal);}
+
+export type { FavoriteSong };
+function favoriteSongList(data:any):FavoriteSong[] {
+ if(!Array.isArray(data?.songs)||data.songs.length>5000)throw new Error('FAVORITE_SONGS_INVALID');
+ return data.songs.map((song:unknown)=>{const parsed=favoriteSongSchema.safeParse(song);if(!parsed.success)throw new Error('FAVORITE_SONGS_INVALID');return parsed.data;});
+}
+export async function favoriteSongs():Promise<FavoriteSong[]> {return favoriteSongList(await browserRequest('/music/favorite-songs'));}
+export async function setFavoriteSong(source:FavoriteSong['source'],id:string,saved:boolean):Promise<FavoriteSong[]> {
+ return favoriteSongList(await browserRequest('/music/favorite-songs',{source,id,saved},undefined,'PUT'));
+}
+export function favoriteTrackReference(track:{neteaseId?:string;qqId?:string}|null|undefined):{source:FavoriteSong['source'];id:string}|null {
+ if(track?.neteaseId)return {source:'netease',id:track.neteaseId};
+ if(track?.qqId)return {source:'qq',id:track.qqId};return null;
+}

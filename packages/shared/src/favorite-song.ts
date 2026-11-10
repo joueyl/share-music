@@ -1,0 +1,4 @@
+import { z } from 'zod';
+export const favoriteSongRequestSchema=z.object({source:z.enum(['netease','qq']),id:z.string().min(1).max(80),saved:z.boolean()}).strict().refine(v=>v.source==='netease'?/^\d{1,20}$/.test(v.id):/^[A-Za-z0-9]{1,80}$/.test(v.id),{message:'Invalid source song ID',path:['id']});
+export const favoriteSongSchema=z.object({source:z.enum(['netease','qq']),id:z.string().min(1).max(80),name:z.string().trim().min(1).max(200),artists:z.string().max(1000),album:z.string().max(500),coverUrl:z.string().max(2048),durationMs:z.number().int().nonnegative().max(86400000),savedAt:z.number().int().nonnegative()}).strict().refine(v=>v.source==='netease'?/^\d{1,20}$/.test(v.id):/^[A-Za-z0-9]{1,80}$/.test(v.id),{message:'Invalid source song ID',path:['id']});
+export type FavoriteSong=z.infer<typeof favoriteSongSchema>;

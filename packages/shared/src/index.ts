@@ -118,3 +118,5 @@ export function positionAt(playback: Playback, now: number): number {
 export function requiredBandwidth(bitrateBps: number, receivers: number): number {
   return Math.ceil(bitrateBps * receivers * 1.2);
 }
+
+export { favoriteSongSchema, favoriteSongRequestSchema, type FavoriteSong } from './favorite-song';

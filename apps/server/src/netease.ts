@@ -5,7 +5,7 @@ import type { DatabaseStore } from './database';
 import { DomainError } from './engine';
 
 export type PasswordLogin = { type: 'phone'; phone: string; countrycode: string; password: string } | { type: 'email'; email: string; password: string };
-export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'simi_song', 'song_detail', 'song_url', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_account', 'user_cloud', 'login_status', 'album']);
+export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'simi_song', 'song_detail', 'song_url', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_detail', 'user_account', 'user_cloud', 'login_status', 'album']);
 function publicBody(value: any): any {
   if (Array.isArray(value)) return value.map(publicBody);
   if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).filter(([k]) => !/^(cookie|token|accessToken|refreshToken|__csrf|MUSIC_U)$/i.test(k)).map(([k, v]) => [k, publicBody(v)]));
@@ -90,8 +90,8 @@ export class NeteaseService {
     // Do not allow browser callers to inject credentials, proxies or network addresses.
     const allowed = new Set(['keywords', 'limit', 'offset', 'type', 'id', 'ids', 'uid', 'br']);
     const clean = Object.fromEntries(Object.entries(params).filter(([key]) => allowed.has(key)));
-    if(['simi_song','lyric_new','playlist_track_all','playlist_detail','user_playlist','album'].includes(name)){
-      const key=name==='user_playlist'?'uid':'id';
+    if(['simi_song','lyric_new','playlist_track_all','playlist_detail','user_playlist','user_detail','album'].includes(name)){
+      const key=name==='user_playlist'||name==='user_detail'?'uid':'id';
       if(!/^\d{1,20}$/.test(String(clean[key]??'')))throw new DomainError('INVALID_REQUEST');
       if(name==='simi_song'||name==='playlist_track_all'||name==='user_playlist'){
         const limit=Number(clean.limit??(name==='user_playlist'?30:50)),offset=Number(clean.offset??0);

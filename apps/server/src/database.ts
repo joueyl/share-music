@@ -1,10 +1,11 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { TrackMetadata } from '../../../packages/shared/src';
+import type { FavoriteSong, TrackMetadata } from '../../../packages/shared/src';
 import { normalizeAlbumCover, trackSchema } from '../../../packages/shared/src';
+import { DomainError } from './engine';
 import type { RoomRecord } from './engine';
-export type UserRecord = { id: string; name: string; passwordHash: string; salt: string; lastLoginIp?: string|null; email?: string|null; displayName?: string; avatarUrl?: string|null };
+export type UserRecord = { id: string; name: string; passwordHash: string; salt: string; lastLoginIp?: string|null; neteaseProfileUrl?: string|null; email?: string|null; displayName?: string; avatarUrl?: string|null };
 export function songInfo(track:Partial<TrackMetadata>,detail:any) {
   const text=(value:unknown)=>typeof value==='string'?value.trim():'';
   const names=(value:unknown)=>Array.isArray(value)?[...new Set(value.map(a=>text(a?.name)).filter(Boolean))].join(' / '):'';
@@ -19,7 +20,13 @@ export class Database {
     this.db = new DatabaseSync(path);
     this.db.exec('CREATE TABLE IF NOT EXISTS music_details(scope TEXT NOT NULL,source TEXT NOT NULL,song TEXT NOT NULL,PRIMARY KEY(scope,source));');
     this.db.exec('PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; CREATE TABLE IF NOT EXISTS music_assets(scope TEXT NOT NULL,hash TEXT NOT NULL,oss_key TEXT NOT NULL,PRIMARY KEY(scope,hash)); CREATE TABLE IF NOT EXISTS music_sources(scope TEXT NOT NULL,source TEXT NOT NULL,track TEXT NOT NULL,PRIMARY KEY(scope,source)); CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS users(id TEXT PRIMARY KEY,name TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL,salt TEXT NOT NULL); CREATE TABLE IF NOT EXISTS rooms(id TEXT PRIMARY KEY,record TEXT NOT NULL);');
+    this.db.exec(`CREATE TABLE IF NOT EXISTS user_favorite_songs (
+      user_id TEXT NOT NULL, source TEXT NOT NULL, song_id TEXT NOT NULL, name TEXT NOT NULL,
+      artists TEXT NOT NULL, album TEXT NOT NULL, cover_url TEXT NOT NULL, duration_ms INTEGER NOT NULL, saved_at INTEGER NOT NULL,
+      PRIMARY KEY(user_id,source,song_id), FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE);
+      CREATE INDEX IF NOT EXISTS idx_favorite_songs_user_saved ON user_favorite_songs(user_id,saved_at DESC);`);
     if (!this.db.prepare('PRAGMA table_info(users)').all().some(c => c.name === 'last_login_ip')) this.db.exec('ALTER TABLE users ADD COLUMN last_login_ip TEXT NULL');
+    if (!this.db.prepare('PRAGMA table_info(users)').all().some(c => c.name === 'netease_profile_url')) this.db.exec('ALTER TABLE users ADD COLUMN netease_profile_url TEXT NULL');
   }
   getAsset(scope: string, hash: string): string | undefined { return (this.db.prepare('SELECT oss_key FROM music_assets WHERE scope=? AND hash=?').get(scope,hash) as {oss_key:string}|undefined)?.oss_key; }
   saveAsset(scope:string,hash:string,key:string) { this.db.prepare('INSERT INTO music_assets(scope,hash,oss_key) VALUES(?,?,?) ON CONFLICT(scope,hash) DO UPDATE SET oss_key=excluded.oss_key').run(scope,hash,key); }
@@ -86,14 +93,39 @@ export class Database {
     }
     return {total:songs.length,songs:songs.slice(offset,offset+limit)};
   }
+  listFavoriteSongs(userId:string):FavoriteSong[] {
+    return this.db.prepare('SELECT source,song_id AS id,name,artists,album,cover_url AS coverUrl,duration_ms AS durationMs,saved_at AS savedAt FROM user_favorite_songs WHERE user_id=? ORDER BY saved_at DESC,source,song_id').all(userId) as FavoriteSong[];
+  }
+  saveFavoriteSong(userId:string,song:FavoriteSong) {
+    this.db.prepare('INSERT INTO user_favorite_songs(user_id,source,song_id,name,artists,album,cover_url,duration_ms,saved_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(user_id,source,song_id) DO NOTHING').run(userId,song.source,song.id,song.name,song.artists,song.album,song.coverUrl,song.durationMs,song.savedAt);
+  }
+  removeFavoriteSong(userId:string,source:FavoriteSong['source'],id:string) {
+    this.db.prepare('DELETE FROM user_favorite_songs WHERE user_id=? AND source=? AND song_id=?').run(userId,source,id);
+  }
   getSetting(key: string): string | undefined { return (this.db.prepare('SELECT value FROM settings WHERE key=?').get(key) as { value: string } | undefined)?.value; }
   setSetting(key: string, value: string) { this.db.prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key, value); }
+  getUserMusicProfileUrl(userId:string):string|null {
+    const row=this.db.prepare('SELECT netease_profile_url AS url FROM users WHERE id=?').get(userId) as {url:string|null}|undefined;
+    return row?.url??null;
+  }
+  setUserMusicProfileUrl(userId:string,url:string|null) {
+    this.db.exec('SAVEPOINT music_profile_binding');
+    try{
+      const result=this.db.prepare('UPDATE users SET netease_profile_url=? WHERE id=?').run(url,userId);
+      if(!result.changes)throw new DomainError('UNAUTHORIZED');
+      this.db.prepare('DELETE FROM settings WHERE key=?').run('music.profile.'+userId);
+      this.db.exec('RELEASE SAVEPOINT music_profile_binding');
+    }catch(e){
+      this.db.exec('ROLLBACK TO SAVEPOINT music_profile_binding');this.db.exec('RELEASE SAVEPOINT music_profile_binding');
+      if(e instanceof DomainError)throw e;throw new DomainError('DATABASE_UNAVAILABLE');
+    }
+  }
   findUser(name: string): UserRecord | undefined {
     const r = this.db.prepare('SELECT id,name,password_hash AS passwordHash,salt,last_login_ip AS lastLoginIp FROM users WHERE name=?').get(name);
     return r as UserRecord | undefined;
   }
   getUser(id: string): UserRecord | undefined { return this.db.prepare('SELECT id,name,password_hash AS passwordHash,salt,last_login_ip AS lastLoginIp FROM users WHERE id=?').get(id) as UserRecord | undefined; }
-  insertUser(user: UserRecord) { this.db.prepare('INSERT INTO users(id,name,password_hash,salt,last_login_ip) VALUES(?,?,?,?,?)').run(user.id, user.name, user.passwordHash, user.salt, user.lastLoginIp ?? null); }
+  insertUser(user: UserRecord) { this.db.prepare('INSERT INTO users(id,name,password_hash,salt,last_login_ip,netease_profile_url) VALUES(?,?,?,?,?,?)').run(user.id, user.name, user.passwordHash, user.salt, user.lastLoginIp ?? null, user.neteaseProfileUrl ?? null); }
   updateLoginIp(id: string, ip: string|null) { this.db.prepare('UPDATE users SET last_login_ip=? WHERE id=?').run(ip, id); }
   saveRoom(record: RoomRecord) {
     const old = this.db.prepare('SELECT record FROM rooms WHERE id=?').get(record.id);

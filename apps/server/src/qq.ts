@@ -122,6 +122,13 @@ export class QqMusicService {
    }
   }
  }
+ async songDetail(mid:string){
+  if(!qqMid.test(mid))throw new DomainError('INVALID_REQUEST');
+  const detail=await this.call('/getSongInfo',{songmid:mid},await this.session());
+  const song=detail.response?.songinfo?.data?.track_info;
+  if(detail.response?.code!==0||detail.response?.songinfo?.code!==0||!song||String(song.mid??song.songmid)!==mid)throw new DomainError('QQ_INVALID_RESPONSE');
+  return qqSong(song);
+ }
  async audio(mid:string){
   const [detail,source]=await Promise.all([this.call('/getSongInfo',{songmid:mid},await this.session()),this.call('/getMusicPlay/'+mid,{quality:'128'},await this.session())]);
   const song=detail.response?.songinfo?.data?.track_info;

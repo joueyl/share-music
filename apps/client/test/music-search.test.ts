@@ -144,3 +144,17 @@ it('sends one authenticated batch with only song IDs and request IDs, and preser
  request.mockResolvedValueOnce(Response.json({results:[{songId:'other',requestId:'first',ok:false,error:'wrong'}]}));
  await expect(bridge.addSearchedMusicBatch('room',[items[0]])).rejects.toThrow('MUSIC_IMPORT_FAILED');
 });
+
+it('reads and binds a real public music profile through the authenticated project API',async()=>{
+ const {bridge,request}=await session();const profile={source:'netease',id:'123',nickname:'网易云昵称',avatarUrl:'http://p1.music.126.net/avatar.jpg',signature:'签名'};
+ request.mockResolvedValueOnce(new Response(JSON.stringify({profile})));
+ expect(await bridge.musicProfile()).toEqual({...profile,avatarUrl:'https://p1.music.126.net/avatar.jpg'});
+ let [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];expect(new URL(url).pathname).toBe('/api/music/profile');expect(options.headers).toMatchObject({Authorization:'Bearer project-token'});
+ request.mockResolvedValueOnce(new Response(JSON.stringify({profile})));await bridge.bindMusicProfile('https://music.163.com/user?id=123');
+ [url,options]=request.mock.calls.at(-1) as unknown as [string,RequestInit];expect(options.method).toBe('PUT');expect(JSON.parse(String(options.body))).toEqual({input:'https://music.163.com/user?id=123'});
+ request.mockResolvedValueOnce(new Response(JSON.stringify({profile:null})));expect(await bridge.bindMusicProfile(null)).toBeNull();
+ for(const malformed of [{},{profile:{...profile,id:'bad'}},{profile:{...profile,nickname:''}}]){
+  request.mockResolvedValueOnce(new Response(JSON.stringify(malformed)));await expect(bridge.musicProfile()).rejects.toThrow('MUSIC_PROFILE_INVALID');
+ }
+ request.mockResolvedValueOnce(new Response(JSON.stringify({error:'QQ_PUBLIC_PROFILE_UNSUPPORTED'}),{status:400}));await expect(bridge.bindMusicProfile('https://y.qq.com/n/ryqq/profile/123')).rejects.toThrow('QQ_PUBLIC_PROFILE_UNSUPPORTED');
+});

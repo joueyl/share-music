@@ -9,9 +9,11 @@ import { openSearch } from '../ui';
 import { useDialogFocus } from '../useDialogFocus';
 import * as bridge from '../bridge';
 import AlbumArt from './AlbumArt.vue';
+import FavoriteSongsList from './FavoriteSongsList.vue';
+import SongFavoriteButton from './SongFavoriteButton.vue';
 const playbackMode=usePlaybackMode();
 const props=defineProps<{open?:boolean}>();
-const app=useApp(),emit=defineEmits<{close:[]}>(),dialog=ref<HTMLElement|null>(null),tab=ref<'queue'|'history'>('queue');
+const app=useApp(),emit=defineEmits<{close:[]}>(),dialog=ref<HTMLElement|null>(null),tab=ref<'queue'|'history'|'favorites'>('queue');
 const visible=ref(true);
 let ignoreBackdropUntil=0;
 let searchAfterClose=false;
@@ -106,15 +108,16 @@ function add(){searchAfterClose=true;close();}
 <template><Teleport to="body"><Transition name="drawer" appear @after-leave="afterLeave"><div v-if="visible" class="drawer-backdrop" @click.self="backdropClose"><aside ref="dialog" class="queue-drawer" @pointermove="dragMove" @pointerup="finishDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag" role="dialog" aria-modal="true" aria-label="共享播放列表">
  <header class="drawer-heading"><div><h2>共享播放列表</h2><p>{{ app.room?.playlist.length??0 }} 首歌曲 · {{ app.room?.members.filter(m=>m.online).length??0 }} 人共同添加</p></div><button class="round-close" aria-label="关闭播放列表" @click="close"><X :size="20" /></button></header>
  <label class="queue-mode"><span>播放模式</span><select class="tone-select" aria-label="房间播放模式" :value="playbackMode.mode.value??''" :disabled="playbackMode.disabled.value" @change="playbackMode.change(($event.target as HTMLSelectElement).value)"><option v-if="!playbackMode.mode.value" value="">请更新服务端</option><option v-for="(label,mode) in PLAYBACK_MODE_LABELS" :key="mode" :value="mode">{{ label }}</option></select></label>
- <div class="queue-tabs"><button :class="{active:tab==='queue'}" @click="tab='queue'">当前队列</button><button :class="{active:tab==='history'}" @click="tab='history'">已播放</button><button v-if="app.permission.enqueue&&tab==='queue'" class="queue-clear" :disabled="!canReorder||!queue.some(t=>t.id!==current?.id)" title="保留当前歌曲，清空其他歌曲" @click="clear">清空</button></div>
+ <div class="queue-tabs" role="tablist" aria-label="播放列表分类"><button role="tab" :aria-selected="tab==='queue'" :class="{active:tab==='queue'}" @click="tab='queue'">当前队列</button><button role="tab" :aria-selected="tab==='history'" :class="{active:tab==='history'}" @click="tab='history'">已播放</button><button role="tab" :aria-selected="tab==='favorites'" :class="{active:tab==='favorites'}" @click="tab='favorites'">收藏单曲</button><button v-if="app.permission.enqueue&&tab==='queue'" class="queue-clear" :disabled="!canReorder||!queue.some(t=>t.id!==current?.id)" title="保留当前歌曲，清空其他歌曲" @click="clear">清空</button></div>
  <div v-if="tab==='history'" class="empty-state queue-history">当前 API 未提供播放历史，暂时无法查看。</div>
+ <FavoriteSongsList v-else-if="tab==='favorites'" />
  <template v-else>
  <div class="queue-next-heading"><strong>播放顺序 <small>{{ queue.length }}</small></strong><span id="queue-sort-hint">{{ app.permission.enqueue?'拖动手柄排序 · Alt+↑↓ 微调':'需要播放列表控制权限' }}</span></div>
  <div ref="scroll" class="queue-scroll" tabindex="0" aria-label="播放队列" :aria-busy="sorting">
   <div v-for="(item,i) in queue" :key="item.id" class="queue-row" :class="{'is-playing':item.id===current?.id,'is-dragging':dragging===item.id,'is-drop-target':dropTarget===item.id}" :data-track-id="item.id" @dblclick="playFromRow($event,item.id)">
    <button v-if="app.permission.enqueue" type="button" class="queue-drag-handle" @dblclick.stop :disabled="!canReorder" :aria-label="`拖动调整 ${item.name} 的顺序`" aria-describedby="queue-sort-hint" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" @pointerdown="startDrag($event,item.id)" @keydown.alt.up.prevent="move(item.id,-1)" @keydown.alt.down.prevent="move(item.id,1)"><GripVertical :size="16" /></button>
    <span class="queue-index">{{ (i+1).toString().padStart(2,'0') }}</span><AlbumArt :src="bridge.playingTrackCover(item)" :draggable="false" /><span class="queue-track"><strong>{{ item.name }}</strong><small>{{ item.artists||'未知歌手' }} · {{ item.id===current?.id?'正在播放':app.room?.members.find(m=>m.id===item.providerId)?.name??'成员' }}{{ item.id===current?.id?'':'添加' }}</small></span><time>{{ format(item.durationMs) }}</time>
-   <div class="track-actions" @dblclick.stop><AudioLines v-if="item.id===current?.id" class="queue-playing-icon" :size="16" /><button v-else class="icon-button" aria-label="播放此曲" :disabled="!canPlay||!item.available" @click="play(item.id)"><Play :size="15" /></button><details v-if="app.permission.enqueue" class="queue-more"><summary aria-label="歌曲操作">···</summary><div><button v-if="app.permission.enqueue" :disabled="!canReorder||i===0" aria-label="上移" @click="move(item.id,-1)"><ArrowUp :size="14" />上移</button><button v-if="app.permission.enqueue" :disabled="!canReorder||i===queue.length-1" aria-label="下移" @click="move(item.id,1)"><ArrowDown :size="14" />下移</button><button v-if="app.permission.enqueue" aria-label="移除音轨" :disabled="!canReorder||item.id===current?.id||!!dragging" @click="remove(item.id)"><Trash2 :size="14" />移除</button></div></details></div>
+   <div class="track-actions" @dblclick.stop><SongFavoriteButton :source="bridge.favoriteTrackReference(item)?.source" :song-id="bridge.favoriteTrackReference(item)?.id" :name="item.name" /><AudioLines v-if="item.id===current?.id" class="queue-playing-icon" :size="16" /><button v-else class="icon-button" aria-label="播放此曲" :disabled="!canPlay||!item.available" @click="play(item.id)"><Play :size="15" /></button><details v-if="app.permission.enqueue" class="queue-more"><summary aria-label="歌曲操作">···</summary><div><button v-if="app.permission.enqueue" :disabled="!canReorder||i===0" aria-label="上移" @click="move(item.id,-1)"><ArrowUp :size="14" />上移</button><button v-if="app.permission.enqueue" :disabled="!canReorder||i===queue.length-1" aria-label="下移" @click="move(item.id,1)"><ArrowDown :size="14" />下移</button><button v-if="app.permission.enqueue" aria-label="移除音轨" :disabled="!canReorder||item.id===current?.id||!!dragging" @click="remove(item.id)"><Trash2 :size="14" />移除</button></div></details></div>
   </div>
   <div v-if="!queue.length" class="empty-state compact">把喜欢的歌，加入共同的列表</div>
  </div></template>
