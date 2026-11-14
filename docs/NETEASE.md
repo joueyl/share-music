@@ -29,6 +29,8 @@ HTTP 路径 `GET /api/netease/:method`（查询参数）或 `POST /api/netease/:
 
 适配层把业务参数传给 `query`，Cookie 放到独立的 `config.cookie`，不再将旧库的 timestamp/noCookie 执行参数塞进业务输入。每次 SDK 调用超时 15 秒，Worker 18 秒终止，外层服务调用仍以 20 秒封顶；显式配置零重试，尤其不能在签到、领取或打卡超时后自动重复副作用。Worker 标准输出/错误输出不写服务端日志。登录拒绝只保留业务 code（包括风控 10004），打卡业务拒绝仅交给后台任务判断是否接受，不打印响应正文；其余传输/结构错误统一返回应用错误码。响应中的 Cookie/token 字段继续过滤，登录成功凭据仅存数据库。
 
+进程内默认 SDK 调用器最多同时保留 4 个 Worker，歌词、相似推荐、取链、登录及后台账号任务共用此上限；满额时不创建 Worker、不排队、不自动重试，立即返回既有 `NETEASE_UNAVAILABLE`。成功、失败及超时均等待 Worker 真正终止后才释放名额并结束调用，避免快速切歌时 SDK 实例及待退出的旧 Worker 无界叠加。此限制不代表进程总内存硬上限，也不保证满载时每个请求成功；线上 RSS 峰值与回落仍需实际部署复测。
+
 ## 验证与限制
 
 开发模式 `node --watch` 会设置 `WATCH_REPORT_DEPENDENCIES`，Worker 导入模块时可能先通过 parentPort 发送 `watch:import` 依赖报告。适配器只处理带 `music-share:hana-result` 标识的结果，不能把端口首条消息直接当作业务结果；不关闭热重载，不放宽接口或凭据校验。
@@ -91,4 +93,4 @@ node <项目绝对路径>/scripts/diagnose-netease-source.mjs <歌曲数字ID>
 - 打卡为单并发、最多 100 项等待队列，与每日任务和 HTTP 业务调用无共享串行锁；满队列丢弃并输出不含凭据的提示。沿用独立 Worker 和 18 秒 Worker/20 秒服务调用超时，不让慢打卡占住搜索、导入、取链或播放命令；关闭服务停止调度、丢弃等待项，并等待有界的在途调用结束后关闭数据库。
 - 这些副作用方法只允许服务端内部固定参数调用，`/api/netease/:method` 仍保持只读白名单。每日任务日志仅输出固定任务名和确认状态；听歌打卡不打印响应 body、歌曲 ID、来源 ID 或上报时长，成功时保持安静，仅保留失败/超时和队列满等固定异常提示，不输出凭据或上游原始异常。SDK 失败诊断仍按前述脱敏规则保留。只有真实账号联调才能验收签到、领取或排行结果，单元测试不代表已获得奖励。
 
-已核对 hana-music-api 3.2.0 的 daily_signin、yunbei_sign、vip_tasks、vip_growthpoint_get、scrobble 实现。新 SDK 的 scrobble 在一次模块调用内依次发送 startplay 和 play 两个请求，使用 SDK 内置的 clientlog/eapi 路径及客户端身份参数；队列、总时长上报与凭据隔离不变，禁用自动重试。返回 200 仍不证明排行、时长或奖励实际入账，必须真实账号核验；不额外增加第三方 HTTP 服务或定时框架。
+已核对 hana-music-api 3.2.0 的 daily_signin、yunbei_sign、vip_tasks、vip_growthpoint_get、scrobble 实现。SDK 的 scrobble 模块会强制覆盖为 macOS 身份；项目改由公开 `createRequest` 向固定 clientlog/eapi 路径依次发送原有 startplay 和 play 事件，仅打卡使用模拟 Windows 10 标识（os=pc、mobilename=Windows 10，配套系统版本及 UA），不修改 node_modules 或数据库 Cookie，不开放浏览器设备参数覆盖。首段失败或响应异常不继续发送第二段；队列、总时长上报与凭据隔离不变，禁用自动重试。该身份不是实际设备检测，网易云最终显示名称、排行、时长或奖励是否入账均需真实账号核验，返回 200 也不能证明；不额外增加第三方 HTTP 服务或定时框架。
