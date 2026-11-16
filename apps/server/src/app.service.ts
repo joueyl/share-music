@@ -61,7 +61,7 @@ export class AppService implements OnModuleDestroy, OnModuleInit {
     }
     this.turn.stun(); // Fail fast on invalid STUN configuration.
     this.auth = new Auth(this.database, secret);
-    this.engine = new RoomEngine(r => this.persist(r), r => { void this.flush().then(()=>this.subscribers.forEach(fn=>fn(r))).catch(()=>{}); }, Date.now, (key,hash)=>this.musicImport?.registered(key,hash)??false, message => { void this.flush().then(()=>this.activitySubscribers.forEach(fn=>fn(message))).catch(()=>{}); }, track => this.neteaseTasks.enqueueScrobble(track));
+    this.engine = new RoomEngine(r => this.persist(r), r => { void this.flush().then(()=>this.subscribers.forEach(fn=>fn(r))).catch(()=>{}); }, Date.now, (key,hash)=>this.musicImport?.registered(key,hash)??false, message => { void this.flush().then(()=>this.activitySubscribers.forEach(fn=>fn(message))).catch(()=>{}); }, event => this.neteaseTasks.observePlayback(event));
     this.musicImport = new MusicImport(this.engine, this.netease, fetch, this.database, Date.now, this.qq);
   }
   async onModuleInit() {

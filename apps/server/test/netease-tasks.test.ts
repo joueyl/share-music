@@ -17,7 +17,8 @@ function fixture(cookie='MUSIC_U=test-session'){
  });
  const service=new NeteaseService(db,api,()=>now),log=vi.fn(),tasks=new NeteaseAccountTasks(service,db,()=>now,log);
  drains.push(async()=>{await tasks.stop();db.close();});
- return {db,api,service,log,tasks,time:(value:number)=>now=value};
+ let sequence=0;const report=(source=track,listenedMs=12000)=>{const id=String(++sequence);tasks.observePlayback({type:'start',id,track:source});tasks.observePlayback({type:'finish',id,track:source,listenedMs});};
+ return {db,api,service,log,tasks,report,time:(value:number)=>now=value};
 }
 it('calculates 08:00 Asia/Shanghai independently of the host timezone and rolls over dates',()=>{
  expect(nextAccountRun(morning-1)).toBe(morning);expect(nextAccountRun(morning)).toBe(morning+86400000);
@@ -86,29 +87,52 @@ it('accepts only genuine unclaimed VIP task IDs and does not invent rewards',()=
  expect(unclaimedVipIds({data:{unGetIds:[]}})).toBe('');expect(unclaimedVipIds({unGetIds:'12_7,13_1'})).toBe('12_7,13_1');
  for(const body of [{data:{}},{data:{unGetIds:['http://evil']}},{data:{unGetIds:Array(101).fill('1_7')}}])expect(()=>unclaimedVipIds(body)).toThrow('NETEASE_INVALID_RESPONSE');
 });
-it('submits full song duration while playback is ongoing, in an independent queue',async()=>{
- const f=fixture();f.tasks.enqueueScrobble(track);await new Promise<void>(resolve=>setImmediate(resolve));await settle();
+it('submits measured listening time after playback finishes, in an independent queue',async()=>{
+ const f=fixture();f.report(track);await new Promise<void>(resolve=>setImmediate(resolve));await settle();
  expect(f.api).toHaveBeenCalledWith('song_detail',expect.objectContaining({ids:'42'}));
- expect(f.api).toHaveBeenCalledWith('scrobble',expect.objectContaining({id:'42',sourceid:'7',time:185}));
- expect(f.log).not.toHaveBeenCalled();
+ expect(f.api).toHaveBeenCalledWith('scrobble',expect.objectContaining({id:'42',sourceid:'7',time:12}));
+ expect(f.log).toHaveBeenCalledExactlyOnceWith('网易云听歌打卡响应 {"code":200}');
 });
-it('reports scrobble failure without logging response bodies or credentials',async()=>{
+it('does not report at start, ignores duplicate completion and skips sub-second listening',async()=>{
+ const f=fixture(),event={type:'start' as const,id:'play-1',track};f.tasks.observePlayback(event);f.tasks.observePlayback(event);
+ await settle();expect(f.api).not.toHaveBeenCalled();
+ f.tasks.observePlayback({type:'finish',id:event.id,track,listenedMs:12345});
+ f.tasks.observePlayback({type:'finish',id:event.id,track,listenedMs:12345});f.report(track,999);
+ await new Promise<void>(resolve=>setImmediate(resolve));await settle();
+ expect(f.api.mock.calls.filter(([name])=>name==='scrobble')).toHaveLength(1);
+ expect(f.api).toHaveBeenCalledWith('scrobble',expect.objectContaining({time:12}));
+});
+it('uses the credential captured at start and never credits a newly logged-in account at finish',async()=>{
+ const f=fixture();f.tasks.observePlayback({type:'start',id:'old',track});await settle();
+ f.db.setSetting('netease.cookie','MUSIC_U=new-account');
+ f.tasks.observePlayback({type:'finish',id:'old',track,listenedMs:12000});
+ await new Promise<void>(resolve=>setImmediate(resolve));await settle();expect(f.api).not.toHaveBeenCalled();
+});
+it('caps reported seconds to both metadata durations and never accepts a missing start',async()=>{
+ const f=fixture();f.tasks.observePlayback({type:'finish',id:'missing',track,listenedMs:10000});
+ f.report({...track,durationMs:10000},20000);f.report(track,999999);
+ await new Promise<void>(resolve=>setImmediate(resolve));await settle();
+ expect(f.api.mock.calls.filter(([name])=>name==='scrobble').map(([,params])=>params.time)).toEqual([10,185]);
+});
+it('prints rejected scrobble responses with credential redaction before the failure notice',async()=>{
  const f=fixture();f.api.mockImplementation(async name=>name==='song_detail'
   ?{body:{code:200,songs:[{id:42,dt:185400,al:{id:7}}]}}
   :{body:{code:502,message:'需要重新登录',cookie:'private-cookie',data:{access_token:'private-token',headers:{'set-cookie':'private-header',Authorization:'private-auth'},note:'MUSIC_U=private-inline;'}}});
- f.tasks.enqueueScrobble(track);await new Promise<void>(resolve=>setImmediate(resolve));await settle();
+ f.report(track);await new Promise<void>(resolve=>setImmediate(resolve));await settle();
  const logs=f.log.mock.calls.flat().join('\n');
- expect(f.log).toHaveBeenCalledExactlyOnceWith('网易云听歌记录未确认成功，已跳过，不阻塞播放');
- expect(logs).not.toContain('需要重新登录');
+ expect(f.log).toHaveBeenCalledTimes(2);
+ expect(f.log.mock.calls[0][0]).toContain('网易云听歌打卡响应 {"code":502,"message":"需要重新登录"');
+ expect(f.log).toHaveBeenLastCalledWith('网易云听歌记录未确认成功，已跳过，不阻塞播放');
  expect(logs).not.toContain('private-');expect(logs).not.toContain('test-session');
 });
-it('does not log even large scrobble responses or drop later listening jobs',async()=>{
+it('bounds large response logs and does not drop later listening jobs',async()=>{
  const f=fixture();f.api.mockImplementation(async name=>name==='song_detail'
   ?{body:{code:200,songs:[{id:42,dt:185400,al:{id:7}}]}}
   :{body:{code:200,data:'x'.repeat(10000)}});
- f.tasks.enqueueScrobble(track);f.tasks.enqueueScrobble(track);
+ f.report(track);f.report(track);
  await new Promise<void>(resolve=>setImmediate(resolve));await settle();
- expect(f.log).not.toHaveBeenCalled();
+ expect(f.log).toHaveBeenCalledTimes(2);
+ for(const [line] of f.log.mock.calls){expect(line.length).toBeLessThanOrEqual(2060);expect(line).toContain('[TRUNCATED]');}
  expect(f.api.mock.calls.filter(([name])=>name==='scrobble')).toHaveLength(2);
 });
 it('a stalled scrobble neither serializes search nor blocks daily tasks and has a bounded timeout',async()=>{
@@ -117,19 +141,20 @@ it('a stalled scrobble neither serializes search nor blocks daily tasks and has 
   if(name==='song_detail')return {body:{code:200,songs:[{id:42,dt:185400,al:{id:7}}]}};
   return {body:name==='vip_tasks'?{code:200,data:{unGetIds:[]}}:{code:200}};
  });
- f.tasks.enqueueScrobble(track);await vi.advanceTimersByTimeAsync(0);
+ f.report(track);await vi.advanceTimersByTimeAsync(0);
  expect(f.api.mock.calls.some(c=>c[0]==='scrobble')).toBe(true);
  await expect(f.service.call('search',{keywords:'still responsive'})).resolves.toEqual({code:200});
  await f.tasks.runDaily();expect(f.api.mock.calls.some(c=>c[0]==='yunbei_sign')).toBe(true);
  await vi.advanceTimersByTimeAsync(20001);expect(f.log).toHaveBeenCalledWith(expect.stringContaining('听歌记录未确认成功'));
+ expect(f.log.mock.calls.some(([line])=>line.startsWith('网易云听歌打卡响应'))).toBe(false);
 });
 it('drops queued playback after credential replacement and never reports QQ/unknown-source tracks',async()=>{
- const f=fixture();f.tasks.enqueueScrobble(track);f.db.setSetting('netease.cookie','MUSIC_U=new-account');
- f.tasks.enqueueScrobble({...track,neteaseId:undefined,qqId:'QQMID'});
+ const f=fixture();f.report(track);f.db.setSetting('netease.cookie','MUSIC_U=new-account');
+ f.report({...track,neteaseId:undefined,qqId:'QQMID'});
  await new Promise<void>(resolve=>setImmediate(resolve));await settle();expect(f.api).not.toHaveBeenCalled();
 });
 it('bounds the listening queue and discards waiting jobs on shutdown',async()=>{
- const f=fixture();for(let i=0;i<101;i++)f.tasks.enqueueScrobble(track);
+ const f=fixture();for(let i=0;i<101;i++)f.report(track);
  expect(f.log).toHaveBeenCalledWith(expect.stringContaining('队列已满'));await f.tasks.stop();
  await new Promise<void>(resolve=>setImmediate(resolve));expect(f.api).not.toHaveBeenCalled();
 });

@@ -102,7 +102,7 @@ it('uses updated clock offsets on an unchanged epoch and timestamps progress sam
   await player.sync(active, 100000); audio.buffered(); player.tick();
   expect(audio.play).toHaveBeenCalledTimes(1);
   setTime(101500); audio.advance(1.5); await player.sync(active, 100000); player.tick();
-  expect(send).toHaveBeenLastCalledWith({ type: 'progress', roomId: 'room', sourceEpoch: 1, positionMs: 1500, sampledAtServerMs: 201500 });
+  expect(send).toHaveBeenLastCalledWith({ type: 'progress', roomId: 'room', sourceEpoch: 1, positionMs: 1500, sampledAtServerMs: 201500,listenedMs:0 });
   expect(audio.seeks).toEqual([]);
 });
 
@@ -113,6 +113,33 @@ it('does not report a stale position while a drift correction is seeking', async
   setTime(103000); player.tick(); player.tick();
   expect(audio.seeks).toEqual([3]); expect(send).not.toHaveBeenCalled();
   audio.seeked(); player.tick(); expect(send).toHaveBeenCalledTimes(1);
+});
+
+it('counts only continuous Audio playback and excludes buffering and automatic seek catch-up',async()=>{
+ const {player,audio,send,setTime}=setup(),active=room();active.pending=null;active.playback.effectiveAtServerMs=100000;
+ await player.sync(active,0);audio.buffered();player.tick();
+ setTime(100100);audio.advance(.1);player.tick(); // First confirmed playing sample.
+ for(let i=2;i<=12;i++){setTime(100000+i*100);audio.advance(.1);player.tick();}
+ const reports=()=>send.mock.calls.map(([value])=>value as any).filter(value=>value.type==='progress');
+ expect(reports().at(-1).listenedMs).toBeCloseTo(1000);
+ audio.readyState=2;setTime(101300);player.tick(); // No ready Audio, reset measurement baseline.
+ setTime(102500);audio.readyState=3;player.tick(); // Synchronization seeks to 2.5 seconds.
+ expect(audio.seeking).toBe(true);audio.seeked();player.tick();
+ for(let i=1;i<=12;i++){setTime(102500+i*100);audio.advance(.1);player.tick();}
+ expect(reports().at(-1).listenedMs).toBeLessThan(2500); // Never adds the skipped buffering interval.
+ expect(reports().at(-1).listenedMs).toBeGreaterThan(1000);
+ player.clear();
+});
+
+it('does not count suspended timer gaps and resets measured time on a new playback epoch',async()=>{
+ const {player,audio,send,setTime}=setup(),active=room();active.pending=null;active.playback.effectiveAtServerMs=100000;
+ await player.sync(active,0);audio.buffered();player.tick();setTime(100100);audio.advance(.1);player.tick();
+ setTime(110100);audio.advance(10);player.tick();
+ expect((send.mock.calls.at(-1)![0] as any).listenedMs).toBe(0);
+ const next=room(2,15000);next.pending=null;next.playback.effectiveAtServerMs=110100;
+ await player.sync(next,0);audio.seeked();player.tick();setTime(111600);audio.advance(1.5);player.tick();
+ expect((send.mock.calls.at(-1)![0] as any)).toMatchObject({type:'progress',sourceEpoch:2,listenedMs:0});
+ player.clear();
 });
 
 it('ignores a previous song URL resolving after switching songs or leaving', async () => {
@@ -170,4 +197,65 @@ it('silently renews an expired link before reporting ready without changing the 
   audio.buffered();expect(audio.seeks).toEqual([90]);expect(send).not.toHaveBeenCalled();
   audio.seeked();expect(send).toHaveBeenCalledWith({type:'ready',roomId:'room',transitionId:'transition-1',sourceEpoch:1});
  } finally {player.clear();create.mockRestore();revoke.mockRestore();}
+});
+
+it('finishes a slow initial seek against a fixed target and starts before correcting again', async () => {
+  const { player, audio, setTime } = setup();
+  const active = room(1, 90000); active.pending = null; active.playback.effectiveAtServerMs = 100000;
+  await player.sync(active, 0); audio.buffered();
+  expect(audio.seeks).toEqual([90]);
+  setTime(101000); audio.seeked(); player.tick();
+  expect(audio.seeks).toEqual([90]); expect(audio.play).toHaveBeenCalledOnce();
+  setTime(101100); audio.advance(.1); player.tick();
+  expect(audio.seeks).toEqual([90]);
+  // Later synchronization does not explicitly pause a playing element.
+  setTime(102600); audio.advance(1.5); audio.pause.mockClear(); player.tick();
+  expect(audio.seeks.at(-1)).toBe(92.6); expect(audio.pause).not.toHaveBeenCalled();
+});
+
+it('reloads a stalled decoder once per epoch, then reports failure rather than looping', async () => {
+  const { player, audio, url, emit, setTime } = setup();
+  const active = room(); active.pending = null; active.playback.effectiveAtServerMs = 100000;
+  await player.sync(active, 0); audio.buffered(); player.tick();
+  for (let i = 1; i <= 80; i++) { setTime(100000 + i * 100); player.tick(); }
+  expect(audio.load).toHaveBeenCalledTimes(2); expect(url).toHaveBeenCalledOnce();
+  expect(emit).toHaveBeenCalledWith('media-status', expect.objectContaining({ status: 'buffering', detail: '音频停滞，正在恢复播放' }));
+  for (let i = 81; i <= 200; i++) { setTime(100000 + i * 100); player.tick(); }
+  expect(audio.load).toHaveBeenCalledTimes(2);
+  expect(emit.mock.calls.filter(([name, value]) => name === 'server-message' && value.type === 'error')).toHaveLength(1);
+  player.clear(); setTime(130000); player.tick(); expect(audio.play).toHaveBeenCalledOnce();
+});
+
+it('does not recover normally advancing, paused, uncommitted or suspended playback', async () => {
+  for (const mode of ['playing', 'paused', 'pending', 'suspended']) {
+    const { player, audio, setTime } = setup();
+    const active = room();
+    if (mode !== 'pending') active.pending = null;
+    active.playback.effectiveAtServerMs = 100000;
+    if (mode === 'paused') active.playback.playState = 'paused';
+    await player.sync(active, 0); audio.buffered(); player.tick();
+    for (let i = 1; i <= 150; i++) {
+      setTime(100000 + i * (mode === 'suspended' ? 10000 : 100));
+      if (mode === 'playing') audio.advance(.1);
+      player.tick();
+    }
+    expect(audio.load).toHaveBeenCalledOnce();
+  }
+});
+
+it('resumes from the current room timeline after reload without redownloading or counting the gap', async () => {
+  const { player, audio, url, send, setTime } = setup();
+  const active = room(); active.pending = null; active.playback.effectiveAtServerMs = 100000;
+  await player.sync(active, 0); audio.buffered(); player.tick();
+  audio.readyState = 2;
+  for (let i = 1; i <= 80; i++) { setTime(100000 + i * 100); player.tick(); }
+  audio.seeking = false; audio.buffered(); audio.seeked(); player.tick();
+  expect(audio.currentTime).toBe(8); expect(audio.paused).toBe(false);
+  for (let i = 1; i <= 120; i++) { setTime(108000 + i * 100); audio.advance(.1); player.tick(); }
+  expect(audio.load).toHaveBeenCalledTimes(2); expect(url).toHaveBeenCalledOnce();
+  expect((send.mock.calls.at(-1)![0] as any).listenedMs).toBeLessThan(12000);
+  const next = room(2); next.pending = null; next.playback.effectiveAtServerMs = 120000;
+  await player.sync(next, 0); audio.seeked(); player.tick();
+  for (let i = 1; i <= 80; i++) { setTime(120000 + i * 100); player.tick(); }
+  expect(audio.load).toHaveBeenCalledTimes(3);
 });

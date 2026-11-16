@@ -39,6 +39,14 @@ async function addAll(){
   if(valid())message.value=`已加入 ${success} 首，失败 ${fail} 首${success+fail<items.length?'，其余已停止':''}`;
  }finally{if(alive)allBusy.value=false;}
 }
+// Match the existing title bars: primary press on non-interactive header content.
+function onHeaderMouseDown(event:MouseEvent){
+ if(event.button!==0)return;
+ if(event.detail>1){event.preventDefault();event.stopPropagation();return;}
+ const target=event.target as HTMLElement|null;
+ if(target?.closest('button, a, input, textarea, select, [role="button"]'))return;
+ void bridge.startDragging().catch(app.error);
+}
 function roomSearch(){if(!keywords.value.trim())return;emit('rooms',keywords.value.trim());visible.value=false;}
 const focused=ref(false),composing=ref(false),suggestionsSuppressed=ref(false);
 const failedCovers=ref(new Set<string>());
@@ -96,12 +104,12 @@ async function add(song:bridge.MusicSearchItem){
 const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toString().padStart(2,'0')}`;
 </script>
 <template>
- <Teleport to="body"><Transition name="modal" appear @after-leave="emit('close')"><div v-if="visible" class="modal-backdrop search-backdrop">
+ <Teleport to="#app"><Transition name="modal" appear @after-leave="emit('close')"><div v-if="visible" class="modal-backdrop search-backdrop">
  <section ref="dialog" class="modal music-search-modal global-search-modal" role="dialog" aria-modal="true" aria-labelledby="music-search-title" :aria-busy="searching||!!adding||allBusy">
-  <header class="global-search-header"><span class="search-symbol"><Search :size="22" /></span><h2 id="music-search-title">搜索音乐</h2><p>发现好音乐，随时添加到共享房间</p><kbd>Esc</kbd><button class="round-close" aria-label="关闭搜索音乐" :disabled="!!adding||allBusy" @click="close"><X :size="22" /></button></header>
+  <header class="global-search-header" @mousedown="onHeaderMouseDown" @dblclick.stop.prevent=""><span class="search-symbol"><Search :size="22" /></span><h2 id="music-search-title">搜索音乐</h2><p>发现好音乐，随时添加到共享房间</p><kbd>Esc</kbd><button class="round-close" aria-label="关闭搜索音乐" :disabled="!!adding||allBusy" @click="close"><X :size="22" /></button></header>
   <div class="global-search-body"><div class="search-main"><span class="eyebrow">SEARCH MUSIC / 找一首此刻想听的歌</span><h1>好音乐，值得一起发现</h1>
   <label class="music-source-picker"><span class="music-source-label">音源平台</span><span class="music-source-control"><Disc3 class="music-source-icon" :size="17" aria-hidden="true" /><select v-model="source" class="tone-select music-source-select" aria-label="搜索音源" :disabled="!!adding||allBusy"><option value="netease">网易云音乐</option><option value="qq">QQ 音乐</option></select></span></label>
-  <form class="music-search-form global-search-form" @submit.prevent="search(0)"><Search :size="20" /><label class="sr-only" for="music-keywords">歌曲、歌手或专辑</label><div class="music-autocomplete"><input id="music-keywords" ref="input" :value="keywords" @input="keywordInput" placeholder="搜索歌曲、歌手或专辑" :maxlength="source==='qq'?60:100" :disabled="!!adding||allBusy" role="combobox" aria-autocomplete="list" aria-controls="music-suggestions" :aria-expanded="suggestionOpen" :aria-activedescendant="suggestionOpen&&suggestionActive>=0?`music-suggestion-${suggestionActive}`:undefined" autocomplete="off" @focus="focused=true" @blur="focused=false" @compositionstart="composing=true" @compositionend="compositionEnd" @keydown="suggestionKeys" />
+  <form class="music-search-form global-search-form" @submit.prevent="search(0)"><Search :size="20" /><label class="sr-only" for="music-keywords">歌曲、歌手或专辑</label><div class="music-autocomplete"><input id="music-keywords" ref="input" v-model="keywords" @input="keywordInput" placeholder="搜索歌曲、歌手或专辑" :maxlength="source==='qq'?60:100" :disabled="!!adding||allBusy" role="combobox" aria-autocomplete="list" aria-controls="music-suggestions" :aria-expanded="suggestionOpen" :aria-activedescendant="suggestionOpen&&suggestionActive>=0?`music-suggestion-${suggestionActive}`:undefined" autocomplete="off" @focus="focused=true" @blur="focused=false" @compositionstart="composing=true" @compositionend="compositionEnd" @keydown="suggestionKeys" />
    <div v-if="suggestionOpen" class="music-suggestions"><div v-if="suggestionLoading&&!suggestionItems.length" class="music-suggestion-loading loading-state" role="status">正在联想…</div><div v-if="suggestionError" class="music-suggestion-loading" role="status">{{ suggestionError }}</div><div v-else-if="!suggestionLoading&&!suggestionItems.length" class="music-suggestion-loading">暂无联想，按回车搜索</div><ul id="music-suggestions" role="listbox" aria-label="搜索联想"><li v-for="(term,index) in suggestionItems" :id="`music-suggestion-${index}`" :key="term" role="option" :aria-selected="suggestionActive===index" :class="{active:suggestionActive===index}" @mouseenter="suggestionActive=index" @mousedown.prevent @click="chooseSuggestion(term)"><Search :size="14" /><span>{{ term }}</span></li></ul></div></div><button v-if="keywords" type="button" class="icon-button" aria-label="清空关键词" :disabled="!!adding||allBusy" @click="keywords='' "><X :size="16" /></button><button class="primary" :aria-busy="searching" :disabled="searching||!!adding||allBusy||!keywords.trim()"><LoaderCircle v-if="searching" class="spinning" :size="16" />搜索</button></form>
    <div class="search-history"><Clock3 :size="16" /><span>最近搜索</span><button v-for="term in history.slice(0,4)" :key="term" :disabled="!!adding||allBusy" @click="chooseSuggestion(term)">{{ term }}</button><small v-if="!history.length">还没有搜索记录</small><button v-else class="history-clear" :disabled="!!adding||allBusy" @click="saveHistory()">清空</button></div>
    <div class="search-kind-tabs"><button class="selected">歌曲</button><button v-for="kind in ['歌手','专辑','歌单']" :key="kind" title="当前仅接入歌曲搜索，可在关键词中输入歌手或专辑名" disabled>{{ kind }}</button><span>搜索结果 · {{ total }} 首歌曲</span></div>
@@ -115,6 +123,10 @@ const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toSt
 </template>
 
 <style scoped>
+/* The overlay is a sibling of the inert shell and inherits window geometry. */
+.search-backdrop{border-radius:var(--window-corner-radius,20px);transition:border-radius .18s ease}
+/* Stay above scrolling content, while retaining the header’s layout space. */
+.global-search-header{user-select:none;position:sticky;top:0;z-index:6;flex-shrink:0;background:#eef4faf2;backdrop-filter:blur(16px)}
 .music-source-picker{display:flex;flex-direction:row;align-items:center;gap:12px;margin:0 0 16px;font-size:12px;flex-shrink:0}
 .music-source-label{color:#798394;white-space:nowrap}
 .music-source-control{position:relative;display:inline-flex;min-width:0;max-width:100%}
@@ -126,4 +138,5 @@ const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toSt
 @supports(appearance:base-select){.music-source-picker .music-source-select{padding-right:14px}.music-source-select option::checkmark{color:#4f80db}}
 @media(pointer:coarse){.music-source-picker .music-source-select{font-size:16px}}
 @media(forced-colors:active){.music-source-icon{color:ButtonText}.music-source-picker .music-source-select{border-color:ButtonText;color:ButtonText;background-color:Canvas;box-shadow:none}}
+@media(prefers-reduced-motion:reduce){.search-backdrop{transition:none}}
 </style>

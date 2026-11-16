@@ -105,7 +105,7 @@ async function clear(){if(!canReorder.value||!queue.value.some(t=>t.id!==current
 async function remove(id:string){if(!canReorder.value||id===current.value?.id)return;sorting.value=true;try{await app.act({type:'remove',payload:{trackId:id}});}finally{sorting.value=false;}}
 function add(){searchAfterClose=true;close();}
 </script>
-<template><Teleport to="body"><Transition name="drawer" appear @after-leave="afterLeave"><div v-if="visible" class="drawer-backdrop" @click.self="backdropClose"><aside ref="dialog" class="queue-drawer" @pointermove="dragMove" @pointerup="finishDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag" role="dialog" aria-modal="true" aria-label="共享播放列表">
+<template><Teleport to="#app"><Transition name="drawer" appear @after-leave="afterLeave"><div v-if="visible" class="drawer-backdrop" @click.self="backdropClose"><aside ref="dialog" class="queue-drawer" @pointermove="dragMove" @pointerup="finishDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag" role="dialog" aria-modal="true" aria-label="共享播放列表">
  <header class="drawer-heading"><div><h2>共享播放列表</h2><p>{{ app.room?.playlist.length??0 }} 首歌曲 · {{ app.room?.members.filter(m=>m.online).length??0 }} 人共同添加</p></div><button class="round-close" aria-label="关闭播放列表" @click="close"><X :size="20" /></button></header>
  <label class="queue-mode"><span>播放模式</span><select class="tone-select" aria-label="房间播放模式" :value="playbackMode.mode.value??''" :disabled="playbackMode.disabled.value" @change="playbackMode.change(($event.target as HTMLSelectElement).value)"><option v-if="!playbackMode.mode.value" value="">请更新服务端</option><option v-for="(label,mode) in PLAYBACK_MODE_LABELS" :key="mode" :value="mode">{{ label }}</option></select></label>
  <div class="queue-tabs" role="tablist" aria-label="播放列表分类"><button role="tab" :aria-selected="tab==='queue'" :class="{active:tab==='queue'}" @click="tab='queue'">当前队列</button><button role="tab" :aria-selected="tab==='history'" :class="{active:tab==='history'}" @click="tab='history'">已播放</button><button role="tab" :aria-selected="tab==='favorites'" :class="{active:tab==='favorites'}" @click="tab='favorites'">收藏单曲</button><button v-if="app.permission.enqueue&&tab==='queue'" class="queue-clear" :disabled="!canReorder||!queue.some(t=>t.id!==current?.id)" title="保留当前歌曲，清空其他歌曲" @click="clear">清空</button></div>
@@ -125,6 +125,9 @@ function add(){searchAfterClose=true;close();}
  </aside></div></Transition></Teleport></template>
 
 <style scoped>
+/* Inherit window geometry outside the inert shell; clip only the window edge. */
+.drawer-backdrop{clip-path:inset(0 round var(--window-corner-radius,20px) var(--window-corner-radius,20px) 0 0)}
+.queue-drawer{border-top-right-radius:var(--window-corner-radius,20px)}
 .queue-mode{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;margin:10px 0 0;font-size:12px}
 .queue-mode .tone-select{width:152px;white-space:nowrap}
 .queue-mode option{white-space:nowrap}

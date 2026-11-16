@@ -144,6 +144,8 @@ mod desktop {
             .plugin(tauri_plugin_notification::init())
             .setup(move |app| {
                 app.manage(close_to_tray::CloseToTray::default());
+                #[cfg(target_os = "macos")]
+                app.manage(chat_notifications::MacChatNotifications::default());
                 if close_to_tray::install(app.handle()).is_err() {
                     eprintln!("托盘初始化失败，保留正常窗口关闭行为。");
                 }
@@ -170,7 +172,7 @@ mod desktop {
             .on_window_event(|window, event| {
                 close_to_tray::on_window_event(window, event);
                 if window.label() == "main" && matches!(event, tauri::WindowEvent::Focused(true)) {
-                    let _ = window.request_user_attention(None);
+                    chat_notifications::on_focus(window);
                 }
             })
             .invoke_handler(tauri::generate_handler![

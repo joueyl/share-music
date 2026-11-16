@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref, toRef, watch, computed, onMounted, onUnmounted } from 'vue';
+import { ref, toRef, watch, computed, onMounted, onUnmounted, nextTick } from 'vue';
 import { appUpdates } from './app-updates';
 import { useAutoDismissNotice } from './useAutoDismissNotice';
 import { Headphones, Search, X, LogOut, History, Settings2, Minus, Square, ChevronDown, Link, Palette, Disc3 } from 'lucide-vue-next';
 import { useRoute, useRouter } from 'vue-router';
 import { useApp } from './store';
 import { ui, openSearch, resetUi } from './ui';
+import { openChatFromNotification } from './chat-notification-navigation';
 import * as bridge from './bridge';
 import AuthPage from './components/AuthPage.vue';
 import CachedMusicPage from './components/CachedMusicPage.vue';
@@ -29,13 +30,14 @@ const versionOpen = ref(false), accountOpen = ref(false);
 const splashDone = ref(false);
 const startupUpdateAvailable = ref(false);
 let alive = true;
+let stopChatNotification=()=>{};
 watch([splashDone, startupUpdateAvailable], ([ready, available]) => {
   if (ready && available) {
     startupUpdateAvailable.value = false;
     if (appUpdates.state.phase === 'available') versionOpen.value = true;
   }
 });
-onUnmounted(() => { alive = false; });
+onUnmounted(() => { alive = false;stopChatNotification(); });
 const isMaximized = ref(false);
 const app = useApp(), router = useRouter(), route = useRoute();
 
@@ -72,6 +74,15 @@ onMounted(async () => {
     if (alive) startupUpdateAvailable.value = available;
   });
   if (bridge.desktop) {
+    const stop=await bridge.subscribe('chat-notification-clicked',()=>{
+      void openChatFromNotification({
+        context:()=>alive&&app.user&&app.room?{userId:app.user.id,roomId:app.room.id}:null,
+        navigate:id=>router.push(`/room/${id}`),settle:nextTick,closeOverlays:resetUi,
+        open:id=>{ui.chatRoomId=id;ui.chatRequest++;},
+      }).catch(app.error);
+    });
+    if(!alive){stop();return;}
+    stopChatNotification=stop;
     isMaximized.value = await bridge.isWindowMaximized();
     await bridge.onWindowResized(async () => {
       isMaximized.value = await bridge.isWindowMaximized();
@@ -478,10 +489,6 @@ function onHeaderMouseDown(e: MouseEvent) {
   .room-nav-right { gap: 4px; }
   .room-mode-btn { padding-inline: 6px; }
   .window-controls { margin-left: 0; padding-left: 2px; }
-}
-
-.shell :deep(.discovery-page) {
-  overflow-y: hidden !important;
 }
 
 .brand-logo-img {

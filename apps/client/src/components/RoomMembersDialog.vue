@@ -36,7 +36,7 @@ async function copyInvite() {
     ? window.location.origin
     : 'https://share.jouei.cn';
     
-  const shareText = `我在【${roomName}】听 ${songDesc}，来和我一起听歌吧！\n房间邀请码：${code}\n客户端下载 / 网页加入：${hostUrl}`;
+  const shareText = `我在【${roomName}】听 ${songDesc}，来和我一起听歌吧！\n房间邀请码：${code}\n客户端下载：https://github.com/joueyl/share-music/releases/latest\n网页加入：${hostUrl}`;
   
   try {
     await navigator.clipboard.writeText(shareText);

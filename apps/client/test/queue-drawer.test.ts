@@ -151,3 +151,12 @@ it('shows the current users saved songs in a separate queue tab without replacin
  const {root}=await mount();all(root).find(n=>n.type==='button'&&text(n)==='收藏单曲').props.onClick();await settle();await Promise.resolve();await settle();
  expect(text(root)).toContain('还没有收藏的单曲');expect(all(root).some(n=>n.props['data-track-id'])).toBe(false);expect(f.app.room.playlist).toHaveLength(4);expect(f.app.act).not.toHaveBeenCalled();
 });
+
+it('uses the shared window top-right corner without changing list scrolling or drawer transitions',()=>{
+ const source=readFileSync(new URL('../src/components/QueueDrawer.vue',import.meta.url),'utf8');
+ expect(source).toContain('<Teleport to="#app">');expect(source).not.toContain('<Teleport to="body">');
+ const css=parse(source).descriptor.styles.find(s=>s.scoped)!.content;
+ expect(css).toContain('.queue-drawer{border-top-right-radius:var(--window-corner-radius,20px)}');
+ expect(css).toContain('.drawer-backdrop{clip-path:inset(0 round var(--window-corner-radius,20px) var(--window-corner-radius,20px) 0 0)}');
+ expect(source).toContain('@after-leave="afterLeave"');expect(css).toContain('scrollbar-gutter:stable');
+});

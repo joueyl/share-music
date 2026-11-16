@@ -17,6 +17,13 @@ const reply=message=>parentPort.postMessage({kind:'music-share:hana-result',...m
   const {invokeModule,createRequest}=await import(workerData.module);
   const {cookie='',timestamp,noCookie,realIP,...query}=workerData.params;
   phase='request';
+  // SDK 6 uses arrays for ID lists; keep existing HTTP and internal string inputs.
+  if(['song_detail','song_url','vip_growthpoint_get'].includes(workerData.name)&&typeof query.ids==='string'){
+   const value=query.ids.trim(),ids=value.startsWith('[')?JSON.parse(value):value.split(',').map(id=>id.trim());
+   const pattern=workerData.name==='vip_growthpoint_get'?/^\\d{1,20}(?:_\\d{1,10})?$/:/^\\d{1,20}$/;
+   if(!Array.isArray(ids)||!ids.length||ids.some(id=>!['string','number'].includes(typeof id)||!pattern.test(String(id))))throw Error('Invalid IDs');
+   query.ids=ids.map(String);
+  }
   const config={
    cookie,realIP:'122.228.189.154',timeoutMs:15000,retry:{retries:0,retryNonIdempotent:false},
    onRequestEvent:event=>{
@@ -37,28 +44,6 @@ const reply=message=>parentPort.postMessage({kind:'music-share:hana-result',...m
    if(Object.keys(query).length!==routes.length||routes.some(route=>!query[route]||typeof query[route]!=='object'||Array.isArray(query[route])))throw Error('Invalid internal batch input');
    const data=Object.fromEntries(routes.map(route=>[route,JSON.stringify(query[route])]));
    result=await createRequest('/api/batch',data,config);
-  }else if(workerData.name==='scrobble'){
-   // The SDK scrobble module forcibly overrides os/osver with macOS values.
-   // Keep its two fixed events, using the public request API for a Windows identity.
-   if(!/^\\d{1,20}$/.test(String(query.id??''))||!/^\\d{1,20}$/.test(String(query.sourceid??''))||
-      !Number.isInteger(query.time)||query.time<1||query.time>86400)throw Error('Invalid internal scrobble input');
-   const identity=typeof cookie==='string'?Object.fromEntries(cookie.split(';').flatMap(part=>{
-    const i=part.indexOf('=');return i>0?[[part.slice(0,i).trim(),part.slice(i+1).trim()]]:[];
-   })):{...cookie};
-   const windows={...config,crypto:'eapi',domain:'https://clientlog.music.163.com',
-    ua:'NeteaseMusic/3.1.17.204416 (Windows NT 10.0; Win64; x64)',
-    cookie:{...identity,os:'pc',osver:'Microsoft-Windows-10-Professional-build-19045-64bit',
-     mobilename:'Windows 10',appver:'3.1.17.204416',channel:'netease'}};
-   const common={id:query.id,type:'song',mainsite:'1',mainsiteWeb:'1',content:'id='+String(query.sourceid)};
-   for(const event of [
-    {action:'startplay',json:common},
-    {action:'play',json:{...common,download:0,end:'playend',sourceId:query.sourceid,time:query.time,wifi:0,source:'list'}}
-   ]){
-    result=await createRequest('/api/feedback/weblog',{logs:JSON.stringify([event])},windows);
-    if(!Number.isInteger(result?.status)||result.status<200||result.status>=300||
-       !result.body||typeof result.body!=='object'||!Number.isInteger(result.body.code)||!Array.isArray(result.cookie))throw Error('Invalid scrobble response');
-    if(result.body.code!==200)throw {status:result.status,body:{code:result.body.code}};
-   }
   }else result=await invokeModule(workerData.name,query,config);
   phase='invalid_response';
   if(!Number.isInteger(result?.status)||result.status<200||result.status>=300||

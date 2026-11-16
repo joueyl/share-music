@@ -5,7 +5,9 @@ const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8'
 test('hana SDK runtime requirement stays aligned across manifests, Docker and CI',()=>{
  assert.equal(JSON.parse(read('package.json')).engines.node,'>=24.0.0');
  const deps=JSON.parse(read('apps/server/package.json')).dependencies;
- assert.equal(deps['hana-music-api'],'3.2.0');assert.equal(deps.NeteaseCloudMusicApi,undefined);
+ assert.equal(deps['hana-music-api'],'6.0.0');assert.equal(deps.NeteaseCloudMusicApi,undefined);
+ assert.equal(JSON.parse(read('package-lock.json')).packages['apps/server'].dependencies['hana-music-api'],deps['hana-music-api']);
+ assert.match(read('pnpm-lock.yaml'),/hana-music-api:\s+specifier: 6\.0\.0\s+version: 6\.0\.0/);
  assert.match(read('apps/server/src/main.ts'),/process\.versions\.node/);
  assert.equal((read('deploy/Dockerfile').match(/FROM node:24-bookworm-slim/g)??[]).length,2);
  for(const path of ['.github/workflows/desktop-release.yml','.github/workflows/recover-release.yml']){

@@ -11,7 +11,7 @@ import { trackArtwork } from './track-artwork';
 import { createSystemArtworkSync, systemArtworkPixels, type ArtworkRequest } from './system-artwork';
 import { systemMediaAction, systemMediaState, type SystemMediaEvent } from './system-media';
 const messages: Record<string, string> = {
-  CHAT_NOTIFICATION_FAILED:'系统通知请求失败，请检查系统通知设置',
+  CHAT_NOTIFICATION_FAILED:'系统通知请求失败，请在系统设置中允许同频通知与横幅，并检查专注/勿扰模式',
   CHAT_ATTENTION_FAILED:'任务栏提醒请求失败，系统可能不支持此提示方式',
   CHAT_NOTIFICATION_SOUND_FAILED:'消息提示音未能播放，请在窗口内点击一次并检查系统音量',
   PLAYBACK_AUDIO_BUSY:'音频读取繁忙，请稍后切歌重试',

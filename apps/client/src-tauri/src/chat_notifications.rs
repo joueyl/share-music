@@ -1,6 +1,11 @@
 use serde::Serialize;
 use tauri::{AppHandle, UserAttentionType, Window};
+#[cfg(not(target_os = "macos"))]
 use tauri_plugin_notification::{NotificationExt, PermissionState};
+#[cfg(target_os = "macos")]
+mod macos;
+#[cfg(target_os = "macos")]
+pub use macos::MacChatNotifications;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,7 +22,7 @@ fn validate(title: &str, body: &str) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn send_chat_notification(
+pub async fn send_chat_notification(
     app: AppHandle,
     window: Window,
     title: String,
@@ -27,26 +32,31 @@ pub fn send_chat_notification(
         return Err("FORBIDDEN".into());
     }
     validate(&title, &body)?;
-    // Native toast only: the bundled custom sound is played separately because
-    // desktop notification sound-name semantics differ between operating systems.
-    let notification_requested = matches!(
-        app.notification().request_permission(),
-        Ok(PermissionState::Granted)
-    ) && app
-        .notification()
-        .builder()
-        .title(title)
-        .body(body)
-        .show()
-        .is_ok();
-    let attention_requested = window.is_focused().unwrap_or(false)
-        || window
-            .request_user_attention(Some(UserAttentionType::Informational))
+    #[cfg(target_os = "macos")]
+    return macos::notify(&app, &window, title, body).await;
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Native toast only: the bundled custom sound is played separately because
+        // desktop notification sound-name semantics differ between operating systems.
+        let notification_requested = matches!(
+            app.notification().request_permission(),
+            Ok(PermissionState::Granted)
+        ) && app
+            .notification()
+            .builder()
+            .title(title)
+            .body(body)
+            .show()
             .is_ok();
-    Ok(ChatAlertResult {
-        notification_requested,
-        attention_requested,
-    })
+        let attention_requested = window.is_focused().unwrap_or(false)
+            || window
+                .request_user_attention(Some(UserAttentionType::Informational))
+                .is_ok();
+        Ok(ChatAlertResult {
+            notification_requested,
+            attention_requested,
+        })
+    }
 }
 
 #[tauri::command]
@@ -54,6 +64,18 @@ pub fn clear_chat_attention(window: Window) -> Result<(), String> {
     if window.label() != "main" {
         return Err("FORBIDDEN".into());
     }
+    clear_attention(&window)
+}
+
+pub fn on_focus(window: &Window) {
+    #[cfg(target_os = "macos")]
+    macos::focused(window);
+    let _ = window.request_user_attention(None);
+}
+
+pub fn clear_attention(window: &Window) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    macos::clear(window);
     window
         .request_user_attention(None)
         .map_err(|_| "CHAT_ATTENTION_FAILED".into())

@@ -1,7 +1,8 @@
 import type { Track } from '../../../packages/shared/src';
 import type { DatabaseStore } from './database';
 import type { NeteaseService } from './netease';
-import { DomainError } from './engine';
+import { DomainError, type PlaybackListeningEvent } from './engine';
+import { scrobbleResponseLog } from './scrobble-response';
 
 const DAY=86400000;
 export function shanghaiDay(now:number):string{return new Date(now+8*3600000).toISOString().slice(0,10);}
@@ -24,7 +25,7 @@ export function unclaimedVipIds(body:any):string {
  if(ids.some(id=>!/^\d{1,20}(?:_\d{1,10})?$/.test(id)))throw new DomainError('NETEASE_INVALID_RESPONSE');
  return ids.join(',');
 }
-type ScrobbleJob={id:string;durationMs:number;session:Promise<string|null>};
+type ScrobbleJob={id:string;listenedMs:number;session:Promise<string|null>};
 /** Separate bounded background lanes; no controller, import or playback command awaits them. */
 export class NeteaseAccountTasks {
  private timer?:ReturnType<typeof setTimeout>;
@@ -32,6 +33,7 @@ export class NeteaseAccountTasks {
  private dailyBusy=false;
  private queue:ScrobbleJob[]=[];
  private pumping=false;
+ private listeningSessions=new Map<string,Promise<string|null>>();
  private inFlight=new Set<Promise<unknown>>();
  constructor(private netease:Pick<NeteaseService,'accountSessionKey'|'accountCall'>,private db:Pick<DatabaseStore,'getSetting'|'setSetting'>,private now=Date.now,private log:(message:string)=>void=message=>console.warn(message)){}
  private track<T>(work:Promise<T>):Promise<T>{this.inFlight.add(work);void work.then(()=>this.inFlight.delete(work),()=>this.inFlight.delete(work));return work;}
@@ -74,12 +76,20 @@ export class NeteaseAccountTasks {
   }catch{this.log('网易云后台任务无法读取登录态');}
   finally{this.dailyBusy=false;}
  }
- enqueueScrobble(track:Track){
-  if(this.stopped||!track.neteaseId||!/^\d{1,20}$/.test(track.neteaseId)||!Number.isFinite(track.durationMs)||track.durationMs<1000)return;
+ observePlayback(event:PlaybackListeningEvent){
+  if(this.stopped)return;
+  if(event.type==='start'){
+   // Capture credentials at playback start, never credit a replacement login at finish.
+   if(!this.listeningSessions.has(event.id))this.listeningSessions.set(event.id,this.netease.accountSessionKey().catch(()=>null));
+   return;
+  }
+  const session=this.listeningSessions.get(event.id);this.listeningSessions.delete(event.id);
+  if(session)this.enqueueScrobble(event.track,event.listenedMs,session);
+ }
+ private enqueueScrobble(track:Track,listenedMs:number,session:Promise<string|null>){
+  if(this.stopped||!track.neteaseId||!/^\d{1,20}$/.test(track.neteaseId)||!Number.isFinite(listenedMs)||listenedMs<1000||!Number.isFinite(track.durationMs)||track.durationMs<1000)return;
   if(this.queue.length>=100){this.log('网易云听歌记录队列已满，本次记录未提交');return;}
-  // Capture the credential identity now, so queued old playback never credits a newly logged-in account.
-  const session=this.netease.accountSessionKey().catch(()=>null);
-  this.queue.push({id:track.neteaseId,durationMs:track.durationMs,session});
+  this.queue.push({id:track.neteaseId,listenedMs:Math.min(listenedMs,track.durationMs),session});
   if(!this.pumping){this.pumping=true;setImmediate(()=>{void this.track(this.pump());});}
  }
  private async pump(){
@@ -92,13 +102,14 @@ export class NeteaseAccountTasks {
      const song=Array.isArray(detail.songs)?detail.songs.find((song:any)=>String(song?.id)===job.id):null;
      const album=song?.al?.id??song?.album?.id,total=Number(song?.dt??song?.duration);
      if(!/^\d{1,20}$/.test(String(album??''))||!Number.isFinite(total)||total<1000)throw new DomainError('NETEASE_INVALID_RESPONSE');
-     const time=Math.floor(Math.min(job.durationMs,total)/1000);
+     const time=Math.floor(Math.min(job.listenedMs,total)/1000);
      if(time<1||this.stopped)continue;
      const response=await this.netease.accountCall('scrobble',{id:job.id,sourceid:String(album),time},session);
+     this.log(scrobbleResponseLog(response));
      accepted(response);
     }catch{this.log('网易云听歌记录未确认成功，已跳过，不阻塞播放');}
    }
   }finally{this.pumping=false;}
  }
- async stop(){this.stopped=true;clearTimeout(this.timer);this.queue=[];await Promise.allSettled([...this.inFlight]);}
+ async stop(){this.stopped=true;clearTimeout(this.timer);this.queue=[];this.listeningSessions.clear();await Promise.allSettled([...this.inFlight]);}
 }

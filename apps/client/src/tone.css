@@ -1,4 +1,10 @@
 /* Shared TONE foundation. Page geometry lives in brilliant.css and AuthPage.vue. */
+/* Desktop-like chrome; editable fields and copyable content opt back into selection. */
+body{-webkit-user-select:none;user-select:none}
+input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]):not([type=file]):not([type=button]):not([type=submit]):not([type=reset]),textarea,[contenteditable]:not([contenteditable=false]),[data-selectable],.chat-message-bubble,.chat-activity p,.lyric-line,.invite-code,.music-search-message,.library-message,.detail-error,.update-status,.version-summary,.release-scroll,.remote-release-notes,[role=alert]{-webkit-user-select:text;user-select:text}
+/* Controls inside copyable notices/history stay nonselectable. */
+button,button *,[role=button],[role=button] *,summary,summary *{-webkit-user-select:none;user-select:none}
+
 .chat-activity{display:flex;align-items:flex-start;gap:7px;margin:14px 0;padding:9px 11px;border-radius:12px;background:#e8eff680;color:#758398;font-size:11px;line-height:1.7}
 .chat-activity>svg{flex-shrink:0;margin-top:3px;color:#7897be}.chat-activity p{margin:0;min-width:0;overflow-wrap:anywhere;flex:1}.chat-activity strong{font-weight:500;color:#526b8c}.chat-activity time{flex-shrink:0;font-size:9px;opacity:.8;margin-top:2px;font-variant-numeric:tabular-nums}
 :root{--accent:#5dbb00;--muted:#798394;--border:#dfe6ee;--surface:#ffffffb3;color:#283448;background:transparent!important}

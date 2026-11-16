@@ -72,7 +72,7 @@ it('wires startup checks independently of login and native window setup, deferri
  expect(app).toContain('watch([splashDone, startupUpdateAvailable]');
  expect(app).toContain("if (appUpdates.state.phase === 'available') versionOpen.value = true");
  expect(app).toContain('if (alive) startupUpdateAvailable.value = available');
- expect(app).toContain('onUnmounted(() => { alive = false; })');
+ expect(app).toContain('onUnmounted(() => { alive = false;stopChatNotification(); })');
  expect(app.indexOf('void appUpdates.checkOnStartup()')).toBeLessThan(app.indexOf('isMaximized.value = await bridge.isWindowMaximized()'));
  expect(app).toContain('<VersionHistoryDialog v-if="versionOpen"');
 });

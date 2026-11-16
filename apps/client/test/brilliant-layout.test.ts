@@ -53,3 +53,27 @@ it('does not render any transient status caption inside the stage',()=>{
  const room=read('../src/views/Room.vue');expect(room).not.toContain('HTML Audio · 同步收听');
  expect(room).not.toContain('stage-audio-status');expect(room).not.toContain('音乐准备中');
 });
+
+it('pins the search header above scrolling content at every viewport size',()=>{
+ const {descriptor}=parse(read('../src/components/MusicSearchDialog.vue'));
+ const scoped=descriptor.styles.find(style=>style.scoped)?.content??'';
+ const header=scoped.match(/\.global-search-header\{([^}]+)\}/)?.[1]??'';
+ expect(header).toContain('position:sticky');expect(header).toContain('top:0');
+ expect(header).toContain('z-index:6');expect(header).toContain('flex-shrink:0');
+ expect(header).toContain('background:');
+ // Do not limit the pinning to desktop or move it out of normal layout flow.
+ expect(scoped.indexOf('.global-search-header')).toBeLessThan(scoped.indexOf('@media'));
+ expect(header).not.toContain('position:fixed');
+});
+
+it('keeps the full-screen search overlay inside the shared window corner boundary',()=>{
+ const source=read('../src/components/MusicSearchDialog.vue');
+ expect(source).toContain('<Teleport to="#app">');
+ expect(source).not.toContain('<Teleport to="body">');
+ const {descriptor}=parse(source);const css=descriptor.styles.find(style=>style.scoped)?.content??'';
+ expect(css).toContain('.search-backdrop{border-radius:var(--window-corner-radius,20px)');
+ expect(css).toContain('@media(prefers-reduced-motion:reduce){.search-backdrop{transition:none}}');
+ const tone=read('../src/tone.css');
+ expect(tone).toContain('#app{--window-corner-radius:20px');
+ expect(tone).toContain('#app.is-maximized{--window-corner-radius:0px');
+});

@@ -1,7 +1,7 @@
 /* Fit the workspace to the viewport, rather than hiding overflowing content.
-   Narrow/very short windows keep document scrolling as an accessible fallback. */
+   Discovery keeps its list scrollport at every size; the library uses route scrolling. */
 @media(max-width:900px),(max-height:639px){
-  /* Keep the library scrollport inside the existing navigation/player padding. */
+  /* Keep the library scrollport inside the navigation/player padding. */
   .shell:not(.auth-shell)>.main:has(.tone-library){height:100dvh;min-height:0;display:flex;flex-direction:column}
   .main:has(.tone-library)>.route-page{flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable}
 }
@@ -107,4 +107,29 @@
  .discovery-card .landscape-cover{min-height:96px;padding:12px 20px}
  .discovery-card .landscape-cover>strong{font-size:20px}
  .discovery-card .discovery-card-body{padding:14px 18px 16px}
+}
+
+/* Discovery always assigns the remaining workspace height to the room list. */
+.shell:not(.auth-shell)>.main:has(.discovery-page){height:100dvh;min-height:0;display:flex;flex-direction:column}
+.main:has(.discovery-page)>.route-page{flex:1;min-height:0;display:flex;flex-direction:column}
+.route-page>.discovery-page{flex:1;width:100%;height:100%;min-height:0;display:flex;flex-direction:column;overflow:visible}
+.route-page>.discovery-page>*{flex-shrink:0}
+.route-page .discovery-page>.discovery-grid,.route-page .discovery-page>.discovery-status{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+.discovery-page>.discovery-status{padding:8px 12px;margin:0}
+/* In short windows, decoration yields to controls and the scrollable list. */
+@media(max-height:639px){
+ .discovery-page .discovery-hero{padding:8px 16px}
+ .discovery-page .discovery-copy>span,.discovery-page .discovery-copy>h1,.discovery-page .discovery-copy>p,.discovery-page .discovery-hero>img{display:none}
+ .discovery-page .discovery-copy>div{gap:8px}
+ .discovery-page .discovery-filterbar{gap:8px;margin:8px 0}
+ .discovery-page .discovery-filterbar>h2,.discovery-page .discovery-footnote{display:none}
+ .discovery-page .discovery-filterbar .category-tabs{flex:1;order:0;flex-wrap:nowrap;overflow:auto;gap:4px}
+ .discovery-page .category-tabs>button{flex-shrink:0;min-width:0;min-height:32px;padding:6px 10px}
+ .discovery-page .invite-code-form,.discovery-page .room-filter-summary{margin:4px 0;padding:4px 8px}
+ .route-page>.discovery-page{padding-top:4px;padding-bottom:4px}
+}
+
+@media(max-height:480px){
+ .discovery-page .discovery-hero{padding:0}
+ .discovery-page .discovery-filterbar{margin:4px 0}
 }

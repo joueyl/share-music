@@ -41,3 +41,14 @@ it('keeps playlist controls grouped for wrapping and preserves the room template
  expect(queue).toContain('aria-label="播放此曲"');expect(queue).toContain('aria-label="移除音轨"');
  expect(read('../src/App.vue')).toContain('aria-label="主导航"');
 });
+
+it('keeps only the room list scrollable at every viewport size',()=>{
+ const css=read('../src/adaptive-layout.css'),app=read('../src/App.vue');
+ expect(css).toContain('.main:has(.discovery-page)>.route-page{flex:1;min-height:0;display:flex;flex-direction:column}');
+ expect(css).toContain('.route-page>.discovery-page{flex:1;width:100%;height:100%;min-height:0;display:flex;flex-direction:column;overflow:visible}');
+ expect(css).toContain('.route-page .discovery-page>.discovery-grid,.route-page .discovery-page>.discovery-status{flex:1;min-height:0;overflow:auto');
+ expect(css).not.toMatch(/\.main:has\(\.discovery-page\)>\.route-page[^}]*overflow:auto/);
+ expect(app).not.toMatch(/:deep\(\.discovery-page\)\s*\{[^}]*overflow[^}]*hidden/);
+ expect(css).toContain('@media(max-height:639px)');
+ expect(read('../src/views/Lobby.vue')).toContain('tabindex="0" aria-label="房间列表"');
+});

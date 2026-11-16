@@ -6,17 +6,47 @@ import { ALL_PERMISSIONS, DEFAULT_PERMISSIONS, MAX_MEMBERS, type PlaybackMode, p
 export class DomainError extends Error { constructor(public code: string) { super(code); } }
 const fail = (code: string): never => { throw new DomainError(code); };
 export type RoomCreatorInfo = { name: string; displayName: string; avatarUrl: string|null };
+export type PlaybackListeningEvent = {type:'start';id:string;track:Track}|{type:'finish';id:string;track:Track;listenedMs:number};
+type ListeningSample={epoch:number;at:number;position:number;listenedMs?:number};
+type ListeningSession={id:string;track:Track;listenedMs:number;sample?:ListeningSample};
 export type RoomRecord = { creatorId?: string|null; creatorInfo?: RoomCreatorInfo|null; playbackMode?: PlaybackMode; id: string; name: string; hostId: string; defaults: Permissions; overrides: Record<string, Partial<Permissions>>; settings?: RoomSettings; inviteCode?: string; playlist?: Track[] };
-type InternalRoom = RoomSnapshot & { creatorId?: string|null; creatorInfo?: RoomCreatorInfo|null; offlineAt: Map<string, number>; dedup: Map<string, { fingerprint: string; version: number }>; lastIndex: number; shufflePlayed: Set<string>; reportPlaybackStart: boolean };
+type InternalRoom = RoomSnapshot & { creatorId?: string|null; creatorInfo?: RoomCreatorInfo|null; offlineAt: Map<string, number>; dedup: Map<string, { fingerprint: string; version: number }>; lastIndex: number; shufflePlayed: Set<string>; startsListeningSession: boolean; listening?:ListeningSession };
 const stopped = (epoch = 0, now = 0): Playback => ({ sourceId: null, sourceEpoch: epoch, sourceType: null, playState: 'stopped', positionMs: 0, effectiveAtServerMs: now, providerId: null, qualityMode: 'lossless', spec: null, bitrateBps: 0, instant: false });
 
 export class RoomEngine {
   readonly rooms = new Map<string, InternalRoom>();
   private preparedEpochs = new Map<string, number>();
-  constructor(private persist: (record: RoomRecord) => void = () => {}, private publish: (room: RoomSnapshot) => void = () => {}, private now: () => number = Date.now, private registeredAsset: (key:string,hash:string)=>boolean = ()=>false, private publishActivity: (message: ChatMessage) => void = () => {}, private playbackStarted: (track: Track) => void = () => {}) {}
+  constructor(private persist: (record: RoomRecord) => void = () => {}, private publish: (room: RoomSnapshot) => void = () => {}, private now: () => number = Date.now, private registeredAsset: (key:string,hash:string)=>boolean = ()=>false, private publishActivity: (message: ChatMessage) => void = () => {}, private observeListening: (event:PlaybackListeningEvent) => void = () => {}) {}
+  private listeningEvent(event:PlaybackListeningEvent){try{this.observeListening(event);}catch{/* Background reporting must not interrupt playback. */}}
+  private finishListening(r:InternalRoom){
+    const session=r.listening;if(!session)return;delete r.listening;
+    this.listeningEvent({type:'finish',id:session.id,track:session.track,listenedMs:session.listenedMs});
+  }
+  private startListening(r:InternalRoom,at:number,position:number,listenedMs?:number){
+    const track=r.playlist.find(t=>t.id===r.playback.sourceId);
+    if(!track?.neteaseId||r.playback.sourceType!=='file'||!r.members.some(m=>m.online))return;
+    r.listening={id:randomUUID(),track:{...track},listenedMs:0,sample:{epoch:r.playback.sourceEpoch,at,position,listenedMs}};
+    this.listeningEvent({type:'start',id:r.listening.id,track:{...track}});
+  }
+  private sampleListening(r:InternalRoom,at:number,position:number,listenedMs?:number){
+    // Only accepted leader Audio progress confirms listening; server clock ticks do not.
+    if(!r.listening)this.startListening(r,at,position,listenedMs);
+    const session=r.listening;if(!session)return;
+    const previous=session.sample,epoch=r.playback.sourceEpoch;
+    if(previous&&previous.epoch===epoch){
+      const elapsed=at-previous.at,advanced=position-previous.position;
+      if(elapsed<=0)return;
+      // Missing/late telemetry is not proof of continuous playback. Never backfill it.
+      if(elapsed<=5000&&advanced>0&&listenedMs!==undefined&&previous.listenedMs!==undefined){
+        const measured=listenedMs-previous.listenedMs;
+        if(measured>0)session.listenedMs=Math.min(session.track.durationMs,session.listenedMs+Math.min(elapsed,advanced,measured));
+      }
+    }
+    session.sample={epoch,at,position,listenedMs};
+  }
   restore(records: RoomRecord[]) { for (const record of records) this.rooms.set(record.id, this.make(record)); }
   private make(record: RoomRecord): InternalRoom {
-    return { ...record, defaults:{...record.defaults,playbackMode:record.defaults.playbackMode??record.defaults.skip}, playbackMode: playbackModeSchema.parse(record.playbackMode ?? 'queue'), shufflePlayed: new Set(), reportPlaybackStart: false, stateVersion: 0, members: [], settings: record.settings ?? roomSettingsSchema.parse({}), inviteCode: record.inviteCode ?? randomUUID().replaceAll('-', '').slice(0,12), playlist: (record.playlist ?? []).map(t=>({...t,available:hasRemoteAudio(t)})), playback: stopped(), pending: null, requests: [], serverNow: this.now(), offlineAt: new Map([[record.hostId, this.now()]]), dedup: new Map(), lastIndex: -1 };
+    return { ...record, defaults:{...record.defaults,playbackMode:record.defaults.playbackMode??record.defaults.skip}, playbackMode: playbackModeSchema.parse(record.playbackMode ?? 'queue'), shufflePlayed: new Set(), startsListeningSession: false, stateVersion: 0, members: [], settings: record.settings ?? roomSettingsSchema.parse({}), inviteCode: record.inviteCode ?? randomUUID().replaceAll('-', '').slice(0,12), playlist: (record.playlist ?? []).map(t=>({...t,available:hasRemoteAudio(t)})), playback: stopped(), pending: null, requests: [], serverNow: this.now(), offlineAt: new Map([[record.hostId, this.now()]]), dedup: new Map(), lastIndex: -1 };
   }
   create(name: string, hostId: string, settings?: RoomSettings, defaults: Permissions = DEFAULT_PERMISSIONS, creatorInfo?: RoomCreatorInfo): RoomSnapshot {
     const id = randomUUID();
@@ -72,7 +102,8 @@ export class RoomEngine {
     for (const t of r.playlist) if (t.providerId === userId && !hasRemoteAudio(t)) t.available = false;
     r.requests = r.requests.filter(q => q.memberId !== userId);
     if (r.pending?.playback.providerId === userId && !hasRemoteAudio(r.playlist.find(t => t.id === r.pending?.playback.sourceId))) r.pending = null;
-    if (r.playback.leaderId === userId) r.playback.leaderId = null;
+    if (r.playback.leaderId === userId) {r.playback.leaderId = null;if(r.listening)r.listening.sample=undefined;}
+    if(!r.members.some(member=>member.online))this.finishListening(r);
     // File playback continues only while recipients have verified buffered data.
     // Receivers report exhaustion; live playback cannot continue without its provider.
     if (r.playback.providerId === userId && r.playback.sourceType === 'live') { r.playback = stopped(r.playback.sourceEpoch + 1, this.now()); this.advance(r); }
@@ -86,9 +117,10 @@ export class RoomEngine {
     if (!t.available) fail('PROVIDER_OFFLINE');
     return { sourceId: t.id, sourceEpoch: Math.max(r.playback.sourceEpoch, r.pending?.playback.sourceEpoch ?? 0) + 1, sourceType: 'file', playState: 'playing', positionMs: 0, effectiveAtServerMs: this.now() + 3000, providerId: t.providerId, qualityMode: t.lossless ? 'lossless' : 'source', spec: t.spec ?? null, bitrateBps: t.bitrateBps, instant };
   }
-  private prepare(r: InternalRoom, playback: Playback, followTimeline = false, reportPlaybackStart = false) {
+  private prepare(r: InternalRoom, playback: Playback, followTimeline = false, startsListeningSession = false) {
     const now = this.now();
-    r.reportPlaybackStart = reportPlaybackStart;
+    if(r.listening)r.listening.sample=undefined;
+    r.startsListeningSession = startsListeningSession;
     playback.sourceEpoch = Math.max(this.preparedEpochs.get(r.id) ?? 0, r.playback.sourceEpoch, r.pending?.playback.sourceEpoch ?? 0) + 1;
     this.preparedEpochs.set(r.id, playback.sourceEpoch);
     r.pending = { id: randomUUID(), playback, previous: { ...r.playback }, ready: [], preparedAt: now, deadlineAt: now + 5000, committed: false, followTimeline };
@@ -115,9 +147,10 @@ export class RoomEngine {
       const t = r.playlist[index];
       if (t.available) { r.lastIndex = index; this.prepare(r, this.filePlayback(r, t), false, true); return; }
     }
-    r.pending = null; r.playback = stopped(r.playback.sourceEpoch + 1, this.now());
+    this.finishListening(r);r.pending = null; r.playback = stopped(r.playback.sourceEpoch + 1, this.now());
   }
   private complete(r: InternalRoom) {
+    this.finishListening(r);
     const index = r.playlist.findIndex(t => t.id === r.playback.sourceId);
     const t = r.playlist[index];
     if (r.playbackMode === 'queue') {
@@ -197,7 +230,7 @@ export class RoomEngine {
         const t = { ...a.payload, providerId: userId, available: true }; r.playlist.push(t); this.prepare(r, this.filePlayback(r, t, true), false, true); break;
       }
       case 'next': case 'previous': this.require(r, userId, 'skip'); this.advance(r, a.type === 'next' ? 1 : -1); break;
-      case 'stop': this.require(r, userId, 'skip'); if (r.playback.sourceType === 'live') { r.pending = null; r.playback = stopped(r.playback.sourceEpoch + 1, this.now()); this.advance(r); } else { r.pending = null; r.playback = stopped(r.playback.sourceEpoch + 1, this.now()); } break;
+      case 'stop': this.require(r, userId, 'skip'); this.finishListening(r); if (r.playback.sourceType === 'live') { r.pending = null; r.playback = stopped(r.playback.sourceEpoch + 1, this.now()); this.advance(r); } else { r.pending = null; r.playback = stopped(r.playback.sourceEpoch + 1, this.now()); } break;
       case 'pause': case 'resume': case 'seek': {
         this.require(r, userId, a.type === 'seek' ? 'seek' : 'skip');
         if (r.playback.sourceType !== 'file') fail('FILE_ONLY');
@@ -226,6 +259,7 @@ export class RoomEngine {
     r.requests = r.requests.filter(q => r.members.find(m => m.id === q.memberId)?.permissions.stream);
     if (r.pending?.playback.instant && !r.members.find(m => m.id === r.pending!.playback.providerId)?.permissions.stream) r.pending = null;
     if (r.playback.instant && !r.members.find(m => m.id === r.playback.providerId)?.permissions.stream) {
+      this.finishListening(r);
       if (r.playback.sourceType === 'file') r.playlist = r.playlist.filter(t => t.id !== r.playback.sourceId);
       r.pending = null; r.playback = stopped(r.playback.sourceEpoch + 1, this.now()); this.advance(r);
     }
@@ -241,16 +275,17 @@ export class RoomEngine {
     }
     this.publish(this.snapshot(roomId));
   }
-  reportProgress(roomId: string, userId: string, epoch: number, positionMs: number, sampledAtServerMs?: number) {
+  reportProgress(roomId: string, userId: string, epoch: number, positionMs: number, sampledAtServerMs?: number,listenedMs?:number) {
     const r = this.get(roomId); this.member(r, userId);
     const p = r.playback, t = r.playlist.find(t => t.id === p.sourceId);
     if (r.pending || !t || !hasRemoteAudio(t) || epoch !== p.sourceEpoch || p.playState !== 'playing' || positionMs > t.durationMs) return;
     const now = this.now(), sampledAt = Math.min(sampledAtServerMs ?? now, now);
-    if (!Number.isFinite(positionMs) || positionMs < 0 || !Number.isFinite(sampledAt) ||
+    if (!Number.isFinite(positionMs) || positionMs < 0 || (listenedMs!==undefined&&(!Number.isFinite(listenedMs)||listenedMs<0)) || !Number.isFinite(sampledAt) ||
         sampledAt < now - 5000 || sampledAt < p.effectiveAtServerMs || (sampledAtServerMs ?? now) > now + 250) return;
     if (p.leaderId && p.leaderId !== userId) return;
     if (Math.abs(positionMs - positionAt(p, sampledAt)) > 5000) return;
     if (!p.leaderId) p.leaderId = userId;
+    this.sampleListening(r,sampledAt,positionMs,listenedMs);
     // Anchor to capture time, not arrival time, so network delay cannot pull a completed seek backwards.
     p.positionMs = positionMs; p.effectiveAtServerMs = sampledAt; this.publish(this.snapshot(roomId));
   }
@@ -265,10 +300,10 @@ export class RoomEngine {
     if (r.pending?.playback.providerId === userId && r.pending.playback.sourceEpoch === epoch) {
       r.pending = null;
       // A completed queue-mode song may already be removed; never leave a ghost playback.
-      if (!r.playlist.some(t => t.id === r.playback.sourceId)) r.playback = stopped(r.playback.sourceEpoch + 1, this.now());
+      if (!r.playlist.some(t => t.id === r.playback.sourceId)) {this.finishListening(r);r.playback = stopped(r.playback.sourceEpoch + 1, this.now());}
       this.changed(r);
     }
-    else if (r.playback.providerId === userId && r.playback.sourceEpoch === epoch) { const t = r.playlist.find(t => t.id === r.playback.sourceId); if (t) t.available = false; r.playback = stopped(r.playback.sourceEpoch + 1, this.now()); this.advance(r); this.changed(r); }
+    else if (r.playback.providerId === userId && r.playback.sourceEpoch === epoch) { this.finishListening(r);const t = r.playlist.find(t => t.id === r.playback.sourceId); if (t) t.available = false; r.playback = stopped(r.playback.sourceEpoch + 1, this.now()); this.advance(r); this.changed(r); }
   }
   tick() {
     for (const r of this.rooms.values()) {
@@ -279,11 +314,11 @@ export class RoomEngine {
       }
       if (p?.committed && now >= p.playback.effectiveAtServerMs) {
         r.playback = p.playback; r.pending = null;
-        const report = r.reportPlaybackStart; r.reportPlaybackStart = false;
+        const startsSession = r.startsListeningSession; r.startsListeningSession = false;
         const track = r.playlist.find(t => t.id === r.playback.sourceId);
-        if (report && track && r.playback.playState === 'playing' && r.members.some(m => m.online)) {
-          try { this.playbackStarted({ ...track }); } catch { /* Optional background observers cannot interrupt playback. */ }
-        }
+        if(startsSession)this.finishListening(r);
+        if(startsSession&&track&&r.playback.playState==='playing')this.startListening(r,r.playback.effectiveAtServerMs,r.playback.positionMs,0);
+        else if(r.listening)r.listening.sample=r.playback.playState==='playing'?{epoch:r.playback.sourceEpoch,at:r.playback.effectiveAtServerMs,position:r.playback.positionMs,listenedMs:0}:undefined;
         if (r.playbackMode === 'shuffle' && r.playback.sourceId) r.shufflePlayed.add(r.playback.sourceId);
         changed = true;
       }

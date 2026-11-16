@@ -1,6 +1,6 @@
 {
   "name": "@music-share/client",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,7 +10,7 @@
     "tauri": "tauri"
   },
   "dependencies": {
-    "@music-share/shared": "1.4.6",
+    "@music-share/shared": "1.4.7",
     "@tauri-apps/api": "^2.9.0",
     "lucide-vue-next": "^0.468.0",
     "music-metadata": "12.3.2",
