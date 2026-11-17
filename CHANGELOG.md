@@ -3,6 +3,7 @@
 ## [未发布]
 
 ### 修复
+- Android APK 工作流固定安装 API 36 / build-tools 36.0.0，并在生成工程后同步 compileSdk、targetSdk 与 buildToolsVersion，避免 CLI 模板请求不存在的 platforms;android-37 而中止；保留最低系统版本及 Debug 签名，模板字段异常明确失败。新增配置脚本回归用例但未运行，远端编译仍待验证。
 - Android APK 工作流显式指定 setup-android 安装 platform-tools，避免默认安装已无法获取的 tools 包导致环境准备失败；后续 SDK/NDK 和 Debug 打包步骤保持不变，远端重新构建仍待验证。
 
 ### 新增

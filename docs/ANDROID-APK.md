@@ -21,7 +21,7 @@
 
 Android 环境初始化显式指定 `setup-android` 的 `packages: platform-tools`，不使用其包含旧 `tools` 包的默认列表；SDK platform、build-tools 和 NDK 在后续步骤分别安装。
 
-1. CI 使用 Node 24、Rust 1.90.0、Java 17、NDK 27.2.12479018、build-tools 35.0.0，目标 ARM64；SDK platform 从锁定 CLI 生成工程的 `compileSdk` 读取并安装。Gradle 仍可能安装其默认 build-tools，不能保证未来模板始终兼容当前工具链。
+1. CI 使用 Node 24、Rust 1.90.0、Java 17、NDK 27.2.12479018，固定安装 Android API 36 与 build-tools 36.0.0，目标 ARM64。初始化工程后由 `scripts/configure-android-sdk.mjs` 将 `compileSdk`、`targetSdk` 和 `buildToolsVersion` 同步为安装版本，不再跟随 CLI 模板请求不可获取的 API 37；保留 `minSdk`。模板字段缺失或重复时明确失败，不盲目继续。后续插件或原生依赖的兼容性仍需远端编译验证。
 2. `npm ci` 后运行 `tauri android init --ci --skip-targets-install`，每次从当前锁定 CLI 生成试用工程，避免提交生成文件和本机路径；后续需要定制 Manifest/Kotlin 时再改为维护已提交工程。
 3. `tauri.android.conf.json` 指定 `npm run build -- --mode android-preview`；`.env.android-preview` 只含公开的试用开关。CI 复用生产服务地址；本地构建需显式提供 `VITE_SERVER_URL`，自定义 Vite mode 不自动读取 `.env.production`。
 4. CI 使用 `tauri android build --ci --debug --apk --target aarch64`，编译与实际启动结果仍待验证。开发机需自行先安装 SDK/NDK/Java 与 Rust Android target。

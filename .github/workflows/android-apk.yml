@@ -20,7 +20,8 @@ jobs:
         shell: bash
     env:
       NDK_VERSION: '27.2.12479018'
-      BUILD_TOOLS_VERSION: '35.0.0'
+      ANDROID_API_LEVEL: '36'
+      BUILD_TOOLS_VERSION: '36.0.0'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -44,7 +45,7 @@ jobs:
       - name: Install Android SDK and NDK
         run: |
           set -euo pipefail
-          sdkmanager "platform-tools" "build-tools;$BUILD_TOOLS_VERSION" "ndk;$NDK_VERSION"
+          sdkmanager "platform-tools" "platforms;android-$ANDROID_API_LEVEL" "build-tools;$BUILD_TOOLS_VERSION" "ndk;$NDK_VERSION"
           echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
       - name: Install Rust Android target
         run: |
@@ -67,12 +68,10 @@ jobs:
         run: |
           set -euo pipefail
           npm run tauri -- android init --ci --skip-targets-install
-      - name: Install SDK platform required by the locked CLI template
+      - name: Pin generated project to the installed stable Android SDK
         run: |
           set -euo pipefail
-          sdk=$(sed -nE 's/^[[:space:]]*compileSdk = ([0-9]+)[[:space:]]*$/\1/p' apps/client/src-tauri/gen/android/app/build.gradle.kts)
-          [[ "$sdk" =~ ^[0-9]+$ ]] || { echo '::error::Unable to determine generated compileSdk'; exit 1; }
-          sdkmanager "platforms;android-$sdk"
+          node scripts/configure-android-sdk.mjs
       - name: Build ARM64 debug APK with automatic debug signing
         working-directory: apps/client
         run: |
