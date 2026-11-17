@@ -65,3 +65,13 @@ it('rounds the independent player bottom corners and shares the window maximized
  expect(player).toContain('prefers-reduced-motion:reduce');
  expect(app).toContain('播放器独立于 shell 的 inert 锁');expect(app).toContain('<GlobalPlayer v-if="app.user" />');
 });
+
+it('preserves the original room slide/scale timings and isolates only the animated layer',()=>{
+ const motion=read('motion.css'),app=read('App.vue');
+ expect(motion).toContain('transform: translateY(100%)');expect(motion).toContain('transform: scale(0.97)');
+ expect(motion).toContain('transform 0.4s cubic-bezier(0.16, 1, 0.3, 1)');
+ expect(motion).toContain('transform 0.35s cubic-bezier(0.3, 0, 0.8, 0.15)');
+ for(const hook of ['@enter="roomRouteTransition.start"','@leave="roomRouteTransition.start"','@after-enter="roomRouteTransition.finish"','@enter-cancelled="roomRouteTransition.finish"','@after-leave="roomRouteTransition.finish"','@leave-cancelled="roomRouteTransition.finish"'])expect(app).toContain(hook);
+ expect(app).toContain('onUnmounted(roomRouteTransition.dispose)');
+ expect(styles('App.vue')).toMatch(/\.shell\.in-room-shell \.main\s*\{[^}]*overflow-y: auto/s);
+});

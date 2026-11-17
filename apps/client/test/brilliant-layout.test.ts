@@ -77,3 +77,11 @@ it('keeps the full-screen search overlay inside the shared window corner boundar
  expect(tone).toContain('#app{--window-corner-radius:20px');
  expect(tone).toContain('#app.is-maximized{--window-corner-radius:0px');
 });
+
+it('preserves search modal motion while isolating transformed overflow and reserving scrollbar space',()=>{
+ const source=read('../src/components/MusicSearchDialog.vue'),motion=read('../src/motion.css');
+ expect(source).toContain('scrollbar-gutter:stable');expect(source).toContain('backdrop-filter:none;-webkit-backdrop-filter:none');expect(source).toContain("createScrollTransitionLayer('global-search-modal')");
+ for(const hook of ['@enter="startTransition"','@leave="startTransition"','@after-enter="finishTransition"','@enter-cancelled="finishTransition"','@after-leave="afterLeave"','@leave-cancelled="finishTransition"'])expect(source).toContain(hook);
+ expect(source).toContain('searchTransition.dispose()');expect(source).toContain('focus({preventScroll:true})');
+ expect(motion).toContain('transform:translateY(12px) scale(.98);opacity:0');
+});

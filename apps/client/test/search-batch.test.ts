@@ -84,3 +84,7 @@ it('drags the native window from header content but not controls, secondary clic
  f.drag.mockRejectedValueOnce(Error('DRAG_FAILED'));header.props.onMousedown(event);await settle();
  expect(f.app.error).toHaveBeenCalledWith(expect.objectContaining({message:'DRAG_FAILED'}));
 });
+
+it('focuses search without scrolling the full-screen overlay during entry',async()=>{
+ const root=await mount();const input=all(root).find(item=>item.props.id==='music-keywords');expect(input.focus).toHaveBeenCalledWith({preventScroll:true});
+});

@@ -11,6 +11,7 @@ import * as bridge from './bridge';
 import AuthPage from './components/AuthPage.vue';
 import CachedMusicPage from './components/CachedMusicPage.vue';
 import { createPlaybackCacheHost } from './playback-cache-host';
+import { createRoomRouteTransition } from './room-route-transition';
 import SplashScreen from './components/SplashScreen.vue';
 import GlobalPlayer from './components/GlobalPlayer.vue';
 import QueueDrawer from './components/QueueDrawer.vue';
@@ -46,6 +47,8 @@ const playbackCacheKey=computed(()=>JSON.stringify([app.user?.id,app.room?.id??(
 const playbackPageHost=computed(()=>createPlaybackCacheHost(playbackCacheKey.value));
 const cachedPageNames=computed(()=>['CachedMusicPage',playbackPageHost.value.name!]);
 const transitionName = ref('page');
+const roomRouteTransition=createRoomRouteTransition();
+onUnmounted(roomRouteTransition.dispose);
 
 router.beforeEach((to, from) => {
   if (to.path.startsWith('/room/')) {
@@ -298,7 +301,7 @@ function onHeaderMouseDown(e: MouseEvent) {
       </Transition>
       <AuthPage v-if="!app.user" @version="versionOpen = true" />
       <router-view v-else v-slot="{ Component, route }">
-        <Transition :name="transitionName" mode="out-in" appear>
+        <Transition :name="transitionName" mode="out-in" appear @enter="roomRouteTransition.start" @leave="roomRouteTransition.start" @after-enter="roomRouteTransition.finish" @enter-cancelled="roomRouteTransition.finish" @after-leave="roomRouteTransition.finish" @leave-cancelled="roomRouteTransition.finish">
           <KeepAlive :key="app.user.id" :include="cachedPageNames" :max="2">
             <component v-if="route.path.startsWith('/room/')" :is="playbackPageHost" :key="route.path" :view="Component" />
             <CachedMusicPage v-else-if="route.path==='/playlists'" key="my-music" :view="Component" />

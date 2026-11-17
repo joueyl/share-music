@@ -124,6 +124,29 @@ it('closes song menus on outside clicks or another menu, and unregisters the lis
  mounted.unmount();expect(document.removeEventListener).toHaveBeenCalledWith('click',listener);
 });
 
+it('closes on outside clicks including the player area and removes the capture listener',async()=>{
+ const {root,dialog}=await mount();dialog.contains=()=>false;
+ const listener=(document.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(c=>c[0]==='click'&&c[2]===true)![1];
+ listener({target:{closest:()=>null},stopPropagation:vi.fn()});await settle();
+ expect(all(root).some(n=>n.props.role==='dialog')).toBe(false);
+ mounted.unmount();expect(document.removeEventListener).toHaveBeenCalledWith('click',listener,true);
+});
+it('keeps inside clicks and the player toggle owned by their existing handlers',async()=>{
+ const {root,dialog}=await mount(),inside={};dialog.contains=(target:unknown)=>target===inside;
+ const listener=(document.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(c=>c[0]==='click'&&c[2]===true)![1];
+ listener({target:inside});listener({target:{closest:()=>({})}});await settle();
+ expect(all(root).some(n=>n.props.role==='dialog')).toBe(true);
+});
+it('ignores outside clicks during sorting gestures and the post-drop protection period',async()=>{
+ const {root,dialog}=await mount();dialog.contains=()=>false;
+ const listener=(document.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(c=>c[0]==='click'&&c[2]===true)![1];
+ const outside={target:{closest:()=>null}};
+ grip(root,'a').props.onPointerdown(pointer(20));listener(outside);await settle();
+ expect(all(root).some(n=>n.props.role==='dialog')).toBe(true);
+ dialog.props.onPointermove(pointer(140));await dialog.props.onPointerup(pointer(140));listener(outside);await settle();
+ expect(all(root).some(n=>n.props.role==='dialog')).toBe(true);
+});
+
 it('animates closed when the external queue toggle requests it and can reopen before leaving',async()=>{
  const state=reactive({open:true}),root=node('root');mounted=renderer.createApp({setup:()=>()=>h(QueueDrawer,{open:state.open})});mounted.mount(root);await settle();
  expect(all(root).some(n=>n.props.role==='dialog')).toBe(true);

@@ -19,6 +19,13 @@ let ignoreBackdropUntil=0;
 let searchAfterClose=false;
 function close(){cancelDrag();visible.value=false;}
 function backdropClose(){if(gesture||Date.now()<ignoreBackdropUntil)return;close();}
+function outsideClose(event:MouseEvent){
+ const target=event.target as Element|null;
+ if(!visible.value||!target||dialog.value?.contains(target))return;
+ // The player toggle owns its click; closing here would make it reopen the drawer.
+ if(target.closest?.('.queue-trigger'))return;
+ backdropClose();
+}
 function afterLeave(){emit('close');if(searchAfterClose)openSearch();}
 useDialogFocus(dialog,close,'.queue-trigger:not([inert])');
 watch(()=>props.open,value=>{if(value===false)close();else if(value)visible.value=true;});
@@ -28,8 +35,8 @@ function closeMenus(event:MouseEvent){
   if(!target||!menu.contains(target))menu.open=false;
  }
 }
-onMounted(()=>document.addEventListener('click',closeMenus));
-onUnmounted(()=>document.removeEventListener('click',closeMenus));
+onMounted(()=>{document.addEventListener('click',closeMenus);document.addEventListener('click',outsideClose,true);});
+onUnmounted(()=>{document.removeEventListener('click',closeMenus);document.removeEventListener('click',outsideClose,true);});
 const current=computed(()=>app.room?.playlist.find(t=>t.id===app.room?.playback.sourceId));
 const scroll=ref<HTMLElement|null>(null),draft=ref<string[]>([]),dragging=ref(''),dropTarget=ref(''),sorting=ref(false),playing=ref(false);
 const queue=computed(()=>{const tracks=app.room?.playlist??[];return draft.value.length?draft.value.map(id=>tracks.find(t=>t.id===id)).filter((t):t is typeof tracks[number]=>!!t):tracks;});

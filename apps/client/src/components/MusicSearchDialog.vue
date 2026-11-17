@@ -4,6 +4,7 @@ let unlockBackground = () => {};
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { Search, X, Plus, Check, LoaderCircle, Disc3, Clock3, Headphones, Play, Users } from 'lucide-vue-next';
 import { useMusicSuggestions } from '../useMusicSuggestions';
+import { createScrollTransitionLayer } from '../scroll-transition-layer';
 import { useApp } from '../store';
 import * as bridge from '../bridge';
 import AlbumArt from './AlbumArt.vue';
@@ -73,6 +74,10 @@ const dialog=ref<HTMLElement|null>(null),input=ref<HTMLInputElement|null>(null);
 let generation=0,alive=true,previous:HTMLElement|null=null;
 const requestIds=new Map<string,string>();
 watch(source,()=>{generation++;songs.value=[];total.value=0;offset.value=0;query.value='';searched.value=false;searching.value=false;message.value='';requestIds.clear();added.value=new Set();},{flush:'sync'});
+const searchTransition=createScrollTransitionLayer('global-search-modal');
+function startTransition(backdrop:Element){const modal=backdrop.querySelector('.global-search-modal');if(modal)searchTransition.start(modal);}
+function finishTransition(backdrop:Element){const modal=backdrop.querySelector('.global-search-modal');if(modal)searchTransition.finish(modal);}
+function afterLeave(backdrop:Element){finishTransition(backdrop);emit('close');}
 const visible=ref(true);
 function close(){if(!adding.value&&!allBusy.value)visible.value=false;}
 function trap(event:KeyboardEvent){
@@ -84,8 +89,8 @@ function trap(event:KeyboardEvent){
  if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}
  else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}
 }
-onMounted(async()=>{previous=document.activeElement as HTMLElement;unlockBackground=lockModalBackground();await nextTick();input.value?.focus();document.addEventListener('keydown',trap);});
-onUnmounted(()=>{alive=false;generation++;document.removeEventListener('keydown',trap);unlockBackground();previous?.focus();});
+onMounted(async()=>{previous=document.activeElement as HTMLElement;unlockBackground=lockModalBackground();await nextTick();if(!alive)return;input.value?.focus({preventScroll:true});document.addEventListener('keydown',trap);});
+onUnmounted(()=>{alive=false;generation++;document.removeEventListener('keydown',trap);searchTransition.dispose();unlockBackground();previous?.focus({preventScroll:true});});
 async function search(page=0){
  const term=page===0?keywords.value.trim():query.value;if(!term||adding.value||allBusy.value||composing.value)return;
  suggestionsSuppressed.value=true;suggestions.dismiss();
@@ -104,7 +109,7 @@ async function add(song:bridge.MusicSearchItem){
 const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toString().padStart(2,'0')}`;
 </script>
 <template>
- <Teleport to="#app"><Transition name="modal" appear @after-leave="emit('close')"><div v-if="visible" class="modal-backdrop search-backdrop">
+ <Teleport to="#app"><Transition name="modal" appear @enter="startTransition" @leave="startTransition" @after-enter="finishTransition" @enter-cancelled="finishTransition" @after-leave="afterLeave" @leave-cancelled="finishTransition"><div v-if="visible" class="modal-backdrop search-backdrop">
  <section ref="dialog" class="modal music-search-modal global-search-modal" role="dialog" aria-modal="true" aria-labelledby="music-search-title" :aria-busy="searching||!!adding||allBusy">
   <header class="global-search-header" @mousedown="onHeaderMouseDown" @dblclick.stop.prevent=""><span class="search-symbol"><Search :size="22" /></span><h2 id="music-search-title">搜索音乐</h2><p>发现好音乐，随时添加到共享房间</p><kbd>Esc</kbd><button class="round-close" aria-label="关闭搜索音乐" :disabled="!!adding||allBusy" @click="close"><X :size="22" /></button></header>
   <div class="global-search-body"><div class="search-main"><span class="eyebrow">SEARCH MUSIC / 找一首此刻想听的歌</span><h1>好音乐，值得一起发现</h1>
@@ -124,7 +129,7 @@ const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toSt
 
 <style scoped>
 /* The overlay is a sibling of the inert shell and inherits window geometry. */
-.search-backdrop{border-radius:var(--window-corner-radius,20px);transition:border-radius .18s ease}
+.search-backdrop{border-radius:var(--window-corner-radius,20px);scrollbar-gutter:stable;backdrop-filter:none;-webkit-backdrop-filter:none;transition:border-radius .18s ease}
 /* Stay above scrolling content, while retaining the header’s layout space. */
 .global-search-header{user-select:none;position:sticky;top:0;z-index:6;flex-shrink:0;background:#eef4faf2;backdrop-filter:blur(16px)}
 .music-source-picker{display:flex;flex-direction:row;align-items:center;gap:12px;margin:0 0 16px;font-size:12px;flex-shrink:0}
