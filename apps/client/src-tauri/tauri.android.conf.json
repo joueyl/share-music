@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "build": {
+    "beforeBuildCommand": "npm run build -- --mode android-preview"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "同频 · TONE · Android 试用"
+      }
+    ]
+  },
+  "bundle": {
+    "android": {
+      "minSdkVersion": 24
+    }
+  }
+}

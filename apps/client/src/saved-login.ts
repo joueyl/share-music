@@ -1,4 +1,5 @@
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
+import { isDesktopRuntime as isTauri } from './native-runtime';
 
 export type SavedLogin = { serverUrl: string; name: string; password: string };
 export async function canRememberLogin(): Promise<boolean> {

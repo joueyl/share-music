@@ -1,5 +1,6 @@
 import { favoriteSongSchema, type FavoriteSong } from '@music-share/shared';
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { invoke } from '@tauri-apps/api/core';
+import { isDesktopRuntime as isTauri } from './native-runtime';
 import { configureRuntimeProfile, getRuntimeProfile } from './runtime-profile';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { apiResponse } from './api-response';

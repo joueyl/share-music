@@ -2,6 +2,9 @@
 
 ## [未发布]
 
+### 新增
+- 新增独立手动触发的实验性 Android ARM64 APK Actions 配置和最小 Tauri 移动壳：复用现有桌面 Vue 页面及浏览器 HTTP/WebSocket/唯一 Audio 路径，Android 试用构建不启用桌面 IPC、托盘、更新器、凭据保存或原生缓存；CI 按锁定 CLI 生成 Android 工程，准备 SDK/NDK/Rust 环境并使用 Gradle 自动 Debug 签名，验证签名/ZIP 对齐、生成校验清单及上传明确标注 debug 的 Artifact，无需签名 Secrets；全新 runner 的签名可能变化，覆盖失败时需卸载并会丢失本地数据。仅用于试用，不影响桌面发布；不含原生后台/锁屏播放或专门手机布局，未执行 Android 编译、远端构建或实机验收，不能视为安卓正式支持；使用与密钥配置见 Android APK 文档。
+
 ## [1.4.8] - 2026-11-17
 
 ### 修复

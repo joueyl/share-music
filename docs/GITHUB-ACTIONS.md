@@ -1,5 +1,7 @@
 # GitHub Actions 自动打包
 
+Android APK 使用独立的手动试用工作流：复用现有页面和浏览器播放路径，CI 生成最小 Android 壳并使用自动 Debug 签名（无需签名 Secrets），不含完整移动端适配；不纳入下面的桌面发布汇总，见 [Android APK 配置与前置条件](ANDROID-APK.md)。
+
 工作流：`.github/workflows/desktop-release.yml`，名称为 **Desktop installers**。现覆盖 Windows x64、Linux x64 和 macOS Intel / Apple Silicon 四种构建目标，并支持配置签名后的应用内更新。
 
 ## 首次配置

@@ -1,5 +1,6 @@
 import { computed, reactive } from 'vue';
-import { Channel, invoke, isTauri } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
+import { isDesktopRuntime as isTauri } from './native-runtime';
 export type UpdateMetadata={version:string;currentVersion:string;body?:string|null};
 export type UpdateProgress={event:'Started'|'Progress'|'Finished';chunkLength?:number;contentLength?:number|null};
 type Adapter={desktop:()=>boolean;status:()=>Promise<{configured:boolean;supported:boolean}>;check:()=>Promise<UpdateMetadata|null>;install:(progress:(event:UpdateProgress)=>void)=>Promise<void>;restart:()=>Promise<void>};

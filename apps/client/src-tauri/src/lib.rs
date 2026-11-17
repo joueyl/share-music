@@ -1,22 +1,35 @@
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", not(target_os = "android")))]
 pub mod app_updates;
-#[cfg(feature = "desktop")]
-pub mod chat_notifications;
+#[cfg(not(target_os = "android"))]
 pub mod buffer;
+#[cfg(all(feature = "desktop", not(target_os = "android")))]
+pub mod chat_notifications;
+#[cfg(not(target_os = "android"))]
 pub mod clock;
+#[cfg(not(target_os = "android"))]
 pub mod close_to_tray;
+#[cfg(not(target_os = "android"))]
 pub mod control;
+#[cfg(not(target_os = "android"))]
 pub mod media;
+#[cfg(not(target_os = "android"))]
 pub mod model;
+#[cfg(not(target_os = "android"))]
 pub mod music_cache;
+#[cfg(not(target_os = "android"))]
 pub mod native;
+#[cfg(not(target_os = "android"))]
 pub mod packet;
+#[cfg(not(target_os = "android"))]
 pub mod playback_audio;
+#[cfg(not(target_os = "android"))]
 pub mod saved_login;
+#[cfg(not(target_os = "android"))]
 pub mod stun;
+#[cfg(not(target_os = "android"))]
 pub mod system_media;
 
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", not(target_os = "android")))]
 mod desktop {
     use super::*;
     use serde_json::{json, Value};
@@ -211,5 +224,15 @@ mod desktop {
             });
     }
 }
-#[cfg(feature = "desktop")]
+#[cfg(all(feature = "desktop", not(target_os = "android")))]
 pub use desktop::run;
+
+// Experimental Android shell: existing Vue UI and browser HTTP/WebSocket/Audio path.
+// No desktop tray, updater, credentials, native cache or media commands are exposed.
+#[cfg(all(feature = "desktop", target_os = "android"))]
+#[tauri::mobile_entry_point]
+pub fn run() {
+    tauri::Builder::default()
+        .run(tauri::generate_context!())
+        .expect("Run experimental Android shell");
+}

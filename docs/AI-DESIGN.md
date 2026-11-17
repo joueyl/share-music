@@ -159,6 +159,8 @@
 
 ## 7. 技术与真实数据边界
 
+- Android 当前仅为实验性最小 WebView 壳，复用现有桌面 Vue 页面与浏览器 HTTP/WebSocket/唯一 Audio 路径，不另写一套页面；`android-preview` 构建模式禁用桌面 IPC、系统凭据、原生缓存、桌面更新和窗口按钮。暂不开发安卓专用布局、原生通知、后台/锁屏播放或系统媒体控制；CI 配置与最小入口不等于实际 APK 编译或手机验收通过，后续按真实试用结果再适配。
+
 - 桌面主 WebView 显式设置 `backgroundThrottling: disabled`，避免 macOS 最小化/隐藏后挂起切歌、取源和播放同步；仍使用唯一 HTML Audio，不抢前台或用静音播放器保活。该配置由 Tauri 在 macOS 14+ 支持，macOS 13 不保证此修复生效，不能据此宣称所有 Mac 已验收。后台 3D RAF、iPod 屏幕与歌词视觉更新仍遵守既有隐藏/停用策略，不因关闭 WebView 挂起而恢复装饰性绘制；保持后台同步可能增加耗电。需重建桌面包，并在目标 Mac 验证长时间最小化、自然接曲、远程切歌、暂停/恢复及恢复前台。
 
 - 保持 Tauri 2 + Vue 3 + TypeScript + Pinia + Vue Router，NestJS 后端、shared 协议校验；不为局部样式引入第二套框架。
