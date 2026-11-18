@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: Completed tag build run ID (all four platforms successful)
+        description: Completed tag build run ID (desktop and Android all successful)
         required: true
         type: string
       publish:
@@ -52,7 +52,7 @@ jobs:
           run-id: ${{ inputs.source_run_id }}
           pattern: music-share-*-${{ steps.source.outputs.version }}
           path: downloaded-artifacts
-      - name: Recheck all four platforms and generate the update manifest
+      - name: Recheck desktop and Android packages and generate the update manifest
         env:
           UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
         run: node scripts/ci-release.mjs merge
@@ -67,7 +67,7 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           assets=(release-artifacts/*)
-          test "${#assets[@]}" -ge 7
+          test "${#assets[@]}" -ge 9
           args=(--draft)
           if [[ "$PUBLISH" == 'true' ]]; then args=(); fi
           gh release create "$RELEASE_TAG" "${assets[@]}" "${args[@]}" --verify-tag --title "共鸣 Music Share $RELEASE_TAG" --notes-file release-artifacts/RELEASE-NOTES.md

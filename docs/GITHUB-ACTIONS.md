@@ -1,8 +1,8 @@
 # GitHub Actions 自动打包
 
-Android APK 使用独立试用工作流，在相关 main 变更或手动运行时构建：独立响应式 APK 页面共用业务和浏览器播放路径，CI 生成 Android 壳并使用自动 Debug 签名（无需签名 Secrets）；不纳入下面的桌面发布汇总，见 [Android APK 配置与前置条件](ANDROID-APK.md)。
+桌面与 Android APK 现共用一个版本工作流。main 只运行检查；匹配的版本标签统一构建四个桌面目标和 Android ARM64 Debug APK，全部成功后汇总到同一 Release 草稿。Android 仍是 Debug 试用包，不代表正式签名或实机验收，见 [Android APK 配置与前置条件](ANDROID-APK.md)。
 
-工作流：`.github/workflows/desktop-release.yml`，名称为 **Desktop installers**。现覆盖 Windows x64、Linux x64 和 macOS Intel / Apple Silicon 四种构建目标，并支持配置签名后的应用内更新。
+工作流：`.github/workflows/desktop-release.yml`，名称为 **Client installers**。现覆盖 Windows x64、Linux x64 和 macOS Intel / Apple Silicon 四个桌面目标及 Android ARM64，并支持配置签名后的应用内更新。
 
 ## 首次配置
 
@@ -13,7 +13,7 @@ Android APK 使用独立试用工作流，在相关 main 变更或手动运行�
 
 ## 手动打包（建议先执行）
 
-在 **Actions → Desktop installers → Run workflow** 选择分支并运行，一次触发全部四种构建目标。流水线将：
+在 **Actions → Client installers → Run workflow** 选择分支并运行，一次触发四个桌面目标及 Android ARM64 共五个目标。流水线将：
 
 - 使用 Node.js 24，校验版本、更新日志和生产服务地址，执行 `npm ci` 与 JavaScript 测试；网易云 hana 编程式 SDK 的离线兼容测试也在此环境执行。
 - 安装固定 Rust 1.90.0，使用对应平台的系统 WebView / HTML Audio。
@@ -21,7 +21,7 @@ Android APK 使用独立试用工作流，在相关 main 变更或手动运行�
 - 调用对应平台的 `package:win` / `package:linux` / `package:mac` 及检查命令。Linux 安装 WebKitGTK 4.1、GTK3、PipeWire、D-Bus 等依赖；macOS 分别使用 Intel / Apple Silicon runner，并设置最低系统版本 13.0。
 - 每个目标独立上传名为 `music-share-目标-版本号` 的 Actions Artifact，保留 30 天；包含对应安装包、`SHA256SUMS-目标.txt`、`RELEASE-NOTES.md`。文件名统一包含版本、平台及架构，避免冲突。
 
-手动运行不创建或公开 Release。main 分支推送涉及客户端、共享包、scripts、根依赖清单/锁文件或本工作流时，也会自动构建四个目标以预热默认分支缓存，只上传 Actions Artifact，不创建或公开 Release；纯文档或仅服务端改动不触发此预热。标签推送不受路径过滤影响。产物可从本次 Actions 运行页面下载。首次构建 Rust 与系统桌面依赖可能较慢，工作流超时为 180 分钟；自动预热会增加 Actions 用量，实际耗时受 GitHub runner 和网络影响，私有仓库还需留意 Actions 配额。
+手动运行会执行检查并构建全部五个目标，仅上传 Actions Artifact，不创建或公开 Release。main 相关推送（客户端、共享包、服务端、scripts、根依赖或工作流）只运行 verify：类型、测试、双端前端构建与发布门禁；不会生成安装包，因此不再与随后 tag 重复打包。匹配版本标签推送时，verify 通过后才并行打包，任一目标失败或被取消都阻止 Release 草稿。标签推送不受路径过滤影响，纯文档修改不触发 main 检查。
 
 ## 版本标签与 Release 草稿
 
@@ -34,7 +34,9 @@ git tag v0.1.2
 git push origin v0.1.2
 ```
 
-标签必须与项目版本完全一致。四种目标全部构建成功后，独立汇总任务重新计算每个安装包的 SHA-256，检查各目标的更新日志和版本一致；缺少目标或校验失败时不会创建草稿。通过后创建 `v0.1.2` 的 **Draft Release**，填入该版本 CHANGELOG.md 说明并附上五个安装包（Windows 一个、Linux 两个、macOS 两个）、统一的 SHA256SUMS.txt 和 RELEASE-NOTES.md，共七个附件（未启用更新时）。启用签名更新时另含两份 macOS 更新压缩包、四份签名和 latest.json，共十四个附件。发布者下载并验收安装包，再手动点 **Publish release** 对外发布。
+标签必须与项目版本完全一致。四个桌面目标和 Android 全部成功后，汇总任务严格核对五份 Artifact 的版本、完整文件集、统一说明及真实 SHA-256；还检查 APK 独立入口标记和不可省略的 Debug 警告。缺少 Android、混入旧包、签名/校验失败或说明不一致，都不会创建草稿。通过后创建同名 **Draft Release**，包含六个安装包（Windows 一个、Linux 两个、macOS 两个及 Android 一个）、ANDROID-DEBUG-NOTICE.txt、SHA256SUMS.txt 和 RELEASE-NOTES.md，共九个附件；启用桌面签名更新时加上两份 macOS 更新压缩包、四份签名和 latest.json，共十六个附件。
+
+Android APK 不是桌面 Tauri Updater 目标，latest.json 仍只含四个桌面平台；APK 不伪造更新签名或生产签名。发布者验收后再点击 **Publish release** 公开整个版本。恢复发布也必须来自同一标签提交的完整五目标构建，并重新校验，不允许跳过 Android。
 
 已有同名 Release 时创建步骤会失败，不覆盖已发布内容。失败重跑前先检查是否已有草稿或部分上传的附件；不要删除正式发布版本或强制移动已公开标签。若构建成功但草稿任务因权限失败，Actions Artifact 仍可下载。
 
@@ -46,6 +48,7 @@ git push origin v0.1.2
 | Linux | ubuntu-22.04 | x64 | .deb、.AppImage |
 | macOS Intel | macos-15-intel | x64 | .dmg |
 | macOS Apple Silicon | macos-15 | arm64 | .dmg |
+| Android 试用 | ubuntu-22.04 | ARM64 | -android-arm64-debug.apk |
 
 对应系统原生编译，不交叉编译；macOS 两种架构分别发布，不是 Universal Binary。Linux ARM64 尚未配置。Runner 标签参考 [GitHub 官方镜像列表](https://github.com/actions/runner-images#available-images)，今后可能随镜像生命周期调整。
 
@@ -59,12 +62,13 @@ Windows、Linux 和两种 macOS 架构均使用固定提交版本的 `Swatinem/r
 - 不缓存 Cargo 安装的工具或本项目最终安装包，不因缓存命中跳过构建、测试和签名检查。
 - 缓存键包含系统、架构、原生依赖配置；Action 自动纳入 Rust 编译器、Cargo.lock/Cargo.toml 与相关构建环境，避免不兼容产物混用。自定义 key 不再额外拼接原始 Cargo.lock 哈希；沿用固定版本 rust-cache 对本项目版本的归一化及真实依赖哈希，使仅应用升版不再改变恢复前缀，依赖变化仍由 Action 识别。
 - `cache-on-failure` 允许普通任务失败后保存已生成的缓存，但缓存服务异常、任务取消或 runner 中断时不保证保存。
-- 第一次仍需冷构建。main 相关推送会自动预热，也可在默认分支 `main` 手动运行一次；**等待 main 构建及缓存保存完成后再推新标签**，后续标签才能复用默认分支缓存。GitHub 不允许不同标签直接读取彼此缓存，单纯重复发标签不能预热下一版本。main 与标签同时推送时，两者可能并行冷构建。命中与保存结果可查看 **Cache Cargo downloads and Rust dependencies** 及其 Post 步骤。
+- main 只检查，不自动预热原生编译缓存。需要默认分支缓存时可在 main 手动运行完整工作流；否则标签构建可能冷启动。GitHub 不允许不同标签直接读取彼此缓存，不能承诺固定加速比例；不再要求每次发布先构建 main 安装包。
+- Android 沿用独立的 Android Rust 缓存命名空间与 NDK 键，不能与桌面目标的编译缓存混用。
 
 npm 依赖与 Cargo/Rust 编译产物分别缓存。缓存失效、依赖或工具链变化时仍可能重新编译，不保证固定加速比例。
 
 ## 验证边界
 
-本地可运行 `npm run test:ci-release` 和 `npm run test:version`。这些测试覆盖标签与版本匹配、公开地址校验、日志提取、四架构产物筛选、汇总和真实 SHA-256 计算，不代表已在 GitHub runner 上完成原生编译、安装包生成或实机安装验收。
+本地可运行 `npm run test:ci-release` 和 `npm run test:version`。这些测试覆盖标签与版本匹配、公开地址校验、日志提取、五目标产物筛选、汇总和真实 SHA-256 计算，隔离测试不代表已在 GitHub runner 上执行新合并工作流或完成实机安装验收。
 
 此工作流已接入 Tauri Updater：配置匹配的公钥和签名 Secrets 后生成 `.sig`、`latest.json`，并在收集及汇总时验证签名。不自动公开 Release，也不部署 NestJS 服务。首次配置和完整流程见 [GitHub 更新配置](UPDATER.md)。

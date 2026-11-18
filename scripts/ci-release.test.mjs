@@ -6,7 +6,7 @@ import { dirname, resolve, join, basename, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { versionPlan } from './version.mjs';
-import { validateRelease, publicServerUrl, prepareRelease, collectRelease, mergeRelease, RELEASE_TARGETS, validateBuildHost } from './ci-release.mjs';
+import { validateRelease, publicServerUrl, prepareRelease, collectRelease, mergeRelease, RELEASE_TARGETS, validateBuildHost, collectAndroidRelease, ANDROID_TARGET, ANDROID_NOTICE_NAME } from './ci-release.mjs';
 import { syntheticSigning } from './test-fixtures/updater-signing.mjs';
 const project=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const read=(root,path)=>readFileSync(join(root,path),'utf8');
@@ -64,7 +64,7 @@ test('fails on absent or ambiguous installers rather than uploading a wrong pack
 test('workflow waits for Windows and every Unix matrix build and gives build jobs no write token',()=>{
  const workflow=read(project,'.github/workflows/desktop-release.yml').replace(/\r\n/g,'\n');
  assert.equal(existsSync(join(project,'.github/workflows/windows-release.yml')),false);
- assert.match(workflow,/workflow_dispatch:/);assert.match(workflow,/contents: read/);assert.match(workflow,/needs: \[build, build-unix\]/);assert.match(workflow,/--draft --verify-tag/);
+ assert.match(workflow,/workflow_dispatch:/);assert.match(workflow,/contents: read/);assert.match(workflow,/needs: \[build, build-unix, android\]/);assert.match(workflow,/--draft --verify-tag/);
  assert.doesNotMatch(workflow,/pull_request_target/);assert.match(workflow,/if-no-files-found: error/);
  const secrets=[...workflow.matchAll(/secrets\.([A-Z_]+)/g)].map(match=>match[1]);
  assert.ok(secrets.every(name=>['TAURI_SIGNING_PRIVATE_KEY','TAURI_SIGNING_PRIVATE_KEY_PASSWORD'].includes(name)));
@@ -88,6 +88,13 @@ async function allArtifacts(t,signing){
   for(const name of readdirSync(result.output))copyFileSync(join(result.output,name),join(destination,name));
   rmSync(result.output,{recursive:true,force:true,maxRetries:3,retryDelay:50});
  }
+ const apk=join(f.root,'fixture.apk');writeFileSync(apk,'synthetic APK fixture, not a signed package');
+ mkdirSync(join(f.root,'apps/client/dist-apk'),{recursive:true});
+ writeFileSync(join(f.root,'apps/client/dist-apk/client-target.json'),JSON.stringify({target:'apk',entry:'src/apk/main.ts',desktopModules:0}));
+ const mobile=await collectAndroidRelease(f.root,apk),destination=join(downloaded,`music-share-${ANDROID_TARGET}-${f.version}`);
+ mkdirSync(destination);for(const name of readdirSync(mobile.output))copyFileSync(join(mobile.output,name),join(destination,name));
+ assert.equal(resolve(mobile.output),join(resolve(f.root),'release-artifacts'));
+ rmSync(mobile.output,{recursive:true,force:true,maxRetries:3,retryDelay:50});
  return {...f,downloaded};
 }
 
@@ -107,7 +114,7 @@ test('every desktop build caches Cargo downloads and compiled dependencies after
  }
 });
 
-test('main warms the same four-platform caches without creating or publishing a release',()=>{
+test('main checks both clients while tag/manual runs alone package all five targets',()=>{
  const workflow=read(project,'.github/workflows/desktop-release.yml').replace(/\r\n/g,'\n');
  const triggers=workflow.slice(0,workflow.indexOf('\npermissions:'));
  assert.match(triggers,/push:\n    branches:\n      - main\n/);
@@ -115,15 +122,15 @@ test('main warms the same four-platform caches without creating or publishing a 
  assert.match(triggers,/tags:\n      - 'v\[0-9\]\*\.\[0-9\]\*\.\[0-9\]\*'/);
  const release=workflow.slice(workflow.indexOf('\n  release-draft:\n'));
  assert.match(release,/if: github.event_name == 'push' && startsWith\(github.ref, 'refs\/tags\/v'\)/);
- assert.doesNotMatch(workflow,/if:.*cache-hit/);
+ for(const name of ['build','build-unix','android'])assert.ok(workflow.includes(`  ${name}:\n    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')\n    needs: verify`));
  assert.doesNotMatch(workflow,/pull_request_target|workflow_run:/);
 });
-test('collects Linux DEB/AppImage and two distinct macOS architecture packages then verifies all five installers',async t=>{
+test('collects Linux DEB/AppImage and two distinct macOS architecture packages then verifies all six installers and the Android warning',async t=>{
  const f=await allArtifacts(t),result=await mergeRelease(f.root,{});
- assert.equal(result.files.length,5);assert.equal(new Set(result.files).size,5);
- assert.equal(readdirSync(result.output).length,7);
+ assert.equal(result.files.length,7);assert.equal(new Set(result.files).size,7);
+ assert.equal(readdirSync(result.output).length,9);
  for(const target of ['macos-x64','macos-arm64'])assert.ok(result.files.some(name=>name.endsWith(`${target}.dmg`)));
- assert.equal(read(result.output,'SHA256SUMS.txt').trim().split('\n').length,5);
+ assert.equal(read(result.output,'SHA256SUMS.txt').trim().split('\n').length,7);
 });
 test('refuses corrupted installers before writing a merged release',async t=>{
  const f=await allArtifacts(t),target='linux-x64',directory=join(f.downloaded,`music-share-${target}-${f.version}`);
@@ -135,7 +142,7 @@ test('merges Windows CRLF notes with Unix LF notes without accepting changed con
  const f=await allArtifacts(t),path=join(f.downloaded,`music-share-windows-x64-${f.version}`,'RELEASE-NOTES.md');
  writeFileSync(path,readFileSync(path,'utf8').replace(/\r?\n/g,'\r\n'));
  const result=await mergeRelease(f.root,{});
- assert.equal(result.files.length,5);
+ assert.equal(result.files.length,7);
  assert(!read(result.output,'RELEASE-NOTES.md').includes('\r'));
 });
 test('refuses mismatched notes, incomplete platform sets and unsupported targets',async t=>{
@@ -153,7 +160,7 @@ test('generates a signed four-platform latest.json for the configured repository
  const result=await mergeRelease(f.root,{UPDATER_PUBLIC_KEY:signing.key});
  const manifest=JSON.parse(read(result.output,'latest.json'));
  assert.equal(manifest.version,f.version);assert.deepEqual(Object.keys(manifest.platforms).sort(),['darwin-aarch64','darwin-x86_64','linux-x86_64','windows-x86_64']);
- assert.equal(result.files.length,11);assert.equal(readdirSync(result.output).length,14);
+ assert.equal(result.files.length,13);assert.equal(readdirSync(result.output).length,16);
  for(const platform of Object.values(manifest.platforms)){assert.ok(platform.url.startsWith(`https://github.com/joueyl/share-music/releases/download/v${f.version}/`));assert.ok(platform.signature.length>100);}
  assert.ok(manifest.platforms['darwin-aarch64'].url.endsWith('.app.tar.gz'));
 });
@@ -169,10 +176,52 @@ test('unsigned test fixtures stay isolated when Actions exports an updater publi
  try{
   process.env.UPDATER_PUBLIC_KEY=syntheticSigning().key;
   const f=await allArtifacts(t),result=await mergeRelease(f.root,{});
-  assert.equal(result.files.length,5);
+  assert.equal(result.files.length,7);
   assert.equal(existsSync(join(result.output,'latest.json')),false);
  }finally{
   if(previous===undefined)delete process.env.UPDATER_PUBLIC_KEY;
   else process.env.UPDATER_PUBLIC_KEY=previous;
  }
+});
+
+test('Android collection refuses missing APKs and desktop entry markers before writing output',async t=>{
+ const f=fixture(t),apk=join(f.root,'fixture.apk');
+ await assert.rejects(collectAndroidRelease(f.root,apk));
+ writeFileSync(apk,'synthetic APK fixture');mkdirSync(join(f.root,'apps/client/dist-apk'),{recursive:true});
+ writeFileSync(join(f.root,'apps/client/dist-apk/client-target.json'),JSON.stringify({target:'desktop',entry:'src/main.ts',desktopModules:1}));
+ await assert.rejects(collectAndroidRelease(f.root,apk),/独立 APK/);
+ assert.equal(existsSync(join(f.root,'release-artifacts')),false);
+ await assert.rejects(collectAndroidRelease(f.root,'fixture.exe'),/APK/);
+});
+
+test('all five targets are mandatory even when desktop signing is disabled',async t=>{
+ const f=await allArtifacts(t),directory=join(f.downloaded,`music-share-${ANDROID_TARGET}-${f.version}`);
+ renameSync(directory,join(f.downloaded,'wrong-android-version'));
+ await assert.rejects(mergeRelease(f.root,{}),/未齐全或版本不匹配/);
+ assert.equal(existsSync(join(f.root,'release-artifacts')),false);
+});
+
+test('rejects Android tampering, missing APK, changed warnings and mismatched notes before merging',async t=>{
+ for(const kind of ['apk','missing','marker','notice','notes','checksum','extra']){
+  const f=await allArtifacts(t),directory=join(f.downloaded,`music-share-${ANDROID_TARGET}-${f.version}`),apk=join(directory,`music-share-${f.version}-${ANDROID_TARGET}.apk`);
+  if(kind==='apk')writeFileSync(apk,'tampered');
+  if(kind==='missing')rmSync(apk);
+  if(kind==='marker')writeFileSync(join(directory,'client-target.json'),'{}');
+  if(kind==='notice')writeFileSync(join(directory,ANDROID_NOTICE_NAME),'production build');
+  if(kind==='notes')writeFileSync(join(directory,'RELEASE-NOTES.md'),'another version');
+  if(kind==='checksum')writeFileSync(join(directory,`SHA256SUMS-${ANDROID_TARGET}.txt`),'bad checksum');
+  if(kind==='extra')writeFileSync(join(directory,'unexpected.apk'),'stale');
+  await assert.rejects(mergeRelease(f.root,{}),/Android/);
+  assert.equal(existsSync(join(f.root,'release-artifacts')),false,kind);
+ }
+});
+
+test('keeps Android out of the desktop updater while including APK and debug notice in Release checksums',async t=>{
+ const signing=syntheticSigning(),f=await allArtifacts(t,signing),result=await mergeRelease(f.root,{UPDATER_PUBLIC_KEY:signing.key});
+ const manifest=JSON.parse(read(result.output,'latest.json')),apk=`music-share-${f.version}-${ANDROID_TARGET}.apk`;
+ assert.equal(Object.keys(manifest.platforms).length,4);assert.equal(manifest.platforms.android,undefined);
+ assert.ok(existsSync(join(result.output,apk)));assert.ok(existsSync(join(result.output,ANDROID_NOTICE_NAME)));
+ assert.equal(existsSync(join(result.output,'client-target.json')),false);
+ assert.match(read(result.output,'SHA256SUMS.txt'),new RegExp(apk.replaceAll('.','\\.')));
+ assert.match(read(result.output,'RELEASE-NOTES.md'),/Android 试用包/);
 });

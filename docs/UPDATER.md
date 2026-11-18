@@ -49,7 +49,7 @@ npm run tauri -w @music-share/client -- signer generate -w "$env:USERPROFILE\.ta
    git push origin v0.1.2
    ```
 
-4. 等待四个平台构建、签名及 SHA-256 校验通过。Actions 创建 Draft Release，并附上 `latest.json`；不需要新建分支，不需要每次更改更新地址。
+4. 等待四个桌面目标和 Android 构建及各自签名、SHA-256 校验通过。Actions 创建 Draft Release，并附上 `latest.json`；不需要新建分支，不需要每次更改更新地址。
 5. 验收安装包，点击 **Publish release**。桌面客户端每次启动会在后台检查一次更高的正式版本，发现更新后在启动动画结束时自动打开“版本与更新日志”窗口，不依赖登录、不阻塞启动。无更新、检查失败、未配置公钥或安装格式不支持时不自动弹窗；可在窗口内手动检查并查看结果。浏览器不执行桌面启动检查。下载和安装仍需明确确认，不会在后台自动安装。
 
 不要覆盖已经发布的同版本包或移动公开标签。修复应升到新版本，并继续使用原签名密钥。
@@ -58,7 +58,7 @@ npm run tauri -w @music-share/client -- signer generate -w "$env:USERPROFILE\.ta
 
 ### 构建成功但汇总失败时
 
-若四个平台都已生成产物，仅 Release 汇总失败，可运行 **Actions → Recover verified release → Run workflow**，填写原标签构建的 run ID。默认只创建草稿；勾选 `publish` 才直接公开发布。恢复任务要求源构建的提交与当前版本标签一致、四个平台全部成功，并重新验证各安装包签名、SHA-256、版本和说明；不会移动标签或重新编译。源产物必须尚未过期，已有同名 Release 时不会覆盖。
+若四个桌面目标和 Android 都已生成产物，仅 Release 汇总失败，可运行 **Actions → Recover verified release → Run workflow**，填写原标签构建的 run ID。默认只创建草稿；勾选 `publish` 才直接公开发布。恢复任务要求源构建的提交与当前版本标签一致、四个桌面目标和 Android 全部成功，并重新验证各安装包签名、SHA-256、版本和说明；不会移动标签或重新编译。源产物必须尚未过期，已有同名 Release 时不会覆盖。
 
 - Windows x64：下载带签名的 NSIS `.exe`。用户确认安装后，Windows 更新安装流程会退出程序，播放会中断。
 - Linux x64：应用内更新仅对 AppImage 开启；DEB 用户手动下载新版安装。
@@ -74,3 +74,5 @@ npm run tauri -w @music-share/client -- signer generate -w "$env:USERPROFILE\.ta
 检查更新失败时，依次确认：GitHub 可访问、Release 已正式发布且不是预发布、附件中存在 latest.json、版本高于当前安装版本、公私钥配套、包包含更新公钥。单独上传安装包不够。切换仓库需要修改源码中的更新地址/来源限制并重新分发客户端。
 
 验证命令：`npm run test:updater`、`npm run test:ci-release`、`npm test`。测试使用临时生成的测试签名，不能替代真实 GitHub Actions 构建、签名发布和各系统升级验收。
+
+Android Debug APK 作为同版 Release 的试用附件，不加入桌面 latest.json，也不使用 Tauri 桌面更新签名代替 APK 签名。

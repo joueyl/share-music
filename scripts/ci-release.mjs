@@ -9,7 +9,7 @@ import { verifyUpdateFile } from './verify-update.mjs';
 
 export function validateRelease(version,event,ref){
  if(ref?.startsWith('refs/tags/')&&ref!==`refs/tags/v${version}`)throw new Error(`标签必须与项目版本一致：v${version}`);
- // main builds warm default-branch caches; only matching tags may create releases.
+ // main runs checks only; matching tags or manual runs may package installers.
  if(event==='push'&&ref!==`refs/tags/v${version}`&&ref!=='refs/heads/main')throw new Error('自动构建仅支持 main 或匹配的版本标签');
 }
 export function publicServerUrl(value){
@@ -39,6 +39,9 @@ export const RELEASE_TARGETS={
  'macos-x64':[{directory:'dmg',extension:'.dmg'}],
  'macos-arm64':[{directory:'dmg',extension:'.dmg'}],
 };
+export const ANDROID_TARGET='android-arm64-debug';
+export const ANDROID_NOTICE_NAME='ANDROID-DEBUG-NOTICE.txt';
+export const ANDROID_NOTICE='Android ARM64 DEBUG TEST BUILD — experimental, not a production-signed APK.\nEach fresh runner may use a different debug key; replacing a build may require uninstalling and will erase local data.\nNo Android automatic updater, background-playback or real-device acceptance is implied.\n';
 const UPDATE_TARGETS={
  'windows-x64':{platform:'windows-x86_64',directory:'nsis',extension:'.exe'},
  'linux-x64':{platform:'linux-x86_64',directory:'appimage',extension:'.AppImage'},
@@ -60,7 +63,7 @@ async function sha256(path){
  await finished(stream,{cleanup:true}); // Release Windows file handles before moving artifacts.
  return hash.digest('hex');
 }
-function notesFor(root,version){return `# 共鸣 Music Share v${version}\n\n${releaseNotes(readFileSync(join(root,'CHANGELOG.md'),'utf8'),version)}`;}
+function notesFor(root,version){return `# 共鸣 Music Share v${version}\n\n${releaseNotes(readFileSync(join(root,'CHANGELOG.md'),'utf8'),version)}\n## Android 试用包\n\n本版本包含 ARM64 Debug APK，尚非固定生产密钥签名。不同构建的签名可能变化，覆盖安装失败时需卸载，卸载会丢失本地数据。详见 ${ANDROID_NOTICE_NAME}；构建通过不代表实机或后台播放验收通过。\n`;}
 function emptyOutput(root){const output=join(root,'release-artifacts');mkdirSync(output,{recursive:true});if(readdirSync(output).length)throw new Error('release-artifacts 非空，请使用干净的构建目录');return output;}
 export async function collectRelease(root,target='windows-x64',env=process.env){
  const {enabled,key}=updaterSettings(root,env),formats=releaseFormats(target,enabled),version=checkVersions(root),files=[];
@@ -82,12 +85,34 @@ export async function collectRelease(root,target='windows-x64',env=process.env){
  writeFileSync(join(output,'RELEASE-NOTES.md'),notes);
  return {version,target,name:files[0].name,files:files.map(file=>file.name),output};
 }
+export async function collectAndroidRelease(root,apkPath){
+ const version=checkVersions(root),target=ANDROID_TARGET;
+ if(typeof apkPath!=='string'||!apkPath.endsWith('.apk'))throw new Error('必须指定已通过签名和对齐验证的 APK 文件');
+ const source=resolve(root,apkPath),name=packageName(version,target,'.apk');
+ const hash=await sha256(source);
+ const marker=readFileSync(join(root,'apps/client/dist-apk/client-target.json'),'utf8');
+ validateAndroidMarker(marker);
+ const output=emptyOutput(root);
+ copyFileSync(source,join(output,name));
+ writeFileSync(join(output,'client-target.json'),marker);
+ writeFileSync(join(output,ANDROID_NOTICE_NAME),ANDROID_NOTICE);
+ const names=[name,'client-target.json',ANDROID_NOTICE_NAME];
+ const checksums=[];
+ for(const file of names)checksums.push(`${file===name?hash:await sha256(join(output,file))}  ${file}\n`);
+ writeFileSync(join(output,`SHA256SUMS-${target}.txt`),checksums.join(''));
+ writeFileSync(join(output,'RELEASE-NOTES.md'),notesFor(root,version));
+ return {version,target,name,output};
+}
+function validateAndroidMarker(raw){
+ let marker;try{marker=JSON.parse(raw);}catch{throw new Error('Android 独立入口标记无效');}
+ if(marker?.target!=='apk'||marker.entry!=='src/apk/main.ts'||marker.desktopModules!==0)throw new Error('Android 产物不是独立 APK 入口');
+}
 export async function mergeRelease(root,env=process.env){
  const {enabled,key}=updaterSettings(root,env),platforms={};
  const version=checkVersions(root),input=join(root,'downloaded-artifacts'),targets=Object.keys(RELEASE_TARGETS),notes=notesFor(root,version),files=[];
- const expected=targets.map(target=>`music-share-${target}-${version}`).sort();
+ const expected=[...targets,ANDROID_TARGET].map(target=>`music-share-${target}-${version}`).sort();
  const actual=readdirSync(input,{withFileTypes:true});
- if(actual.some(file=>!file.isDirectory())||JSON.stringify(actual.map(file=>file.name).sort())!==JSON.stringify(expected))throw new Error('四个平台产物未齐全或版本不匹配');
+ if(actual.some(file=>!file.isDirectory()||file.isSymbolicLink())||JSON.stringify(actual.map(file=>file.name).sort())!==JSON.stringify(expected))throw new Error('四个桌面目标和 Android 产物未齐全或版本不匹配');
  for(const target of targets){
   const directory=join(input,`music-share-${target}-${version}`),targetFiles=[];
   const names=artifactNames(version,target,enabled);
@@ -105,6 +130,19 @@ export async function mergeRelease(root,env=process.env){
   }
   files.push(...targetFiles);
  }
+ const androidDirectory=join(input,`music-share-${ANDROID_TARGET}-${version}`);
+ const androidNames=[packageName(version,ANDROID_TARGET,'.apk'),'client-target.json',ANDROID_NOTICE_NAME];
+ const expectedAndroid=[...androidNames,`SHA256SUMS-${ANDROID_TARGET}.txt`,'RELEASE-NOTES.md'].sort();
+ const androidEntries=readdirSync(androidDirectory,{withFileTypes:true});
+ if(androidEntries.some(e=>!e.isFile())||JSON.stringify(androidEntries.map(e=>e.name).sort())!==JSON.stringify(expectedAndroid))throw new Error('Android 附件不完整或含多余文件');
+ if(readFileSync(join(androidDirectory,'RELEASE-NOTES.md'),'utf8').replace(/\r\n/g,'\n')!==notes)throw new Error('Android 版本说明不匹配');
+ validateAndroidMarker(readFileSync(join(androidDirectory,'client-target.json'),'utf8'));
+ if(readFileSync(join(androidDirectory,ANDROID_NOTICE_NAME),'utf8')!==ANDROID_NOTICE)throw new Error('Android Debug 试用说明不匹配');
+ const androidFiles=[];
+ for(const name of androidNames){const source=join(androidDirectory,name);androidFiles.push({source,name,hash:await sha256(source)});}
+ const androidChecksum=androidFiles.map(f=>`${f.hash}  ${f.name}\n`).join('');
+ if(readFileSync(join(androidDirectory,`SHA256SUMS-${ANDROID_TARGET}.txt`),'utf8')!==androidChecksum)throw new Error('Android SHA-256 校验失败');
+ files.push(...androidFiles.filter(f=>f.name!=='client-target.json'));
  const output=emptyOutput(root);
  for(const file of files)copyFileSync(file.source,join(output,file.name));
  writeFileSync(join(output,'SHA256SUMS.txt'),files.map(file=>`${file.hash}  ${file.name}\n`).join(''));
@@ -115,10 +153,11 @@ export async function mergeRelease(root,env=process.env){
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
  try{
-  if(process.argv.length<3||process.argv.length>4||(process.argv[3]&&process.argv[2]!=='collect'))throw new Error('用法：node scripts/ci-release.mjs prepare|collect [平台]|merge');
+  if(process.argv.length<3||process.argv.length>4||(process.argv[3]&&!['collect','collect-android'].includes(process.argv[2])))throw new Error('用法：node scripts/ci-release.mjs prepare|collect [平台]|collect-android APK路径|merge');
   if(process.argv[2]==='prepare'){const result=prepareRelease(root);console.log(`已验证 v${result.version} 的版本、标签和生产服务配置`);}
   else if(process.argv[2]==='collect'){const target=process.argv[3]??'windows-x64';validateBuildHost(target);const result=await collectRelease(root,target);console.log(`已收集 v${result.version} ${result.target} 安装包、校验文件和更新说明：${result.output}`);}
-  else if(process.argv[2]==='merge'){const result=await mergeRelease(root);console.log(`已验证并汇总 v${result.version} 的 ${result.files.length} 个安装包：${result.output}`);}
+  else if(process.argv[2]==='collect-android'){const result=await collectAndroidRelease(root,process.argv[3]);console.log(`已收集 v${result.version} Android Debug APK 和试用说明：${result.output}`);}
+  else if(process.argv[2]==='merge'){const result=await mergeRelease(root);console.log(`已验证并汇总 v${result.version} 的 ${result.files.length} 个附件文件：${result.output}`);}
   else throw new Error('未知命令');
  }catch(error){console.error(error.message);process.exitCode=1;}
 }

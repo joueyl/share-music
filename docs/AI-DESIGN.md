@@ -159,6 +159,8 @@
 
 ## 7. 技术与真实数据边界
 
+- 桌面与 Android 版本打包共用 Client installers 工作流：main 只检查，标签或手动运行才生成安装包；Release 汇总及恢复必须包含四个桌面目标和 Android。APK 保留 Debug 试用说明，不加入桌面 updater；详细规则见 [GitHub Actions](GITHUB-ACTIONS.md)。
+
 - Android 使用独立 APK 页面及浏览器 HTTP/WebSocket/唯一 Audio 路径；禁用桌面 IPC、原生音频缓存、桌面更新和窗口按钮，仅向本地 main 窗口开放独立安全登录插件。Mac 记住密码使用钥匙串，Android 使用 Keystore + AES-GCM 和不备份私有文件，网页不自行持久化密码，详见[安全记住密码](SAVED-LOGIN.md)。仍不提供安卓原生通知、后台/锁屏保活或系统媒体控制；前端与隔离测试通过不等于原生编译、钥匙串/Keystore 或实机验收通过。
 
 - 桌面主 WebView 显式设置 `backgroundThrottling: disabled`，避免 macOS 最小化/隐藏后挂起切歌、取源和播放同步；仍使用唯一 HTML Audio，不抢前台或用静音播放器保活。该配置由 Tauri 在 macOS 14+ 支持，macOS 13 不保证此修复生效，不能据此宣称所有 Mac 已验收。后台 3D RAF、iPod 屏幕与歌词视觉更新仍遵守既有隐藏/停用策略，不因关闭 WebView 挂起而恢复装饰性绘制；保持后台同步可能增加耗电。需重建桌面包，并在目标 Mac 验证长时间最小化、自然接曲、远程切歌、暂停/恢复及恢复前台。

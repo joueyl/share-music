@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync,mkdtempSync,mkdirSync,writeFileSync,rmSync } from 'node:fs';
+import { readFileSync,existsSync,mkdtempSync,mkdirSync,writeFileSync,rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve,dirname,basename } from 'node:path';
 import { checkApkBuild } from './check-apk-build.mjs';
@@ -28,8 +28,11 @@ test('business controllers are single-source and consumed by both page trees',()
  ]){assert.match(read('apps/client/src/'+desktop),new RegExp(hook+'\\(\\)'));assert.match(read('apps/client/src/'+apk),new RegExp(hook+'\\(\\)'));assert.match(read('apps/client/src/features/'+hook+'.ts'),new RegExp('export function '+hook));}
 });
 test('Actions checks both clients before packaging the explicit Android config and uploads a debug artifact',()=>{
- const yaml=read('.github/workflows/android-apk.yml');for(const expected of ['workflow_dispatch:','build:apk','check-apk-build.mjs','needs: frontend','src-tauri/tauri.android.conf.json','apksigner','upload-artifact@v4'])assert.ok(yaml.includes(expected),expected);
- assert.doesNotMatch(yaml,/TAURI_SIGNING_PRIVATE_KEY|KEYSTORE_PASSWORD|gh release/);
+ assert.equal(existsSync(new URL('../.github/workflows/android-apk.yml',import.meta.url)),false);
+ const yaml=read('.github/workflows/desktop-release.yml');for(const expected of ['workflow_dispatch:','build:apk','check-apk-build.mjs','needs: verify','src-tauri/tauri.android.conf.json','apksigner','upload-artifact@v4'])assert.ok(yaml.includes(expected),expected);
+ const android=yaml.slice(yaml.indexOf('  android:\n'),yaml.indexOf('  release-draft:\n'));
+ assert.doesNotMatch(android,/TAURI_SIGNING_PRIVATE_KEY|KEYSTORE_PASSWORD|gh release/);
+ assert.match(yaml,/needs: \[build, build-unix, android\]/);
 });
 test('Android enables only scoped secure-login IPC with Keystore ciphertext and no plaintext fallback',()=>{
  const native=read('apps/client/src-tauri/src/lib.rs');assert.match(native,/plugin\(tauri_plugin_saved_login::init\(\)\)/);

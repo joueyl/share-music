@@ -1,4 +1,4 @@
-name: Desktop installers
+name: Client installers
 
 on:
   workflow_dispatch:
@@ -9,6 +9,7 @@ on:
       - '.github/workflows/desktop-release.yml'
       - 'apps/client/**'
       - 'packages/shared/**'
+      - 'apps/server/**'
       - 'scripts/**'
       - 'package.json'
       - 'package-lock.json'
@@ -24,7 +25,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Validate version and public server URL
+        id: release
+        env:
+          CLIENT_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+        run: node scripts/ci-android.mjs
+      - run: npm ci
+      - name: Check both clients and release guards
+        run: |
+          set -euo pipefail
+          npm run typecheck
+          npm run test:version
+          npm run test:ci-release
+          node --test scripts/recover-release.test.mjs
+          npm run test:updater
+          npm run test:desktop-launcher
+          npm run test:packaging
+          npm run test:apk
+          node --test scripts/configure-android-sdk.test.mjs
+          npm test
+          npm run build -w @music-share/client
+          npm run build:apk
+          node scripts/check-apk-build.mjs
+
   build:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: verify
     runs-on: windows-2022
     timeout-minutes: 180
     defaults:
@@ -91,6 +130,8 @@ jobs:
           retention-days: 30
 
   build-unix:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -194,9 +235,97 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  android:
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      NDK_VERSION: '27.2.12479018'
+      ANDROID_API_LEVEL: '36'
+      BUILD_TOOLS_VERSION: '36.0.0'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Validate Android readiness, version and server URL
+        id: release
+        env:
+          CLIENT_SERVER_URL: ${{ vars.VITE_SERVER_URL }}
+        run: node scripts/ci-android.mjs
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
+      - name: Install Android SDK and NDK
+        run: |
+          set -euo pipefail
+          sdkmanager "platform-tools" "platforms;android-$ANDROID_API_LEVEL" "build-tools;$BUILD_TOOLS_VERSION" "ndk;$NDK_VERSION"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+      - name: Install Rust Android target
+        run: |
+          set -euo pipefail
+          rustup toolchain install 1.90.0 --profile minimal
+          rustup default 1.90.0
+          rustup target add aarch64-linux-android
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          prefix-key: android-rust-v1
+          workspaces: apps/client/src-tauri -> target
+          key: android-arm64-${{ env.NDK_VERSION }}
+          cache-bin: 'false'
+          cache-workspace-crates: 'false'
+      - name: Install JavaScript dependencies
+        run: npm ci
+      - name: Generate experimental Android shell
+        working-directory: apps/client
+        run: |
+          set -euo pipefail
+          npm run tauri -- android init --ci --skip-targets-install
+      - name: Pin generated project to the installed stable Android SDK
+        run: |
+          set -euo pipefail
+          node scripts/configure-android-sdk.mjs
+      - name: Build ARM64 debug APK with automatic debug signing
+        working-directory: apps/client
+        run: |
+          set -euo pipefail
+          npm run tauri -- android build --ci --debug --apk --target aarch64 --config src-tauri/tauri.android.conf.json
+          node ../../scripts/check-apk-build.mjs
+      - name: Verify and collect debug APK
+        run: |
+          set -euo pipefail
+          mapfile -d '' apks < <(find apps/client/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -path '*/debug/*' -print0)
+          if [ "${#apks[@]}" -ne 1 ]; then
+            echo '::error::Expected exactly one ARM64 debug APK; refusing missing or ambiguous outputs'
+            exit 1
+          fi
+          tools="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
+          "$tools/apksigner" verify --verbose "${apks[0]}"
+          "$tools/zipalign" -c 4 "${apks[0]}"
+          node scripts/ci-release.mjs collect-android "${apks[0]}"
+      - name: Upload debug APK and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: music-share-android-arm64-debug-${{ steps.release.outputs.version }}
+          path: release-artifacts/
+          if-no-files-found: error
+          retention-days: 30
+
   release-draft:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [build, build-unix]
+    needs: [build, build-unix, android]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -212,7 +341,7 @@ jobs:
         with:
           pattern: music-share-*-${{ needs.build.outputs.version }}
           path: downloaded-artifacts
-      - name: Verify all four platform artifacts and merge release files
+      - name: Verify all desktop and Android artifacts and merge release files
         env:
           UPDATER_PUBLIC_KEY: ${{ vars.UPDATER_PUBLIC_KEY }}
         run: node scripts/ci-release.mjs merge
@@ -226,5 +355,5 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           assets=(release-artifacts/*)
-          test "${#assets[@]}" -ge 7
+          test "${#assets[@]}" -ge 9
           gh release create "$RELEASE_TAG" "${assets[@]}" --draft --verify-tag --title "共鸣 Music Share $RELEASE_TAG" --notes-file release-artifacts/RELEASE-NOTES.md

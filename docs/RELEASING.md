@@ -41,7 +41,7 @@ npm run build
 
 ## GitHub Release
 
-可用 GitHub Actions 自动构建 Windows x64、Linux x64、macOS Intel / Apple Silicon 安装包，并在版本标签的四种目标全部构建成功后创建统一 Release 草稿。首次配置、手动运行、仓库变量、签名限制和验证边界见 [GitHub Actions 自动打包](GITHUB-ACTIONS.md)。以下手工步骤仍可作为备用流程。
+可用 GitHub Actions 自动构建 Windows x64、Linux x64、macOS Intel / Apple Silicon 安装包，及 Android ARM64 Debug 试用包，并在版本标签的全部五个目标构建成功且校验通过后创建统一 Release 草稿；main 只检查，不再预先生成同版安装包。首次配置、手动运行、仓库变量、签名限制和验证边界见 [GitHub Actions 自动打包](GITHUB-ACTIONS.md)。以下手工步骤仍可作为备用流程。
 
 1. 准备版本、审阅日志并完成测试和目标平台打包。
 2. 按实际新版本创建 Git 标签，例如 `v0.1.2`；提交、标签和推送由发布者执行。
