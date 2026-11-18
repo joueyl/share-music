@@ -3,7 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 import { X, Plus, Play, ArrowUp, ArrowDown, Trash2, GripVertical, AudioLines } from 'lucide-vue-next';
 import { PLAYBACK_MODE_LABELS } from '@music-share/shared';
 import { usePlaybackMode } from '../usePlaybackMode';
-import { moveQueueTrack } from '../queue-order';
+import Sortable from 'sortablejs';
 import { useApp } from '../store';
 import { openSearch } from '../ui';
 import { useDialogFocus } from '../useDialogFocus';
@@ -38,62 +38,67 @@ function closeMenus(event:MouseEvent){
 onMounted(()=>{document.addEventListener('click',closeMenus);document.addEventListener('click',outsideClose,true);});
 onUnmounted(()=>{document.removeEventListener('click',closeMenus);document.removeEventListener('click',outsideClose,true);});
 const current=computed(()=>app.room?.playlist.find(t=>t.id===app.room?.playback.sourceId));
-const scroll=ref<HTMLElement|null>(null),draft=ref<string[]>([]),dragging=ref(''),dropTarget=ref(''),sorting=ref(false),playing=ref(false);
-const queue=computed(()=>{const tracks=app.room?.playlist??[];return draft.value.length?draft.value.map(id=>tracks.find(t=>t.id===id)).filter((t):t is typeof tracks[number]=>!!t):tracks;});
+const scroll=ref<HTMLElement|null>(null),dragging=ref(''),sorting=ref(false),playing=ref(false);
+const queue=computed(()=>app.room?.playlist??[]);
 const blocked=computed(()=>!app.connected||!!app.room?.pending);
-const canReorder=computed(()=>app.permission.enqueue&&!blocked.value&&!sorting.value&&!app.pendingActions&&visible.value);
+const canReorder=computed(()=>app.permission.enqueue&&!blocked.value&&!sorting.value&&!app.pendingActions&&visible.value&&tab.value==='queue');
 const canPlay=computed(()=>app.permission.skip&&!blocked.value&&!sorting.value&&!playing.value&&!app.pendingActions&&!dragging.value&&visible.value);
-let gesture:{id:string;pointer:number;y:number;version:number;roomId:string;handle:HTMLElement}|null=null;
-let frame=0,lastX=0,lastY=0;
-function cancelDrag(){
- const previous=gesture;gesture=null;
- if(frame)cancelAnimationFrame(frame);frame=0;
- if(previous?.handle.hasPointerCapture?.(previous.pointer))previous.handle.releasePointerCapture(previous.pointer);
- draft.value=[];dragging.value='';dropTarget.value='';
+let sortable:Sortable|null=null;
+let gesture:{ids:string[];version:number;roomId:string;item:HTMLElement}|null=null;
+const sortableEpoch=ref(0);
+function cancelDrag(rebuild=true){
+ const instance=sortable,previous=gesture;sortable=null;gesture=null;
+ if(previous){
+  ignoreBackdropUntil=Date.now()+500;
+  // Sortable.destroy() removes listeners/timers but its event-less drop leaves fallback DOM.
+  // Remove only this gesture's transient nodes before restoring the Vue-owned children.
+  if(Sortable.dragged===previous.item){Sortable.ghost?.remove();Sortable.clone?.remove();}
+  previous.item.classList.remove('is-dragging','sortable-chosen','sortable-drag');
+  previous.item.style.willChange='';previous.item.style.transform='';
+  instance?.sort(previous.ids);
+ }
+ dragging.value='';instance?.destroy();if(rebuild)sortableEpoch.value++;
 }
 function validGesture(){return !!gesture&&canReorder.value&&app.room?.id===gesture.roomId&&app.room.stateVersion===gesture.version;}
-function startDrag(event:PointerEvent,id:string){
- if(!canReorder.value||!app.room||event.button!==0)return;
- cancelDrag();event.preventDefault();const target=event.currentTarget as HTMLElement,handle=dialog.value??target;
- gesture={id,pointer:event.pointerId,y:event.clientY,version:app.room.stateVersion,roomId:app.room.id,handle};
- lastX=event.clientX;lastY=event.clientY;draft.value=app.room.playlist.map(t=>t.id);
- target.focus({preventScroll:true});handle.setPointerCapture?.(event.pointerId);
+function setupSortable(){
+ cancelDrag(false);
+ if(!scroll.value||!canReorder.value)return;
+ const instance:Sortable=sortable=new Sortable(scroll.value,{
+  draggable:'.queue-row',handle:'.queue-drag-handle',dataIdAttr:'data-track-id',
+  // WKWebView uses the same mouse/touch fallback as the other platforms, not native HTML5 DnD.
+  forceFallback:true,fallbackTolerance:6,fallbackOnBody:false,
+  animation:0,ghostClass:'is-dragging',fallbackClass:'queue-drag-preview',
+  scroll:scroll.value,forceAutoScrollFallback:true,bubbleScroll:false,scrollSensitivity:40,scrollSpeed:14,
+  onChoose(event){
+   if(sortable!==instance||!canReorder.value||!app.room)return;
+   gesture={ids:app.room.playlist.map(t=>t.id),version:app.room.stateVersion,roomId:app.room.id,item:event.item};
+   event.item.querySelector<HTMLButtonElement>('.queue-drag-handle')?.focus({preventScroll:true});
+  },
+  onUnchoose(){if(sortable===instance&&!dragging.value)gesture=null;},
+  onStart(event){if(sortable===instance&&validGesture()){dragging.value=event.item.dataset.trackId??'';ignoreBackdropUntil=Date.now()+500;}},
+  onMove(){return sortable===instance&&validGesture();},
+  onEnd(){
+   if(sortable!==instance||!gesture)return;
+   const ids=instance.toArray(),previous=gesture,valid=validGesture()&&!!dragging.value;
+   // Sortable mutates DOM only during dragging. Restore Vue's order before any reactive render;
+   // the authoritative playlist changes only after the existing server command is confirmed.
+   instance.sort(previous.ids);gesture=null;dragging.value='';ignoreBackdropUntil=Date.now()+500;
+   if(valid&&ids.length===previous.ids.length&&new Set(ids).size===ids.length&&ids.every(id=>previous.ids.includes(id)))void submitOrder(ids);
+  },
+ });
 }
-function updateTarget(){
- if(!gesture||!scroll.value)return;
- const row=document.elementFromPoint(lastX,lastY)?.closest<HTMLElement>('[data-track-id]');
- if(!row||!scroll.value.contains(row)||row.dataset.trackId===gesture.id)return;
- const id=row.dataset.trackId!;dropTarget.value=id;
- draft.value=moveQueueTrack(draft.value,gesture.id,id,lastY>row.getBoundingClientRect().top+row.getBoundingClientRect().height/2);
-}
-function autoScroll(){
- frame=0;if(!dragging.value||!validGesture()){cancelDrag();return;}
- const list=scroll.value;if(list){const bounds=list.getBoundingClientRect(),edge=40;
-  const speed=lastY<bounds.top+edge?-Math.min(14,(bounds.top+edge-lastY)/3):lastY>bounds.bottom-edge?Math.min(14,(lastY-bounds.bottom+edge)/3):0;
-  if(speed){list.scrollTop+=speed;updateTarget();}
- }
- frame=requestAnimationFrame(autoScroll);
-}
-function dragMove(event:PointerEvent){
- if(!gesture||event.pointerId!==gesture.pointer)return;
- if(!validGesture()){cancelDrag();return;}
- lastX=event.clientX;lastY=event.clientY;
- if(!dragging.value&&Math.abs(lastY-gesture.y)<6)return;
- event.preventDefault();dragging.value=gesture.id;ignoreBackdropUntil=Date.now()+500;updateTarget();if(!frame)frame=requestAnimationFrame(autoScroll);
-}
-async function finishDrag(event:PointerEvent){
- if(!gesture||event.pointerId!==gesture.pointer)return;
- const ids=[...draft.value],valid=validGesture()&&!!dragging.value;if(dragging.value)ignoreBackdropUntil=Date.now()+500;cancelDrag();
- if(valid)await submitOrder(ids);
-}
+// Restore the old DOM before Vue patches a new snapshot or removes a tab/closed drawer.
+watch(()=>[app.room?.id,app.room?.stateVersion,canReorder.value,tab.value],()=>cancelDrag());
+watch([scroll,sortableEpoch],setupSortable,{flush:'post'});
+function cancelPointer(){if(gesture)cancelDrag();}
+onMounted(()=>document.addEventListener('pointercancel',cancelPointer,true));
+onUnmounted(()=>{document.removeEventListener('pointercancel',cancelPointer,true);cancelDrag();});
 async function submitOrder(ids:string[]){
  if(!canReorder.value||!app.room||ids.join()===app.room.playlist.map(t=>t.id).join())return;
  sorting.value=true;try{await app.act({type:'reorder',payload:{trackIds:ids}});}finally{sorting.value=false;}
 }
-watch(()=>[app.room?.id,app.room?.stateVersion,canReorder.value,tab.value],cancelDrag);
-onUnmounted(cancelDrag);
 const format=(ms:number)=>`${Math.floor(ms/60000).toString().padStart(2,'0')}:${Math.floor(ms/1000%60).toString().padStart(2,'0')}`;
-function move(id:string,delta:number){if(!canReorder.value||!app.room)return;const ids=app.room.playlist.map(t=>t.id),index=ids.indexOf(id),target=index+delta;if(index<0||target<0||target>=ids.length)return;[ids[index],ids[target]]=[ids[target]!,ids[index]!];void submitOrder(ids);}
+function move(id:string,delta:number){if(gesture||!canReorder.value||!app.room)return;const ids=app.room.playlist.map(t=>t.id),index=ids.indexOf(id),target=index+delta;if(index<0||target<0||target>=ids.length)return;[ids[index],ids[target]]=[ids[target]!,ids[index]!];void submitOrder(ids);}
 async function play(id:string){
  if(!canPlay.value||gesture||Date.now()<ignoreBackdropUntil||!app.room)return;
  const item=app.room.playlist.find(track=>track.id===id);if(!item?.available)return;
@@ -112,7 +117,7 @@ async function clear(){if(!canReorder.value||!queue.value.some(t=>t.id!==current
 async function remove(id:string){if(!canReorder.value||id===current.value?.id)return;sorting.value=true;try{await app.act({type:'remove',payload:{trackId:id}});}finally{sorting.value=false;}}
 function add(){searchAfterClose=true;close();}
 </script>
-<template><Teleport to="#app"><Transition name="drawer" appear @after-leave="afterLeave"><div v-if="visible" class="drawer-backdrop" @click.self="backdropClose"><aside ref="dialog" class="queue-drawer" @pointermove="dragMove" @pointerup="finishDrag" @pointercancel="cancelDrag" @lostpointercapture="cancelDrag" role="dialog" aria-modal="true" aria-label="共享播放列表">
+<template><Teleport to="#app"><Transition name="drawer" appear @after-leave="afterLeave"><div v-if="visible" class="drawer-backdrop" @click.self="backdropClose"><aside ref="dialog" class="queue-drawer" role="dialog" aria-modal="true" aria-label="共享播放列表">
  <header class="drawer-heading"><div><h2>共享播放列表</h2><p>{{ app.room?.playlist.length??0 }} 首歌曲 · {{ app.room?.members.filter(m=>m.online).length??0 }} 人共同添加</p></div><button class="round-close" aria-label="关闭播放列表" @click="close"><X :size="20" /></button></header>
  <label class="queue-mode"><span>播放模式</span><select class="tone-select" aria-label="房间播放模式" :value="playbackMode.mode.value??''" :disabled="playbackMode.disabled.value" @change="playbackMode.change(($event.target as HTMLSelectElement).value)"><option v-if="!playbackMode.mode.value" value="">请更新服务端</option><option v-for="(label,mode) in PLAYBACK_MODE_LABELS" :key="mode" :value="mode">{{ label }}</option></select></label>
  <div class="queue-tabs" role="tablist" aria-label="播放列表分类"><button role="tab" :aria-selected="tab==='queue'" :class="{active:tab==='queue'}" @click="tab='queue'">当前队列</button><button role="tab" :aria-selected="tab==='history'" :class="{active:tab==='history'}" @click="tab='history'">已播放</button><button role="tab" :aria-selected="tab==='favorites'" :class="{active:tab==='favorites'}" @click="tab='favorites'">收藏单曲</button><button v-if="app.permission.enqueue&&tab==='queue'" class="queue-clear" :disabled="!canReorder||!queue.some(t=>t.id!==current?.id)" title="保留当前歌曲，清空其他歌曲" @click="clear">清空</button></div>
@@ -121,8 +126,8 @@ function add(){searchAfterClose=true;close();}
  <template v-else>
  <div class="queue-next-heading"><strong>播放顺序 <small>{{ queue.length }}</small></strong><span id="queue-sort-hint">{{ app.permission.enqueue?'拖动手柄排序 · Alt+↑↓ 微调':'需要播放列表控制权限' }}</span></div>
  <div ref="scroll" class="queue-scroll" tabindex="0" aria-label="播放队列" :aria-busy="sorting">
-  <div v-for="(item,i) in queue" :key="item.id" class="queue-row" :class="{'is-playing':item.id===current?.id,'is-dragging':dragging===item.id,'is-drop-target':dropTarget===item.id}" :data-track-id="item.id" @dblclick="playFromRow($event,item.id)">
-   <button v-if="app.permission.enqueue" type="button" class="queue-drag-handle" @dblclick.stop :disabled="!canReorder" :aria-label="`拖动调整 ${item.name} 的顺序`" aria-describedby="queue-sort-hint" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" @pointerdown="startDrag($event,item.id)" @keydown.alt.up.prevent="move(item.id,-1)" @keydown.alt.down.prevent="move(item.id,1)"><GripVertical :size="16" /></button>
+  <div v-for="(item,i) in queue" :key="item.id" class="queue-row" :class="{'is-playing':item.id===current?.id}" :data-track-id="item.id" @dblclick="playFromRow($event,item.id)">
+   <button v-if="app.permission.enqueue" type="button" class="queue-drag-handle" @dblclick.stop :disabled="!canReorder" :aria-label="`拖动调整 ${item.name} 的顺序`" aria-describedby="queue-sort-hint" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" @keydown.alt.up.prevent="move(item.id,-1)" @keydown.alt.down.prevent="move(item.id,1)"><GripVertical :size="16" /></button>
    <span class="queue-index">{{ (i+1).toString().padStart(2,'0') }}</span><AlbumArt :src="bridge.playingTrackCover(item)" :draggable="false" /><span class="queue-track"><strong>{{ item.name }}</strong><small>{{ item.artists||'未知歌手' }} · {{ item.id===current?.id?'正在播放':app.room?.members.find(m=>m.id===item.providerId)?.name??'成员' }}{{ item.id===current?.id?'':'添加' }}</small></span><time>{{ format(item.durationMs) }}</time>
    <div class="track-actions" @dblclick.stop><SongFavoriteButton :source="bridge.favoriteTrackReference(item)?.source" :song-id="bridge.favoriteTrackReference(item)?.id" :name="item.name" /><AudioLines v-if="item.id===current?.id" class="queue-playing-icon" :size="16" /><button v-else class="icon-button" aria-label="播放此曲" :disabled="!canPlay||!item.available" @click="play(item.id)"><Play :size="15" /></button><details v-if="app.permission.enqueue" class="queue-more"><summary aria-label="歌曲操作">···</summary><div><button v-if="app.permission.enqueue" :disabled="!canReorder||i===0" aria-label="上移" @click="move(item.id,-1)"><ArrowUp :size="14" />上移</button><button v-if="app.permission.enqueue" :disabled="!canReorder||i===queue.length-1" aria-label="下移" @click="move(item.id,1)"><ArrowDown :size="14" />下移</button><button v-if="app.permission.enqueue" aria-label="移除音轨" :disabled="!canReorder||item.id===current?.id||!!dragging" @click="remove(item.id)"><Trash2 :size="14" />移除</button></div></details></div>
   </div>
@@ -174,7 +179,7 @@ function add(){searchAfterClose=true;close();}
 .queue-drag-handle:disabled{cursor:default;opacity:.4}
 .queue-row.is-dragging{opacity:.55;background:#e6effd;border-color:#a8c1e8}
 .queue-row.is-dragging .queue-drag-handle{cursor:grabbing}
-.queue-row.is-drop-target{border-color:#b5cbee}
+.queue-row.queue-drag-preview{opacity:.95;background:var(--surface,#fff);box-shadow:0 8px 24px #42629630;pointer-events:none}
 .queue-footer{padding:10px 0 12px}
 .queue-footer .primary{height:38px;min-height:38px;font-size:12px}
 @media(max-height:500px){
@@ -193,4 +198,35 @@ function add(){searchAfterClose=true;close();}
  .queue-drag-handle{width:28px;min-width:28px;height:44px}
  .queue-footer .primary{min-height:44px}
 }
+
+@media(max-width:720px),(max-width:900px) and (pointer:coarse){
+ .drawer-backdrop{bottom:var(--workspace-player);background:#28344833;clip-path:none;display:flex;align-items:flex-end}
+ .queue-drawer{position:relative;inset:auto;width:100%;height:min(654px,calc(100dvh - var(--workspace-player) - 12px));max-height:100%;padding:16px 12px 0;border-radius:28px 28px 0 0;background:#f6f8fc;border:1px solid white;display:flex;flex-direction:column;overflow:visible}
+ .queue-drawer::before{content:"";width:40px;height:4px;background:#c8d4e3;border-radius:4px;align-self:center;margin:-6px 0 10px;flex-shrink:0}
+ .drawer-heading h2{font-size:20px;line-height:1.5}
+ .drawer-heading p{font-size:12px;line-height:1.6}
+ .round-close{width:44px;height:44px;min-width:44px;min-height:44px}
+ .queue-tabs{gap:14px;min-height:44px;height:auto;flex-wrap:wrap}
+ .queue-tabs>button{font-size:13px;min-height:44px;height:auto}
+ .queue-tabs>button.active{color:var(--accent);border-bottom-color:var(--accent)}
+ .queue-tabs>button.active::after{background:var(--accent)}
+ .queue-next-heading{height:auto;min-height:36px;margin:8px 0}
+ .queue-next-heading>span{font-size:11px}
+ .queue-row{min-height:72px;padding:8px 2px;gap:6px;border-radius:16px}
+ .queue-row.is-playing{background:#e7effc}
+ .queue-index,.queue-row time{display:none}
+ .queue-row .album-art{width:40px;height:40px;flex:0 0 40px;border-radius:12px}
+ .queue-track{min-width:0;flex:1}
+ .queue-track strong{font-size:14px;line-height:1.5}
+ .queue-track small{font-size:11px;line-height:1.5}
+ .queue-drag-handle{width:44px;min-width:44px;height:44px}
+ .queue-row .track-actions{display:flex;flex:0 0 auto;grid-column:auto;gap:0}
+ .queue-row .icon-button,.queue-more>summary{width:44px;min-width:44px;min-height:44px;height:44px;display:grid;place-items:center}
+ .queue-playing-icon{margin:0 4px}
+ .queue-footer{padding:10px 0 12px}
+ .queue-footer .primary{min-height:48px;height:auto;border-radius:16px;font-size:14px}
+ .queue-scroll{min-height:0;flex:1;flex-shrink:1;overflow:auto}
+ .queue-drawer>:deep(.favorite-songs){flex:1;min-height:0;overflow:auto}
+}
+
 </style>

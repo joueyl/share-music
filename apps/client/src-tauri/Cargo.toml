@@ -1,6 +1,6 @@
 [package]
 name = "music-share-desktop"
-version = "1.4.8"
+version = "1.4.9"
 edition = "2021"
 rust-version = "1.90"
 
@@ -37,6 +37,10 @@ tauri-plugin-notification = { version = "2", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-usernotifications = { version = "=0.3.1", optional = true }
+security-framework = "=3.7.0"
+
+[target.'cfg(target_os = "android")'.dependencies]
+tauri-plugin-saved-login = { path = "plugins/saved-login" }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security_Credentials"] }

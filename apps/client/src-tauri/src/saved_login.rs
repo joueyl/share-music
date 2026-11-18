@@ -102,7 +102,44 @@ mod platform {
         }
     }
 }
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+mod platform {
+    use super::*;
+    use security_framework::passwords::{delete_generic_password, generic_password, set_generic_password, PasswordOptions};
+    const SERVICE: &str = "com.musicshare.desktop";
+    const ACCOUNT: &str = "auto-login";
+    const NOT_FOUND: i32 = -25300; // errSecItemNotFound; other errors must not look like an empty store.
+
+    pub fn save(value: &SavedLogin) -> Result<(), String> {
+        value.validate()?;
+        let mut blob = serde_json::to_vec(value).map_err(|_| "SAVED_LOGIN_INVALID")?;
+        let result = set_generic_password(SERVICE, ACCOUNT, &blob)
+            .map_err(|_| "SAVED_LOGIN_WRITE_FAILED".to_owned());
+        blob.fill(0);
+        result
+    }
+    pub fn load() -> Result<Option<SavedLogin>, String> {
+        let mut blob = match generic_password(PasswordOptions::new_generic_password(SERVICE, ACCOUNT)) {
+            Ok(blob) => blob,
+            Err(error) if error.code() == NOT_FOUND => return Ok(None),
+            Err(_) => return Err("SAVED_LOGIN_READ_FAILED".into()),
+        };
+        let result = if blob.len() > 8192 { Err("SAVED_LOGIN_INVALID".to_owned()) }
+            else { serde_json::from_slice::<SavedLogin>(&blob).map_err(|_| "SAVED_LOGIN_INVALID".to_owned()) };
+        blob.fill(0);
+        let value = result?;
+        value.validate()?;
+        Ok(Some(value))
+    }
+    pub fn clear() -> Result<(), String> {
+        match delete_generic_password(SERVICE, ACCOUNT) {
+            Ok(()) => Ok(()),
+            Err(error) if error.code() == NOT_FOUND => Ok(()),
+            Err(_) => Err("SAVED_LOGIN_DELETE_FAILED".into()),
+        }
+    }
+}
+#[cfg(not(any(windows, target_os = "macos")))]
 mod platform {
     use super::*;
     pub fn save(_: &SavedLogin) -> Result<(), String> {

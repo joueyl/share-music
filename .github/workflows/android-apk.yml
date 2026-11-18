@@ -1,8 +1,19 @@
 name: Android APK (experimental)
 
-# Deliberately independent of desktop tags and release aggregation.
+# Independent APK UI; never attached to desktop release aggregation.
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/client/**'
+      - 'packages/shared/**'
+      - 'apps/server/**'
+      - 'package.json'
+      - 'scripts/*android*'
+      - 'scripts/*apk*'
+      - '.github/workflows/android-apk.yml'
+      - 'package-lock.json'
 
 permissions:
   contents: read
@@ -12,7 +23,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  frontend:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npx vitest run apps/client/test
+      - run: node --test scripts/apk-entry.test.mjs scripts/configure-android-sdk.test.mjs
+      - run: npm run build -w @music-share/client
+      - run: npm run build:apk
+      - run: node scripts/check-apk-build.mjs
   apk:
+    needs: frontend
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     defaults:
@@ -76,7 +106,8 @@ jobs:
         working-directory: apps/client
         run: |
           set -euo pipefail
-          npm run tauri -- android build --ci --debug --apk --target aarch64
+          npm run tauri -- android build --ci --debug --apk --target aarch64 --config src-tauri/tauri.android.conf.json
+          node ../../scripts/check-apk-build.mjs
       - name: Verify and collect debug APK
         env:
           RELEASE_VERSION: ${{ steps.release.outputs.version }}
@@ -95,7 +126,8 @@ jobs:
           "$tools/apksigner" verify --verbose "$output"
           "$tools/zipalign" -c 4 "$output"
           (cd release-artifacts && sha256sum "music-share-$RELEASE_VERSION-android-arm64-debug.apk" > SHA256SUMS-android-arm64-debug.txt)
-          printf '%s\n' 'DEBUG TEST BUILD — not for production distribution.' 'Each fresh runner may generate a different debug key; uninstall may be required to replace a previous build (local data will be lost).' > release-artifacts/DEBUG-BUILD.txt
+          cp -- apps/client/dist-apk/client-target.json release-artifacts/client-target.json
+          printf '%s\n' 'Independent APK UI — DEBUG TEST BUILD, not for production distribution.' 'Each fresh runner may generate a different debug key; uninstall may be required to replace a previous build (local data will be lost).' > release-artifacts/DEBUG-BUILD.txt
           node scripts/version.mjs --notes "$RELEASE_VERSION" > release-artifacts/RELEASE-NOTES.md
       - name: Upload debug APK and checksums
         uses: actions/upload-artifact@v4

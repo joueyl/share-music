@@ -30,6 +30,7 @@ const messages: Record<string, string> = {
   PLAYBACK_AUDIO_DOWNLOAD_FAILED: '本地音频加载失败，请检查网络并重启客户端更新音频模块',
   PLAYBACK_AUDIO_TOO_LARGE: '音频超过本地播放的 100MB 限制',
   SAVED_LOGIN_UNSUPPORTED: '当前环境不支持安全保存密码，请手动登录',
+  SAVED_LOGIN_UNAVAILABLE: '系统安全存储暂不可用，请手动登录',
   SAVED_LOGIN_INVALID: '保存的登录信息无效，请重新输入',
   SAVED_LOGIN_READ_FAILED: '无法读取系统保存的密码，请手动登录',
   SAVED_LOGIN_WRITE_FAILED: '登录成功，但无法保存密码，下次启动请手动登录',

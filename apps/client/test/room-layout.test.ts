@@ -18,7 +18,9 @@ it('keeps narrow and short rooms scrollable with space for the fixed transport a
  expect(app).toMatch(/\.shell\.in-room-shell \.main\s*\{[^}]*overflow-y: auto/s);
  expect(app).toContain('(max-height: 639px)');
  expect(app).toContain('padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px))');
- expect(room).toContain('height: clamp(500px, calc(100dvh - 184px), 640px)');
+ expect(app).toContain('padding-top: 52px; padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px))');
+ expect(app).toContain('.shell.in-room-shell .in-room-page { height: 100%; min-height: 360px; }');
+ expect(room).not.toContain('height: clamp(500px, calc(100dvh - 184px), 640px)');
  expect(room).toContain('height: 400px; min-height: 320px');
 });
 it('wraps long untimed lyrics, bounds word spacing, and scrolls long lines without scaling the page',()=>{
@@ -74,4 +76,13 @@ it('preserves the original room slide/scale timings and isolates only the animat
  for(const hook of ['@enter="roomRouteTransition.start"','@leave="roomRouteTransition.start"','@after-enter="roomRouteTransition.finish"','@enter-cancelled="roomRouteTransition.finish"','@after-leave="roomRouteTransition.finish"','@leave-cancelled="roomRouteTransition.finish"'])expect(app).toContain(hook);
  expect(app).toContain('onUnmounted(roomRouteTransition.dispose)');
  expect(styles('App.vue')).toMatch(/\.shell\.in-room-shell \.main\s*\{[^}]*overflow-y: auto/s);
+});
+
+it('keeps the 900px room breakpoint flexible instead of forcing a viewport-independent stage height',()=>{
+ const room=styles('views/Room.vue');
+ const narrow=room.slice(room.indexOf('@media (max-width: 900px)'),room.indexOf('@media (min-width: 901px)'));
+ expect(narrow).toContain('height: 100%; min-height: 0; padding: 0 16px 20px; display: flex; flex-direction: column;');
+ expect(narrow).toMatch(/flex: 1;\s*min-height: 340px;\s*height: auto;/);
+ expect(narrow).not.toMatch(/min-height: 500px|height: clamp|overflow(?:-y)?: hidden|scale\(/);
+ expect(narrow).toContain('grid-template-columns: minmax(0, 1fr)');
 });

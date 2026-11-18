@@ -12,3 +12,9 @@ export function resolveServerUrl(value: unknown, mode: string): string {
 export function getServerUrl(): string {
   return resolveServerUrl(import.meta.env.VITE_SERVER_URL, import.meta.env.MODE);
 }
+
+/** Development must never silently inherit the production backend. */
+export function resolveApkServerUrl(value:unknown,command:'serve'|'build',productionFallback:()=>unknown):string {
+  if(value!==undefined&&value!=='')return resolveServerUrl(value,'android-preview');
+  return resolveServerUrl(command==='serve'?'http://127.0.0.1:3000':productionFallback(),'android-preview');
+}

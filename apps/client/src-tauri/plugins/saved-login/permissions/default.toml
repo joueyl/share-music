@@ -1,0 +1,3 @@
+[default]
+description = "Read, save and delete this application's remembered login only."
+permissions = ["allow-can-remember-login", "allow-load-saved-login", "allow-save-login", "allow-clear-saved-login"]

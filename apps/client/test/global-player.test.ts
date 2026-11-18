@@ -14,6 +14,11 @@ const settle=async()=>{for(let i=0;i<6;i++){await Promise.resolve();await nextTi
 let mounted:ReturnType<typeof renderer.createApp>;
 async function mount(){const root=node('root');mounted=renderer.createApp(GlobalPlayer);mounted.use(createPinia());mounted.component('router-link',{setup(_,context){return()=>h('a',{},context.slots.default?.());}});mounted.mount(root);await settle();return root;}
 const label=(root:any,name:string)=>all(root).find(n=>n.props['aria-label']===name);
+it('expands the existing mobile controls without sending playback commands and collapses on room change',async()=>{
+ const root=await mount();label(root,'展开播放控制').props.onClick();await settle();
+ expect(label(root,'收起播放控制').props['aria-expanded']).toBe(true);expect(fixture.app.act).not.toHaveBeenCalled();
+ fixture.app.room.id='other';await settle();expect(label(root,'展开播放控制').props['aria-expanded']).toBe(false);
+});
 beforeEach(()=>{vi.stubGlobal('Document',class{});vi.stubGlobal('ShadowRoot',class{});resetUi();fixture.readFavorites.mockReset().mockResolvedValue([]);fixture.setFavorite.mockReset().mockResolvedValue([]);fixture.volume.mockReset().mockResolvedValue(undefined);fixture.app=reactive({room:{id:'room',playbackMode:'queue',playlist:[{id:'one',name:'歌曲',artists:'歌手',durationMs:100000}],playback:{sourceId:'one',sourceEpoch:1,playState:'paused'},pending:null},connected:true,permission:{skip:true,seek:true,enqueue:true,playbackMode:true},progress:5000,media:{status:'paused'},act:vi.fn().mockResolvedValue(undefined),error:vi.fn()});});
 afterEach(()=>{mounted?.unmount();vi.unstubAllGlobals();});
 it('uses the existing room command channel for pause/resume and track changes',async()=>{const root=await mount();label(root,'继续').props.onClick();expect(fixture.app.act).toHaveBeenCalledWith({type:'resume',payload:{}});fixture.app.room.playback.playState='playing';await settle();label(root,'暂停').props.onClick();expect(fixture.app.act).toHaveBeenLastCalledWith({type:'pause',payload:{}});label(root,'下一首').props.onClick();expect(fixture.app.act).toHaveBeenLastCalledWith({type:'next',payload:{}});});

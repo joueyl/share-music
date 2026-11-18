@@ -102,19 +102,22 @@ mod desktop {
     }
     #[tauri::command]
     fn can_remember_login() -> bool {
-        cfg!(windows)
+        cfg!(any(windows, target_os = "macos"))
     }
     #[tauri::command]
-    fn load_saved_login() -> Result<Option<saved_login::SavedLogin>, String> {
-        saved_login::load()
+    async fn load_saved_login() -> Result<Option<saved_login::SavedLogin>, String> {
+        tauri::async_runtime::spawn_blocking(saved_login::load)
+            .await.map_err(|_| "SAVED_LOGIN_READ_FAILED".to_owned())?
     }
     #[tauri::command]
-    fn save_login(credentials: saved_login::SavedLogin) -> Result<(), String> {
-        saved_login::save(&credentials)
+    async fn save_login(credentials: saved_login::SavedLogin) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || saved_login::save(&credentials))
+            .await.map_err(|_| "SAVED_LOGIN_WRITE_FAILED".to_owned())?
     }
     #[tauri::command]
-    fn clear_saved_login() -> Result<(), String> {
-        saved_login::clear()
+    async fn clear_saved_login() -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(saved_login::clear)
+            .await.map_err(|_| "SAVED_LOGIN_DELETE_FAILED".to_owned())?
     }
     #[tauri::command]
     fn media_capabilities() -> Value {
@@ -228,11 +231,12 @@ mod desktop {
 pub use desktop::run;
 
 // Experimental Android shell: existing Vue UI and browser HTTP/WebSocket/Audio path.
-// No desktop tray, updater, credentials, native cache or media commands are exposed.
+// Only the scoped secure-login plugin exposes mobile IPC, not desktop commands.
 #[cfg(all(feature = "desktop", target_os = "android"))]
 #[tauri::mobile_entry_point]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_saved_login::init())
         .run(tauri::generate_context!())
         .expect("Run experimental Android shell");
 }

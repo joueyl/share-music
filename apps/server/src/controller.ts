@@ -55,7 +55,11 @@ export class ApiController {
   @Put('music/favorite-songs') async setFavoriteSong(@Body() body:unknown,@Headers('authorization') header?:string){
     try{
       const user=await this.user(header);this.app.limit(`favorite-songs-write:${user.id}`,60,60000);this.app.limit('favorite-songs-write:global',300,60000);
-      const {source,id,saved}=favoriteSongRequestSchema.parse(body);
+      const parsed=favoriteSongRequestSchema.safeParse(body);
+      // Shared schemas may be loaded from another Zod module instance (npm/pnpm).
+      // Map validation here instead of relying on instanceof across module copies.
+      if(!parsed.success)throw new HttpException({error:'INVALID_REQUEST',issues:parsed.error.issues.map(i=>({path:i.path,message:i.message}))},400);
+      const {source,id,saved}=parsed.data;
       return {songs:await this.app.favoriteSongs.set(user.id,source,id,saved)};
     }catch(e){httpError(e);}
   }

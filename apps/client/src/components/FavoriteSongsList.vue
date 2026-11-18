@@ -37,4 +37,17 @@ const format=(ms:number)=>`${Math.floor(ms/60000)}:${String(Math.floor(ms/1000)%
 </section></template>
 <style scoped>
 .favorite-songs{display:flex;flex-direction:column;flex:1;min-height:0;min-width:0}.favorite-songs-heading{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);flex-shrink:0}.favorite-songs-heading button{font-size:12px;min-height:36px}.favorite-songs-hint{font-size:11px;line-height:1.6;color:var(--muted);margin:4px 0 8px;overflow-wrap:anywhere;flex-shrink:0}.favorite-songs-state{display:flex;flex:1;min-height:150px;align-items:center;justify-content:center;flex-direction:column;gap:12px;text-align:center;color:var(--muted);font-size:12px;padding:24px 12px}.favorite-songs-state h3{margin:0;font-size:16px;color:var(--text)}.favorite-songs-state p{margin:0;line-height:1.8}.favorite-songs-scroll{padding-bottom:8px;overflow:auto;min-height:0;flex:1;scrollbar-gutter:stable;overscroll-behavior:contain}.favorite-song-row{display:flex;align-items:center;gap:10px;min-height:64px;padding:8px 4px;border-bottom:1px solid var(--border)}.favorite-song-row .album-art{width:40px;height:40px;border-radius:10px;flex-shrink:0}.favorite-song-info{flex:1;min-width:0}.favorite-song-info strong,.favorite-song-info small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.favorite-song-info strong{font-size:13px;font-weight:500}.favorite-song-info small{font-size:11px;color:var(--muted);margin-top:4px}.favorite-song-row time{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}.favorite-song-row>.icon-button{width:36px;height:36px;flex-shrink:0}.favorite-songs :deep(.song-favorite){width:36px;height:36px}@media(max-width:600px){.favorite-song-row{gap:6px}.favorite-song-row time{display:none}.favorite-song-row>.icon-button,.favorite-songs :deep(.song-favorite){width:44px;height:44px}.favorite-song-info strong{font-size:12px}}@media(max-height:500px){.favorite-songs{min-height:180px;flex-shrink:0}}
+@media(max-width:720px),(max-width:900px) and (pointer:coarse){
+ .favorite-songs-heading,.favorite-songs-heading button{font-size:13px;min-height:44px}
+ .favorite-songs-hint{font-size:12px;line-height:1.7}
+ .favorite-songs-state{min-height:240px;flex:0 0 auto;padding:28px 20px;border:1px solid white;border-radius:24px;background:#ffffffb3;font-size:14px;gap:16px;margin:8px 0}
+ .favorite-songs-state>svg{box-sizing:content-box;width:32px;height:32px;padding:20px;background:#e7effc;color:var(--accent);border-radius:24px}
+ .favorite-songs-state h3{font-size:20px;line-height:1.5;font-weight:600}
+ .favorite-songs-state button{min-height:48px;font-size:14px;border-radius:16px}
+ .favorite-song-row{background:#ffffffb3;border:1px solid white;border-radius:18px;padding:12px;gap:10px;margin:8px 0}
+ .favorite-song-info strong{font-size:14px}
+ .favorite-song-info small{font-size:12px}
+ .favorite-song-row>.icon-button,.favorite-songs :deep(.song-favorite){width:44px;height:44px;min-width:44px;min-height:44px}
+ .favorite-song-row time{display:none}
+}
 </style>

@@ -1,22 +1,15 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
-import { UserRound, LockKeyhole, Eye, EyeOff, LoaderCircle, Minus, Square, X } from 'lucide-vue-next';
+import { Headphones, UserRound, LockKeyhole, Eye, EyeOff, LoaderCircle, Minus, Square, X } from 'lucide-vue-next';
 import * as bridge from '../bridge';
-import { useApp } from '../store';
-import { canRememberLogin, clearSavedLogin } from '../saved-login';
 import BrandMark from './BrandMark.vue';
 import appLogo from '../assets/logo.webp';
 const emit = defineEmits<{ version: [] }>();
-const app = useApp(), router = useRouter();
-const name = ref(''), password = ref(''), confirmation = ref(''), register = ref(false);
-const showPassword = ref(false), showConfirmation = ref(false);
-const remember = ref(false), rememberAvailable = ref(false), starting = ref(true);
-const confirmInput = ref<HTMLInputElement | null>(null);
+import { useAccountAuth } from '../features/useAccountAuth';
+const { app,name,password,confirmation,register,showPassword,showConfirmation,remember,rememberAvailable,starting,confirmInput,changeRemember,submit } = useAccountAuth();
+const router = useRouter();
 const isMaximized = ref(false);
-
-watch(register, () => { password.value = ''; confirmation.value = ''; showPassword.value = false; showConfirmation.value = false; });
-watch([password, confirmation], () => confirmInput.value?.setCustomValidity(''));
 
 watch(isMaximized, (val) => {
   if (val) {
@@ -27,15 +20,6 @@ watch(isMaximized, (val) => {
 }, { immediate: true });
 
 onMounted(async () => {
-  try {
-    await app.initialize();
-    rememberAvailable.value = await canRememberLogin();
-    if (rememberAvailable.value) {
-      const saved = await app.restoreLogin();
-      if (saved) { name.value = saved.name; remember.value = true; }
-    }
-  } catch (e) { app.error(e); }
-  finally { starting.value = false; }
 
   if (bridge.desktop) {
     isMaximized.value = await bridge.isWindowMaximized();
@@ -52,18 +36,6 @@ async function toggleMaximize() {
   }
 }
 
-async function changeRemember() {
-  if (!remember.value) try { await clearSavedLogin(); } catch (e) { app.error(e); }
-}
-async function submit() {
-  if (starting.value || app.busy) return;
-  if (register.value && confirmation.value !== password.value) {
-    confirmInput.value?.setCustomValidity('两次输入的密码不一致');
-    confirmInput.value?.reportValidity(); return;
-  }
-  await app.login(name.value, password.value, register.value, rememberAvailable.value && remember.value);
-  if (app.user) { password.value = ''; confirmation.value = ''; }
-}
 function home() { register.value = false; void router.replace('/'); }
 
 function onHeaderMouseDown(e: MouseEvent) {
@@ -97,6 +69,7 @@ function onHeaderMouseDown(e: MouseEvent) {
       </div>
     </header>
     <div class="auth-content">
+      <section class="mobile-auth-brand" aria-label="同频 TONE"><Headphones :size="38" /><h1>同频 TONE</h1><p>每一次相遇，都有共同的旋律</p></section>
       <section class="auth-intro" aria-label="同频音乐陪伴">
         <div class="auth-brand-visual">
           <div class="auth-ripples" aria-hidden="true"><i></i><i></i><i></i></div>
@@ -108,10 +81,12 @@ function onHeaderMouseDown(e: MouseEvent) {
         </div>
       </section>
       <form class="auth-card" :class="{ 'auth-register': register }" aria-label="账号登录与注册" @submit.prevent="submit">
+        <div class="mobile-auth-tabs" aria-label="账号认证方式"><button type="button" :class="{selected:!register}" :aria-pressed="!register" :disabled="starting||app.busy" @click="register=false">登录</button><button type="button" :class="{selected:register}" :aria-pressed="register" :disabled="starting||app.busy" @click="register=true">注册</button></div>
         <h2>{{ register ? '注册，遇见同频的人' : '欢迎回到同频' }}</h2>
         <label class="auth-field">用户名<span class="auth-input"><UserRound :size="18" /><input v-model="name" :disabled="starting || app.busy" autocomplete="username" minlength="2" maxlength="40" required placeholder="请输入用户名" /></span></label>
         <label class="auth-field">{{ register ? '设置密码' : '密码' }}<span class="auth-input"><LockKeyhole :size="18" /><input v-model="password" :disabled="starting || app.busy" :type="showPassword ? 'text' : 'password'" :autocomplete="register ? 'new-password' : 'current-password'" minlength="10" maxlength="128" required :placeholder="register ? '10–128 位密码' : '请输入密码'" /><button type="button" :aria-label="showPassword ? '隐藏密码' : '显示密码'" :disabled="starting || app.busy" @click="showPassword = !showPassword"><EyeOff v-if="showPassword" :size="18" /><Eye v-else :size="18" /></button></span></label>
         <label v-if="register" class="auth-field">确认密码<span class="auth-input"><LockKeyhole :size="18" /><input ref="confirmInput" v-model="confirmation" :disabled="starting || app.busy" :type="showConfirmation ? 'text' : 'password'" autocomplete="new-password" minlength="10" maxlength="128" required placeholder="请再次输入密码" /><button type="button" :aria-label="showConfirmation ? '隐藏确认密码' : '显示确认密码'" :disabled="starting || app.busy" @click="showConfirmation = !showConfirmation"><EyeOff v-if="showConfirmation" :size="18" /><Eye v-else :size="18" /></button></span></label>
+        <p v-if="app.notice" class="mobile-auth-error" role="alert">{{ app.notice }}</p>
         <div class="auth-options">
           <label class="auth-remember" :class="{ disabled: !rememberAvailable || starting || app.busy }" :title="rememberAvailable ? '仅在个人设备启用；凭据由系统安全保存，退出登录会清除' : '当前环境不支持安全保存登录凭据'">
             <input v-model="remember" type="checkbox" :disabled="!rememberAvailable || starting || app.busy" @change="changeRemember" />
@@ -203,4 +178,33 @@ function onHeaderMouseDown(e: MouseEvent) {
 
 
 }
+
+.mobile-auth-brand,.mobile-auth-tabs,.mobile-auth-error{display:none}
+@media(max-width:720px),(max-width:900px) and (pointer:coarse){
+ .auth-page{min-height:100dvh;max-width:none}
+ .auth-header{min-height:24px;padding:calc(8px + env(safe-area-inset-top,0px)) 12px 0}
+ .auth-content{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:24px;flex:1;padding:16px max(20px,env(safe-area-inset-right,0px)) calc(28px + env(safe-area-inset-bottom,0px)) max(20px,env(safe-area-inset-left,0px))}
+ .mobile-auth-brand{display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--accent);flex-shrink:0}
+ .mobile-auth-brand h1{font-size:26px;line-height:1.4;font-weight:700;color:#283448;margin:0}
+ .mobile-auth-brand p{font-size:13px;color:var(--muted);margin:0;text-align:center}
+ .auth-intro{display:none}
+ .auth-card,.auth-card.auth-register{padding:20px 16px;border-radius:24px;border:1px solid white;background:#ffffffb3;box-shadow:none;margin:0;max-width:430px;flex-shrink:0}
+ .auth-card>h2{font-size:20px;line-height:1.5;margin-bottom:20px}
+ .mobile-auth-tabs{display:flex;justify-content:center;gap:32px;margin-bottom:16px}
+ .mobile-auth-tabs button{min-width:72px;min-height:44px;padding:8px;background:transparent;border-radius:12px;color:var(--muted);font-size:16px}
+ .mobile-auth-tabs .selected{color:var(--accent);background:#e7effc}
+ .auth-card .auth-field{font-size:13px;line-height:1.5;gap:8px;margin:0 0 16px}
+ .auth-input{height:52px;border-radius:14px;gap:10px;padding:0 12px}
+ .auth-input input{font-size:16px}
+ .auth-input button{min-width:44px;width:44px;min-height:44px;height:44px}
+ .auth-input:focus-within{border-color:var(--accent);box-shadow:0 0 0 3px #4f80db12}
+ .auth-card .auth-options{margin:12px 0 16px;flex-wrap:wrap;gap:8px}
+ .auth-forgot{min-height:44px;color:var(--accent)}
+ .auth-submit{border-radius:16px;background:var(--accent);min-height:48px;font-size:15px}
+ .auth-submit:hover:not(:disabled){background:#4272c9}
+ .auth-switch{display:none}
+ .auth-remember input:checked + .auth-checkbox-box{background:var(--accent);border-color:var(--accent)}
+ .mobile-auth-error{display:block;line-height:1.6;font-size:13px;color:#a64b40;overflow-wrap:anywhere}
+}
+@media(max-width:720px) and (max-height:600px){.auth-content{justify-content:flex-start;gap:16px}.mobile-auth-brand>svg{display:none}.mobile-auth-brand h1{font-size:22px}}
 </style>

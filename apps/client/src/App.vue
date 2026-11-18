@@ -14,6 +14,7 @@ import { createPlaybackCacheHost } from './playback-cache-host';
 import { createRoomRouteTransition } from './room-route-transition';
 import SplashScreen from './components/SplashScreen.vue';
 import GlobalPlayer from './components/GlobalPlayer.vue';
+import MobileNavigation from './components/MobileNavigation.vue';
 import QueueDrawer from './components/QueueDrawer.vue';
 import MusicSearchDialog from './components/MusicSearchDialog.vue';
 import UploadedMusicDialog from './components/UploadedMusicDialog.vue';
@@ -234,6 +235,7 @@ function onHeaderMouseDown(e: MouseEvent) {
         >
           <ChevronDown :size="24" />
         </button>
+        <span class="mobile-room-name" :title="app.room?.name">{{ app.room?.name ?? '一起听' }}</span>
       </div>
 
       <div class="room-nav-right">
@@ -288,6 +290,7 @@ function onHeaderMouseDown(e: MouseEvent) {
     </header>
 
     <main class="main">
+      <p v-if="app.user && !app.connected" class="mobile-connection-note" role="status">连接已断开 · 房间操作暂不可用，等待重新同步</p>
       <Transition name="toast">
         <div v-if="app.notice" :key="app.notice" class="toast" role="alert">
           {{ app.notice }}
@@ -310,6 +313,7 @@ function onHeaderMouseDown(e: MouseEvent) {
         </Transition>
       </router-view>
     </main>
+    <MobileNavigation v-if="app.user" />
   </div>
   <!-- 播放器独立于 shell 的 inert 锁，仅列表开关在队列展开时可操作。 -->
   <GlobalPlayer v-if="app.user" />
@@ -483,7 +487,16 @@ function onHeaderMouseDown(e: MouseEvent) {
 }
 
 @media (max-width: 900px), (max-height: 639px) {
-  .shell.in-room-shell .main { padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
+  .shell.in-room-shell .main { padding-top: 52px; padding-bottom: calc(132px + env(safe-area-inset-bottom, 0px)); }
+}
+
+@media (max-width: 900px) {
+  /* Keep the stage's 340px floor and 20px page padding in normal flow so that
+     short windows can scroll the whole stage above the fixed player. */
+  .shell.in-room-shell .in-room-page { height: 100%; min-height: 360px; }
+}
+
+@media (min-width: 901px) and (max-height: 639px) {
   .shell.in-room-shell .in-room-page { height: auto; min-height: 100%; }
 }
 
@@ -539,4 +552,35 @@ function onHeaderMouseDown(e: MouseEvent) {
   background: #e81123;
   color: #ffffff;
 }
+
+.mobile-room-name,.mobile-connection-note{display:none}
+@media(max-width:720px),(max-width:900px) and (pointer:coarse){
+ .shell:not(.auth-shell){height:100dvh;min-height:0;overflow:visible;box-shadow:none}
+ .shell:not(.auth-shell)>.main,.shell.in-room-shell:not(.auth-shell)>.main{height:100%;min-height:0;display:flex;flex-direction:column;padding:var(--mobile-header) 0 var(--workspace-player)!important;overflow-y:auto}
+ .shell .tone-navigation.sidebar{inset:0 0 auto;height:var(--mobile-header);width:100%;display:flex;align-items:center;padding:calc(8px + env(safe-area-inset-top,0px)) max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));gap:12px;background:transparent;backdrop-filter:none;border:0}
+ .shell .tone-navigation.sidebar .brand{display:flex;width:auto;margin:0 auto 0 0;gap:10px;min-width:0}
+ .shell .tone-navigation.sidebar .brand>span{font-size:20px;line-height:1.25;letter-spacing:0}
+ .shell .tone-navigation.sidebar .brand small{display:inline;font-size:12px;margin-left:6px;letter-spacing:1px}
+ .tone-navigation.sidebar .tone-nav-links{display:none}
+ .tone-account{gap:6px;margin:0;flex-shrink:0}
+ .tone-navigation .header-search{display:grid;place-items:center;width:44px;height:44px;min-width:44px;padding:0;background:transparent;border:0}
+ .header-search>span,.header-headphones{display:none}
+ .account-avatar{width:44px;height:44px;min-width:44px;background:#ffffff80;border:1px solid #ffffff;color:var(--accent)}
+ .account-menu{right:0;max-width:calc(100vw - 32px);background:#f8fafdf5}
+ .tone-room-nav{height:var(--mobile-header);padding:calc(8px + env(safe-area-inset-top,0px)) 12px 8px;background:transparent}
+ .room-nav-left{min-width:0;flex:1;gap:6px}
+ .mobile-room-name{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:600}
+ .room-nav-right{gap:2px;flex-shrink:0}
+ .room-mode-btn{min-height:44px;padding:0 10px;color:#65748b}
+ .room-mode-btn>span{display:none}
+ .room-collapse-minimal,.room-icon-btn{width:44px;height:44px;min-width:44px}
+ .mobile-connection-note{display:block;flex-shrink:0;margin:0 16px 8px;padding:10px 12px;border-radius:14px;background:#fff0e1;color:#966329;font-size:12px;line-height:1.6;overflow-wrap:anywhere}
+ .shell .main>.route-page{flex:1;min-height:0;width:100%}
+ .shell .main>.route-page:has(.tone-room){overflow:auto}
+ .shell .main>.route-page:has(.tone-library){overflow:auto;scrollbar-gutter:stable}
+ .window-controls{margin-left:0;padding-left:0;border:0}
+ .window-controls .win-btn{width:28px;min-width:28px}
+ .toast{top:calc(8px + env(safe-area-inset-top,0px));z-index:90}
+}
+
 </style>

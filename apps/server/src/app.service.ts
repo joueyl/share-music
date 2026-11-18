@@ -70,6 +70,7 @@ export class AppService implements OnModuleDestroy, OnModuleInit {
     }
     const records = await this.database.rooms(); this.engine.restore(records); this.engine.restoreOverrides(records);
     this.neteaseTasks.start();
+    this.qq.start();
     this.ticker = setInterval(() => { if(!this.persistenceFailed)this.engine.tick(); }, 50); this.ticker.unref();
   }
   limit(key: string, maximum: number, windowMs: number) {

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { DatabaseStore } from './database';
 import { DomainError } from './engine';
 import { EmbeddedQqRuntime } from './qq-runtime';
+import { QqSessionKeepalive } from './qq-keepalive';
 import { setTimeout as delay } from 'node:timers/promises';
 
 class QqUpstreamFailure extends DomainError {
@@ -16,17 +17,25 @@ export class QqMusicService {
  private runtime?:EmbeddedQqRuntime;
  private searches=new Map<string,Promise<ReturnType<typeof qqSearchResult>>>();
  private searchCache=new Map<string,{at:number;result:ReturnType<typeof qqSearchResult>}>();
+ private keepalive=new QqSessionKeepalive(async signal=>{
+  const token=await this.session();if(!token||signal.aborted)return;
+  const data=await this.call('/login/refresh',{},token,signal,'POST');
+  // This integration uses stored sessions: the upstream persists credentials under the
+  // same opaque key. Do not overwrite a newer QR login or silently accept sealed mode.
+  if(data?.code!==200||data.data?.rotated!==false||data.data?.token!==token||(!Number.isFinite(data.data?.expiresAt)||data.data.expiresAt<=this.now()))throw new DomainError('QQ_INVALID_RESPONSE');
+ });
  constructor(private db:DatabaseStore, private endpoint:string|undefined=process.env.QQ_MUSIC_API_URL?.trim()||undefined, private request:typeof fetch=fetch, private now=Date.now) {
   if(endpoint===undefined)this.runtime=new EmbeddedQqRuntime(db);
  }
- async close(){await this.runtime?.close();}
- private async call(path:string, params:Record<string,string>={}, token?:string,signal=AbortSignal.timeout(20000)) {
+ start(){if(this.endpoint!=='')this.keepalive.start();}
+ async close(){await this.keepalive.stop();await this.runtime?.close();}
+ private async call(path:string, params:Record<string,string>={}, token?:string,signal=AbortSignal.timeout(20000),method?:'POST') {
   if(this.endpoint==='')throw new DomainError('QQ_MUSIC_NOT_CONFIGURED');
   try {
    const base=new URL(this.endpoint??await this.runtime!.url());
    if(!['http:','https:'].includes(base.protocol)||base.username||base.password||base.search||base.hash)throw Error();
    const url=new URL(base.href.replace(/\/$/,'')+path);url.search=new URLSearchParams(params).toString();
-   const response=await this.request(url,{redirect:'error',signal,headers:token?{'X-QQ-Session':token}:{}});
+   const response=await this.request(url,{redirect:'error',signal,...(method?{method}:{}),headers:token?{'X-QQ-Session':token}:{}});
    if(response.status===401){await response.body?.cancel();throw new DomainError('QQ_LOGIN_REQUIRED');}
    if(response.status===429){await response.body?.cancel();throw new DomainError('QQ_MUSIC_RATE_LIMITED');}
    if(!response.body)throw new QqUpstreamFailure(!response.ok&&[502,503,504].includes(response.status));

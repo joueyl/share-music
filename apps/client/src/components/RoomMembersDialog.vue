@@ -161,4 +161,17 @@ async function copyInvite() {
   border-radius: 17px;
   white-space: nowrap;
 }
+
+@media(max-width:720px),(max-width:900px) and (pointer:coarse){
+ .room-invite-card{background:#ffffffb3;border:1px solid white;border-radius:20px;padding:16px;gap:12px;flex-wrap:wrap}
+ .invite-label{font-size:12px}
+ .invite-code{font-size:20px;overflow-wrap:anywhere}
+ .invite-copy-action{height:auto;min-height:44px;border-radius:14px;font-size:13px}
+ .members-dialog .tabs button{min-height:44px;font-size:14px}
+ .member-row{min-height:68px;background:#ffffffb3;border-radius:16px;padding:12px;margin:8px 0}
+ .member-row>span{font-size:14px;min-width:0;overflow-wrap:anywhere}
+ .member-row small{font-size:12px}
+ .override-row .tone-select{min-width:0;width:144px;max-width:100%}
+}
+
 </style>

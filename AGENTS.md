@@ -23,7 +23,9 @@
 
 ## 修改位置
 
-- 页面与交互：`apps/client/src/views/`、`apps/client/src/components/`。
+- 桌面/网页入口：`apps/client/index.html` → `src/main.ts` → `src/App.vue`，页面与交互在 `apps/client/src/views/`、`apps/client/src/components/`。
+- APK 入口：`apps/client/apk.html` → `src/apk/main.ts` → `src/apk/ApkApp.vue`；APK 页面在 `src/apk/pages/`、布局在 `src/apk/apk.css`，不导入桌面 App、页面或布局样式。
+- 双端业务共享 `apps/client/src/features/`、bridge、store、CloudPlayer、协议及复杂交互组件。认证、房间、音乐库、播放、权限、接口行为变化必须核对两端消费者并跑双端回归；优先修改同一个共享模块，不复制一份 APK 业务实现或只修改桌面模板里的逻辑。API/协议变化仍核对服务端与 shared，不以 UI 隔离为由分叉协议。
 - `apps/client/src/` 下：tone.css 管共享配色；brilliant.css 管设计基准几何；adaptive-layout.css 管页面自适应；motion.css 管动效；selects.css 管下拉框。
 - 局部调整优先组件 scoped 样式；跨页规则放对应公共样式。先检查 main.ts 的加载顺序和实际生效样式，避免不断堆叠全局覆盖。
 - 播放与协议：客户端 bridge.ts、store.ts、cloud-player.ts、`packages/shared/src/`；后端在 `apps/server/src/`。
@@ -32,6 +34,7 @@
 
 - 每次完成需求并实际修改项目后（包括功能、样式、修复、配置和文档），必须在结束任务前更新根目录 CHANGELOG.md 的 `## [未发布]`。按新增、优化、修复、文档等分类记录实际变化、影响和必要升级提示；复用已有分类，同一需求连续调整可合并条目，避免重复刷屏。未完成或未验证的工作不得写成已完成，纯问答未修改项目不新增日志。
 - 日常需求不修改已发布版本的历史日志，不自动升版、归档或发标签；只有用户明确要求发布时才按统一发布流程执行。交付前检查日志与本次实际改动一致。
+- 双端或 APK 变更额外运行 `npm run build:apk`、`npm run test:apk`；APK 产物输出 `dist-apk`，由入口隔离检查阻止误包桌面页面。
 - 代码变更运行相关测试和 `npm run typecheck`；组件模板、样式或依赖变更运行 `npm run build`，影响跨模块时运行 `npm test`。
 - 纯文档修改核对 Markdown 链接、引用路径与 `git diff --check`，不声称运行了未执行的检查。
 - 布局修改尽量验证 1024×640、1280×720、1440×960、390×844，以及长文案、空/长列表、加载、失败、断线、无权限和高缩放。无法验证的项目明确说明。

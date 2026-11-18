@@ -101,4 +101,26 @@ onUnmounted(()=>{alive=false;cancelDrag();detach();unsubscribe();});
 .floating-room-chat :deep(.chat-quick-replies){margin:8px 0}
 .floating-chat-close{flex:0 0 32px;width:32px!important;min-height:32px}
 @media(max-height:480px){.floating-room-chat.room-chat{top:56px;padding:10px}.floating-room-chat :deep(.chat-quick-replies){display:none}}
+
+@media(max-width:720px),(max-width:900px) and (pointer:coarse){
+ .floating-chat-trigger{top:auto;bottom:calc(var(--workspace-player) + 12px);right:16px;padding:10px 16px;min-height:48px;background:var(--accent)}
+ .floating-room-chat.room-chat{top:calc(env(safe-area-inset-top,0px) + 8px);bottom:calc(var(--workspace-player) + 8px);right:8px;width:calc(100% - 16px);max-width:600px;max-height:none;padding:16px;border-radius:24px;background:linear-gradient(135deg,#e9f3ff,#faf3e7);box-shadow:0 12px 40px #38527530}
+ .floating-room-chat :deep(.room-chat-header){min-height:48px}
+ .floating-room-chat :deep(.floating-chat-close){width:44px!important;min-height:44px;height:44px;flex-basis:44px}
+ .floating-room-chat :deep(.room-chat-messages){min-height:60px;padding:12px 0}
+ .floating-room-chat :deep(.chat-message-bubble){font-size:14px;line-height:1.65;padding:10px 12px;border-radius:16px}
+ .floating-room-chat :deep(.room-chat-form){flex-shrink:0}
+ .floating-room-chat :deep(.room-chat-form textarea){min-height:44px;font-size:16px;border-radius:16px}
+ .floating-room-chat :deep(.room-chat-actions .primary){min-height:44px;font-size:14px;background:var(--accent)}
+ .floating-room-chat :deep(.chat-quick-replies){display:flex;flex-wrap:nowrap;overflow:auto;gap:8px}
+ .floating-room-chat :deep(.chat-quick-replies button){min-height:44px;flex-shrink:0}
+ .floating-room-chat :deep(.room-chat-note){display:none}
+}
+
+
+@media(max-width:720px) and (max-height:560px),(max-width:900px) and (pointer:coarse) and (max-height:560px){
+ .floating-room-chat.room-chat{overflow:auto;padding:12px}
+ .floating-room-chat :deep(.chat-quick-replies){display:none}
+ .floating-room-chat :deep(.room-chat-messages){flex:1 0 80px}
+}
 </style>

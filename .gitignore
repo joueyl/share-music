@@ -19,3 +19,6 @@ downloaded-artifacts/
 
 .claude/
 .qq-music/
+
+# Independent APK web bundle
+apps/client/dist-apk/

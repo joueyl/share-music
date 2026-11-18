@@ -2341,12 +2341,13 @@ dependencies = [
 
 [[package]]
 name = "music-share-desktop"
-version = "1.4.8"
+version = "1.4.9"
 dependencies = [
  "futures-util",
  "libloading 0.8.9",
  "mac-usernotifications",
  "reqwest 0.12.28",
+ "security-framework 3.7.0",
  "serde",
  "serde_json",
  "sha2",
@@ -2354,6 +2355,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-notification",
+ "tauri-plugin-saved-login",
  "tauri-plugin-updater",
  "tokio",
  "tokio-tungstenite",
@@ -4304,6 +4306,16 @@ dependencies = [
  "time",
  "url",
  "zbus",
+]
+
+[[package]]
+name = "tauri-plugin-saved-login"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

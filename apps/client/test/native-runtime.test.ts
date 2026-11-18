@@ -17,3 +17,6 @@ it('does not enable desktop commands in a browser',()=>{
  vi.stubEnv('VITE_ANDROID_PREVIEW','');native.mockReturnValue(false);
  expect(isDesktopRuntime()).toBe(false);
 });
+it('never enables desktop IPC in an independently built APK even without the legacy preview switch',()=>{
+ vi.stubEnv('VITE_CLIENT_TARGET','apk');vi.stubEnv('VITE_ANDROID_PREVIEW','');native.mockReturnValue(true);expect(isDesktopRuntime()).toBe(false);
+});

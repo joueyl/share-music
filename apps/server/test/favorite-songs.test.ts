@@ -28,6 +28,7 @@ it('requires auth, rejects metadata/user injection and invalid IDs, and always s
  await expect(controller.favoriteSongs()).rejects.toMatchObject({status:401});
  for(const body of [{source:'netease',id:'abc',saved:true},{source:'local',id:'1',saved:true},{source:'netease',id:'1',saved:true,userId:'b'},{source:'qq',id:'abc',saved:true,name:'fake'}])await expect(controller.setFavoriteSong(body,'Bearer token')).rejects.toMatchObject({status:400});
  expect(f.netease.call).not.toHaveBeenCalled();expect(f.qq.songDetail).not.toHaveBeenCalled();
+ await expect(controller.setFavoriteSong({source:'netease',id:'invalid',saved:true},'Bearer token')).rejects.toMatchObject({status:400,response:{error:'INVALID_REQUEST',issues:[{path:['id'],message:'Invalid source song ID'}]}});
  expect(await controller.setFavoriteSong({source:'netease',id:'1',saved:true},'Bearer token')).toMatchObject({songs:[{id:'1',name:'真实歌曲'}]});
  expect(await controller.favoriteSongs('Bearer token')).toMatchObject({songs:[{id:'1'}]});expect(await f.service.list('b')).toEqual([]);
 });

@@ -144,4 +144,48 @@ const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toSt
 @media(pointer:coarse){.music-source-picker .music-source-select{font-size:16px}}
 @media(forced-colors:active){.music-source-icon{color:ButtonText}.music-source-picker .music-source-select{border-color:ButtonText;color:ButtonText;background-color:Canvas;box-shadow:none}}
 @media(prefers-reduced-motion:reduce){.search-backdrop{transition:none}}
+
+@media(max-width:720px),(max-width:900px) and (pointer:coarse){
+ .search-backdrop{padding:0;align-items:stretch;overflow:auto}
+ .global-search-modal.modal{width:100%;max-width:none;height:100dvh;max-height:none;padding:0;display:flex;flex-direction:column;border-radius:var(--window-corner-radius,20px);background:linear-gradient(135deg,#ddeeff,#f2f1ed 60%,#fff2df);overflow:auto}
+ .global-search-header{height:auto;min-height:calc(64px + env(safe-area-inset-top,0px));padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px;gap:10px;background:#eaf2faf5}
+ .global-search-header h2{font-size:20px}
+ .global-search-header .round-close{width:44px;height:44px;min-width:44px;min-height:44px}
+ .global-search-header p,.global-search-header kbd{display:none}
+ .global-search-body{display:flex;flex:1;min-height:0;padding:16px;gap:0}
+ .search-main{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}
+ .search-main>.eyebrow,.search-main>h1,.search-discovery,.global-search-footer{display:none}
+ .music-source-picker{margin-bottom:12px;gap:12px}
+ .music-source-picker .music-source-select{font-size:16px;width:190px}
+ .global-search-form.music-search-form{min-height:52px;height:auto;flex-shrink:0;gap:8px;padding:4px 4px 4px 12px;border-radius:16px;margin:0 0 8px}
+ .global-search-form input{font-size:16px;height:44px}
+ .global-search-form.music-search-form .primary{height:44px;min-height:44px;flex:0 0 64px;font-size:13px;border-radius:12px}
+ .global-search-form .icon-button{width:44px;min-width:44px;min-height:44px}
+ .search-history{min-height:44px;flex-shrink:0;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+ .search-history>span{font-size:12px}
+ .search-history button{min-height:44px;border-radius:14px}
+ .search-kind-tabs{flex-shrink:0;gap:8px;margin-bottom:12px}
+ .search-kind-tabs>button{min-width:52px;min-height:44px;font-size:13px;padding:8px}
+ .search-kind-tabs>button.selected,.global-search-header .search-symbol{background:var(--accent);color:white}
+ .search-kind-tabs>span{font-size:12px}
+ .search-result-card{display:flex;flex-direction:column;flex:1;min-height:160px;padding:12px;border:1px solid white;border-radius:20px;background:#ffffffb3}
+ .search-result-card>header{flex-shrink:0;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+ .search-result-card>header>button{min-height:44px;height:auto;font-size:13px;border-radius:14px}
+ .search-result-card>header>span{font-size:12px}
+ .result-columns{display:none}
+ .global-search-modal .music-search-results{flex:1;min-height:0;max-height:none;overflow:auto;padding-right:2px}
+ .search-song-row.music-search-row{display:grid;grid-template-columns:40px minmax(0,1fr) 44px;gap:4px 10px;padding:12px 0;min-height:76px}
+ .search-song-row>.search-song-number,.search-song-row>.search-album,.search-song-row>time{display:none}
+ .search-song-row .album-art{grid-column:1;grid-row:1/3;width:40px;height:40px;border-radius:10px}
+ .search-song-row>strong{grid-column:2;grid-row:1;font-size:14px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .search-song-row>.search-artist{grid-column:2;grid-row:2;font-size:12px}
+ .search-song-row>.icon-button{grid-column:3;grid-row:1/3;width:44px;height:44px;min-width:44px;min-height:44px;background:#e7effc;color:var(--accent);border-radius:14px}
+ .music-search-pagination{flex-shrink:0;gap:12px;font-size:12px}
+ .music-search-message{flex-shrink:0;max-height:80px;overflow:auto;font-size:13px;line-height:1.6}
+}
+@media(max-width:720px) and (max-height:500px),(max-width:900px) and (pointer:coarse) and (max-height:500px){
+ .global-search-body{flex:none;min-height:260px}
+ .search-history{display:none}
+}
+
 </style>

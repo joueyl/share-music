@@ -1,0 +1,7 @@
+{
+  "identifier": "android-secure-login",
+  "description": "Only the bundled Android main window may use remembered-login storage.",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": ["saved-login:default"]
+}

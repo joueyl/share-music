@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
 import { Crown, Link, X, Settings2, Music } from 'lucide-vue-next';
-import { useApp } from '../store';
 import { ui, openSearch } from '../ui';
 import { stageTheme, lumiereCssVars } from '../stage-theme';
 import * as bridge from '../bridge';
@@ -15,76 +12,8 @@ import IpodStage from '../components/IpodStage.vue';
 import TurntableStage from '../components/TurntableStage.vue';
 import turntable from '../assets/room-turntable.png';
 
-const app = useApp();
-const route = useRoute();
-const router = useRouter();
-const leaving = ref(false);
-const resolvedCover = ref('');
-const floatingChat=ref(false);
-
-const track = computed(() => app.room?.playlist.find((t) => t.id === app.room?.playback.sourceId));
-const coverUrl = computed(() => bridge.playingTrackCover(track.value) || resolvedCover.value);
-const online = computed(() => app.room?.members.filter((m) => m.online) ?? []);
-const hostMember = computed(() => app.room?.members.find((m) => m.id === app.room?.hostId));
-const sortedOnline = computed(() => {
-  const members = [...online.value];
-  const hostId = app.room?.hostId;
-  return members.sort((a, b) => {
-    if (a.id === hostId) return -1;
-    if (b.id === hostId) return 1;
-    return 0;
-  });
-});
-
-watch(
-  [() => app.room?.id, () => track.value?.id, () => track.value?.contentHash],
-  async (_, __, onCleanup) => {
-    let active = true;
-    onCleanup(() => {
-      active = false;
-    });
-    resolvedCover.value = '';
-    const roomId = app.room?.id;
-    const song = track.value;
-    if (roomId && song && !bridge.playingTrackCover(song)) {
-      const cover = await bridge.loadTrackCover(roomId, song);
-      if (active) resolvedCover.value = cover;
-    }
-  },
-  { immediate: true }
-);
-
-onMounted(async () => {
-  try {
-    if (app.room?.id !== route.params.id) {
-      await bridge.join(String(route.params.id));
-    }
-  } catch (e) {
-    app.error(e);
-  }
-});
-
-async function exit() {
-  if (leaving.value) return;
-  leaving.value = true;
-  try {
-    await app.exitRoom();
-    await router.push('/');
-  } finally {
-    leaving.value = false;
-  }
-}
-
-async function invite() {
-  const code = app.room?.inviteCode;
-  if (!code) return;
-  try {
-    await navigator.clipboard.writeText(code);
-    app.notice = '房间码已复制，请私下分享给朋友';
-  } catch {
-    app.notice = `房间码：${code}，请手动复制并私下分享`;
-  }
-}
+import { useRoomSession } from '../features/useRoomSession';
+const { app,route,router,leaving,track,coverUrl,online,hostMember,sortedOnline,floatingChat,exit,invite } = useRoomSession();
 </script>
 
 <template>
@@ -620,14 +549,14 @@ async function invite() {
   font-weight: 500;
 }
 @media (max-width: 900px) {
-  .in-room-stage-page { height: auto; min-height: 100%; padding: 12px 16px 20px; }
+  .in-room-stage-page { height: 100%; min-height: 0; padding: 0 16px 20px; display: flex; flex-direction: column; }
   .listening-layout { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .listening-stage.ipod-active,
   .listening-stage.turntable-active,
   .listening-stage.lumiere-active {
-    flex: none;
-    min-height: 500px;
-    height: clamp(500px, calc(100dvh - 184px), 640px);
+    flex: 1;
+    min-height: 340px;
+    height: auto;
   }
   .listening-layout > :deep(.room-chat) { height: 400px; min-height: 320px; }
 }
@@ -639,4 +568,35 @@ async function invite() {
   .listening-stage.lumiere-active { flex: none; height: 460px; }
   .listening-layout > :deep(.room-chat) { height: 420px; }
 }
+
+@media(max-width:720px),(max-width:900px) and (pointer:coarse){
+ .in-room-stage-page{height:auto;min-height:100%;padding:8px 16px 20px}
+ .listening-layout,.listening-main{flex:1;min-height:0;gap:12px}
+ .listening-stage.ipod-active,.listening-stage.turntable-active{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto clamp(160px,25dvh,224px) minmax(200px,1fr);gap:12px;min-height:480px;flex:1;padding:12px;background:#ffffff50;border-radius:24px;box-shadow:none}
+ .stage-top-presence{grid-column:1;grid-row:1;justify-content:flex-start;width:100%;margin:0}
+ .stage-controller-badge{min-height:44px;max-width:100%;flex-wrap:wrap;gap:8px;padding:6px 12px;border-radius:16px;box-shadow:none}
+ .controller-tag{font-size:10px}
+ .stage-ipod-wrap,.stage-turntable-wrap{grid-column:1;grid-row:2;min-height:0;width:100%;max-width:300px;justify-self:center}
+ .listening-stage.ipod-active .stage-song,.listening-stage.turntable-active .stage-song{grid-column:1;grid-row:3;position:static;min-height:200px;text-align:left}
+ .stage-song-title{justify-content:flex-start}
+ .stage-song h2{font-size:22px;line-height:1.4;white-space:normal;overflow-wrap:anywhere}
+ .stage-song>p{font-size:13px;line-height:1.6;margin:4px 0 8px}
+ .listening-stage :deep(.stage-lyrics .lyric-scroll){min-height:140px;max-height:240px;padding:24px 0;text-align:left;scroll-padding:24px}
+ .listening-stage :deep(.stage-lyrics .lyric-line){font-size:15px;line-height:1.7;min-height:36px}
+ .listening-stage :deep(.stage-lyrics .lyric-line.active){font-size:18px;color:var(--accent)}
+ .listening-stage .stage-empty-lyric{font-size:14px!important;padding:12px 0!important}
+ .listening-stage.lumiere-active{min-height:380px;padding:12px;border-radius:24px;grid-template-rows:auto minmax(280px,1fr)}
+ .lumiere-song-header{gap:12px}
+ .lumiere-title{font-size:20px;white-space:normal;overflow-wrap:anywhere}
+ .up-next{margin-top:12px;border-radius:20px;padding:16px}
+ .up-next header>button{min-height:44px;font-size:13px}
+ .room-waveform{opacity:.25}
+}
+@media(max-width:720px) and (max-height:500px),(max-width:900px) and (pointer:coarse) and (max-height:500px){
+ .listening-stage.ipod-active,.listening-stage.turntable-active{grid-template-columns:minmax(0,1fr) minmax(0,1.2fr);grid-template-rows:auto minmax(200px,1fr);min-height:280px}
+ .stage-top-presence{grid-column:1/-1}
+ .stage-ipod-wrap,.stage-turntable-wrap{grid-column:1;grid-row:2}
+ .listening-stage.ipod-active .stage-song,.listening-stage.turntable-active .stage-song{grid-column:2;grid-row:2}
+}
+
 </style>

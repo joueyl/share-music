@@ -21,7 +21,7 @@ importers:
   apps/client:
     dependencies:
       '@music-share/shared':
-        specifier: 1.4.8
+        specifier: 1.4.9
         version: link:../../packages/shared
       '@tauri-apps/api':
         specifier: ^2.9.0
@@ -38,6 +38,9 @@ importers:
       postprocessing:
         specifier: 6.37.8
         version: 6.37.8(three@0.174.0)
+      sortablejs:
+        specifier: 1.15.7
+        version: 1.15.7
       three:
         specifier: ^0.174.0
         version: 0.174.0
@@ -51,6 +54,9 @@ importers:
       '@tauri-apps/cli':
         specifier: ^2.9.0
         version: 2.12.1
+      '@types/sortablejs':
+        specifier: 1.15.9
+        version: 1.15.9
       '@types/three':
         specifier: ^0.174.0
         version: 0.174.0
@@ -67,7 +73,7 @@ importers:
   apps/server:
     dependencies:
       '@music-share/shared':
-        specifier: 1.4.8
+        specifier: 1.4.9
         version: link:../../packages/shared
       '@nestjs/common':
         specifier: ^11.1.0
@@ -646,6 +652,9 @@ packages:
 
   '@types/stats.js@0.17.4':
     resolution: {integrity: sha512-jIBvWWShCvlBqBNIZt0KAshWpvSjhkwkEu4ZUcASoAvhmrgAUI2t1dXrjSL4xXVLB4FznPrIsX3nKXFl/Dt4vA==}
+
+  '@types/sortablejs@1.15.9':
+    resolution: {integrity: sha512-7HP+rZGE2p886PKV9c9OJzLBI6BBJu1O7lJGYnPyG3fS4/duUCcngkNCjsLwIMV+WMqANe3tt4irrXHSIe68OQ==}
 
   '@types/three@0.174.0':
     resolution: {integrity: sha512-De/+vZnfg2aVWNiuy1Ldu+n2ydgw1osinmiZTAn0necE++eOfsygL8JpZgFjR2uHmAPo89MkxBj3JJ+2BMe+Uw==}
@@ -1522,6 +1531,9 @@ packages:
     resolution: {integrity: sha512-6x6dK6zJdpTzF4sQeNYxwtvBzf6Eg4GtlesS94HOvTudUeyK2WXAaIfmDgsyslYrRBeFIlsi54AYsFGUuhmvrQ==}
     engines: {node: '>= 0.4'}
 
+  sortablejs@1.15.7:
+    resolution: {integrity: sha512-Kk8wLQPlS+yi1ZEf48a4+fzHa4yxjC30M/Sr2AnQu+f/MPwvvX9XjZ6OWejiz8crBsLwSq8GHqaxaET7u6ux0A==}
+
   source-map-js@1.2.2:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
     engines: {node: '>=0.10.0'}
@@ -2197,6 +2209,8 @@ snapshots:
       '@types/node': 22.20.5
 
   '@types/stats.js@0.17.4': {}
+
+  '@types/sortablejs@1.15.9': {}
 
   '@types/three@0.174.0':
     dependencies:
@@ -3237,6 +3251,8 @@ snapshots:
       side-channel-list: 1.0.1
       side-channel-map: 1.0.1
       side-channel-weakmap: 1.0.2
+
+  sortablejs@1.15.7: {}
 
   source-map-js@1.2.2: {}
 

@@ -1,6 +1,6 @@
 {
   "name": "music-share",
-  "version": "1.4.8",
+  "version": "1.4.9",
   "private": true,
   "workspaces": [
     "packages/*",
@@ -28,7 +28,10 @@
     "release:notes": "node scripts/version.mjs --notes",
     "test:version": "node --test scripts/version.test.mjs",
     "test:ci-release": "node --test scripts/ci-release.test.mjs",
-    "test:updater": "node --test scripts/updater-config.test.mjs"
+    "test:updater": "node --test scripts/updater-config.test.mjs",
+    "build:apk": "npm run build:apk -w @music-share/client",
+    "dev:apk": "npm run dev:apk -w @music-share/client",
+    "test:apk": "node --test scripts/apk-entry.test.mjs && vitest run apps/client/test/apk-business.test.ts apps/client/test/apk-layout.test.ts apps/client/test/saved-login.test.ts apps/client/test/logout.test.ts"
   },
   "devDependencies": {
     "vitest": "^5.0.3",

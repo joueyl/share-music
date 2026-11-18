@@ -3,10 +3,19 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { h, nextTick, reactive } from 'vue';
 import { all, node, renderer, text } from './helpers/vue-host';
 import QueueDrawer from '../src/components/QueueDrawer.vue';
-import { moveQueueTrack } from '../src/queue-order';
+import Sortable from 'sortablejs';
 import { readFileSync } from 'node:fs';
 import { parse } from '@vue/compiler-sfc';
-const f=vi.hoisted(()=>({app:null as any,target:null as any}));
+const f=vi.hoisted(()=>({app:null as any,target:null as any,sortables:[] as any[]}));
+vi.mock('sortablejs',()=>({default:class {
+ options:any;ids=['a','b','c','d'];sort=vi.fn((ids:string[])=>{this.ids=[...ids];});destroy=vi.fn();
+ constructor(_el:any,options:any){this.options=options;f.sortables.push(this);}
+ toArray(){return [...this.ids];}
+}}));
+const sortable=()=>f.sortables.at(-1);
+function choose(id='a'){const instance=sortable();instance.item={dataset:{trackId:id},querySelector:()=>null,classList:{remove:vi.fn()},style:{willChange:'transform',transform:'translateY(20px)'}};instance.options.onChoose({item:instance.item});return instance;}
+function start(id='a'){const instance=choose(id);instance.options.onStart({item:{dataset:{trackId:id}}});return instance;}
+function drop(instance=sortable(),ids=['b','c','a','d']){instance.ids=ids;instance.options.onEnd();}
 vi.mock('../src/store',()=>({useApp:()=>f.app}));
 vi.mock('../src/bridge',()=>({favoriteSongs:vi.fn(async()=>[]),setFavoriteSong:vi.fn(async()=>[]),favoriteTrackReference:(t:any)=>t?.neteaseId?{source:'netease',id:t.neteaseId}:t?.qqId?{source:'qq',id:t.qqId}:null,__v_isRef:false,playingTrackCover:()=>''}));
 vi.mock('../src/useDialogFocus',()=>({useDialogFocus:()=>{}}));
@@ -14,6 +23,7 @@ vi.mock('vue',async original=>{const vue=await original<typeof import('vue')>();
 let mounted:ReturnType<typeof renderer.createApp>;
 const settle=async()=>{await nextTick();await nextTick();};
 beforeEach(()=>{
+ f.sortables=[];Object.assign(Sortable,{dragged:null,ghost:null,clone:null});
  vi.stubGlobal('document',{elementFromPoint:()=>f.target,addEventListener:vi.fn(),removeEventListener:vi.fn()});vi.stubGlobal('requestAnimationFrame',vi.fn(()=>1));vi.stubGlobal('cancelAnimationFrame',vi.fn());
  f.app=reactive({host:true,connected:true,pendingActions:0,user:{id:'host'},permission:{skip:true,enqueue:true,playbackMode:true},room:{id:'room',playbackMode:'queue',stateVersion:1,pending:null,members:[],playback:{sourceId:'b'},playlist:['a','b','c','d'].map(id=>({id,name:id,available:true,providerId:'host',durationMs:100000}))},act:vi.fn().mockResolvedValue(undefined)});
 });
@@ -23,7 +33,6 @@ async function mount(){const root=node('root');mounted=renderer.createApp(QueueD
  Object.assign(dialog,{setPointerCapture:vi.fn(),hasPointerCapture:()=>false});Object.assign(list,{contains:()=>true,getBoundingClientRect:()=>({top:0,bottom:400}),scrollTop:0});
  return {root,dialog,list};}
 const grip=(root:any,id:string)=>all(root).find(n=>n.props['aria-label']===`拖动调整 ${id} 的顺序`);
-const pointer=(y:number)=>({pointerId:1,button:0,clientX:100,clientY:y,preventDefault:vi.fn(),currentTarget:{focus:vi.fn()}});
 it('keeps a stable, themed queue scrollbar without disabling scrolling or drag sorting',()=>{
  const {descriptor}=parse(readFileSync(new URL('../src/components/QueueDrawer.vue',import.meta.url),'utf8'));
  const css=descriptor.styles.find(s=>s.scoped)!.content;
@@ -32,37 +41,53 @@ it('keeps a stable, themed queue scrollbar without disabling scrolling or drag s
  expect(css).toContain('::-webkit-scrollbar-thumb:hover');expect(css).toContain('::-webkit-scrollbar-thumb:active');
  expect(css).toContain('forced-colors:active');expect(css).not.toMatch(/scrollbar-width\s*:\s*none|overflow(?:-y)?\s*:\s*hidden/);
 });
-it('moves queue IDs without losing the current track or any other item',()=>{
- expect(moveQueueTrack(['a','b','c','d'],'a','c',true)).toEqual(['b','c','a','d']);
- expect(moveQueueTrack(['a','b','c','d'],'d','a')).toEqual(['d','a','b','c']);
- expect(moveQueueTrack(['a','b'],'missing','b')).toEqual(['a','b']);
-});
-it('shows the complete compact queue, including the current track, and commits a drag only on release',async()=>{
- const {root,dialog}=await mount();expect(all(root).filter(n=>n.props['data-track-id'])).toHaveLength(4);expect(text(root)).toContain('正在播放');
- grip(root,'a').props.onPointerdown(pointer(20));
- f.target={closest:()=>({dataset:{trackId:'c'},getBoundingClientRect:()=>({top:100,height:40})})};
- dialog.props.onPointermove(pointer(140));await settle();expect(f.app.act).not.toHaveBeenCalled();
- await dialog.props.onPointerup(pointer(140));
+it('uses SortableJS fallback handles and internal edge auto-scroll without motion',async()=>{
+ const {root,list}=await mount();
+ expect(sortable().options).toMatchObject({forceFallback:true,fallbackTolerance:6,handle:'.queue-drag-handle',draggable:'.queue-row',dataIdAttr:'data-track-id',forceAutoScrollFallback:true,bubbleScroll:false,scrollSensitivity:40,scrollSpeed:14,animation:0});
+ expect(all(root).filter(n=>n.props['data-track-id'])).toHaveLength(4);expect(text(root)).toContain('正在播放');
+ const instance=start();expect(f.app.act).not.toHaveBeenCalled();drop(instance);
+ expect(instance.sort).toHaveBeenCalledWith(['a','b','c','d']);
  expect(f.app.act).toHaveBeenCalledWith({type:'reorder',payload:{trackIds:['b','c','a','d']}});
+ expect(f.app.room.playlist.map((t:any)=>t.id)).toEqual(['a','b','c','d']);
 });
-it('cancels on room-version changes, pointer cancellation or an ordinary click',async()=>{
- const {root,dialog}=await mount();grip(root,'a').props.onPointerdown(pointer(20));await dialog.props.onPointerup(pointer(20));expect(f.app.act).not.toHaveBeenCalled();
- grip(root,'a').props.onPointerdown(pointer(20));f.app.room.stateVersion++;await settle();await dialog.props.onPointerup(pointer(140));expect(f.app.act).not.toHaveBeenCalled();
- grip(root,'a').props.onPointerdown(pointer(20));dialog.props.onPointercancel();expect(f.app.act).not.toHaveBeenCalled();
+it('cancels stale versions, pointer cancellation and ordinary clicks without committing',async()=>{
+ await mount();let instance=choose();instance.options.onUnchoose();drop(instance);expect(f.app.act).not.toHaveBeenCalled();
+ instance=start();f.app.room.stateVersion++;await settle();drop(instance);expect(instance.destroy).toHaveBeenCalled();expect(f.app.act).not.toHaveBeenCalled();
+ instance=start();const cancel=(document.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(c=>c[0]==='pointercancel')![1];cancel();drop(instance);
+ expect(instance.destroy).toHaveBeenCalled();expect(instance.sort).toHaveBeenCalledWith(['a','b','c','d']);expect(f.app.act).not.toHaveBeenCalled();
 });
 it('disables ordering without playlist control, disconnected clients, pending transitions and unconfirmed actions',async()=>{
  const {root}=await mount();
  for(const change of [()=>{f.app.connected=false;},()=>{f.app.connected=true;f.app.room.pending={id:'pending'};},()=>{f.app.room.pending=null;f.app.pendingActions=1;}]){
-  change();await settle();expect(grip(root,'a').props.disabled).toBe(true);grip(root,'a').props.onPointerdown(pointer(20));expect(f.app.act).not.toHaveBeenCalled();
+  const instance=sortable();change();await settle();expect(grip(root,'a').props.disabled).toBe(true);expect(instance.destroy).toHaveBeenCalled();expect(f.app.act).not.toHaveBeenCalled();
  }
  f.app.pendingActions=0;f.app.host=false;await settle();expect(grip(root,'a')).toBeDefined();f.app.permission.enqueue=false;await settle();expect(grip(root,'a')).toBeUndefined();
 });
-it('auto-scrolls near an edge and stops the animation when the gesture is cancelled',async()=>{
- const {root,dialog,list}=await mount();grip(root,'a').props.onPointerdown(pointer(20));f.target=null;
- dialog.props.onPointermove(pointer(395));
- const frame=(requestAnimationFrame as ReturnType<typeof vi.fn>).mock.calls[0][0];frame();
- expect(list.scrollTop).toBeGreaterThan(0);
- dialog.props.onPointercancel();expect(cancelAnimationFrame).toHaveBeenCalled();expect(f.app.act).not.toHaveBeenCalled();
+it('removes fallback preview and classes explicitly when cancellation destroys the library',async()=>{
+ await mount();const instance=start(),ghost={remove:vi.fn()},clone={remove:vi.fn()};Object.assign(Sortable,{dragged:instance.item,ghost,clone});
+ const cancel=(document.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(c=>c[0]==='pointercancel')![1];cancel();
+ expect(ghost.remove).toHaveBeenCalledOnce();expect(clone.remove).toHaveBeenCalledOnce();expect(instance.item.classList.remove).toHaveBeenCalledWith('is-dragging','sortable-chosen','sortable-drag');
+ expect(instance.item.style).toMatchObject({willChange:'',transform:''});expect(instance.destroy).toHaveBeenCalledOnce();expect(f.app.act).not.toHaveBeenCalled();
+});
+it('rejects malformed or unchanged orders and preserves keyboard adjustment',async()=>{
+ const {root}=await mount();drop(start(),['a','b','c','d']);drop(start(),['a','a','c','d']);drop(start(),['a','b','c']);drop(start(),['a','b','c','unknown']);expect(f.app.act).not.toHaveBeenCalled();
+ for(const handler of grip(root,'a').props.onKeydown)handler({key:'ArrowDown',altKey:true,preventDefault:vi.fn()});await settle();
+ expect(f.app.act).toHaveBeenCalledWith({type:'reorder',payload:{trackIds:['b','a','c','d']}});
+});
+it('restores the order after an unconfirmed command and allows the next drag',async()=>{
+ await mount();f.app.act.mockImplementationOnce(async()=>{});const instance=start();drop(instance);await settle();
+ expect(instance.sort).toHaveBeenCalledWith(['a','b','c','d']);expect(f.app.room.playlist.map((t:any)=>t.id)).toEqual(['a','b','c','d']);
+ drop(start('d'),['d','a','b','c']);expect(f.app.act).toHaveBeenLastCalledWith({type:'reorder',payload:{trackIds:['d','a','b','c']}});
+});
+it('rejects a stale drop even before the version watcher runs, and cancels active drags on disconnect',async()=>{
+ await mount();let instance=start();f.app.room.stateVersion++;drop(instance);expect(f.app.act).not.toHaveBeenCalled();await settle();
+ instance=start();f.app.connected=false;await settle();drop(instance);expect(instance.destroy).toHaveBeenCalled();expect(f.app.act).not.toHaveBeenCalled();
+});
+it('destroys sorting and rejects late drops on tab changes, closing and unmounting',async()=>{
+ const {root}=await mount();let instance=start();all(root).find(n=>n.type==='button'&&text(n)==='已播放').props.onClick();await settle();drop(instance);expect(instance.destroy).toHaveBeenCalled();
+ all(root).find(n=>n.type==='button'&&text(n)==='当前队列').props.onClick();await settle();instance=start();
+ all(root).find(n=>n.props['aria-label']==='关闭播放列表').props.onClick();await settle();drop(instance);expect(instance.destroy).toHaveBeenCalled();expect(f.app.act).not.toHaveBeenCalled();
+ mounted.unmount();expect(document.removeEventListener).toHaveBeenCalledWith('pointercancel',expect.any(Function),true);
 });
 const row=(root:any,id:string)=>all(root).find(n=>n.props['data-track-id']===id);
 const doubleClick=(interactive=false)=>({preventDefault:vi.fn(),target:{closest:()=>interactive?{}:null}});
@@ -88,9 +113,9 @@ it('guards double-click playback against permission, connection, pending actions
 it('does not play when double-clicking controls, dragging, or immediately after dropping a song',async()=>{
  const {root,dialog}=await mount();
  row(root,'a').props.onDblclick(doubleClick(true));await settle();expect(f.app.act).not.toHaveBeenCalled();
- grip(root,'a').props.onPointerdown(pointer(20));row(root,'a').props.onDblclick(doubleClick());await settle();expect(f.app.act).not.toHaveBeenCalled();
- dialog.props.onPointermove(pointer(140));await settle();await dialog.props.onPointerup(pointer(140));
- row(root,'a').props.onDblclick(doubleClick());await settle();expect(f.app.act).not.toHaveBeenCalled();
+ choose();row(root,'a').props.onDblclick(doubleClick());await settle();expect(f.app.act).not.toHaveBeenCalled();
+ sortable().options.onStart({item:{dataset:{trackId:"a"}}});drop();await settle();
+ f.app.act.mockClear();row(root,'a').props.onDblclick(doubleClick());await settle();expect(f.app.act).not.toHaveBeenCalled();
 });
 it('coalesces repeated activation while a playback command is being sent',async()=>{
  const {root}=await mount();let finish!:()=>void;
@@ -141,9 +166,9 @@ it('ignores outside clicks during sorting gestures and the post-drop protection 
  const {root,dialog}=await mount();dialog.contains=()=>false;
  const listener=(document.addEventListener as ReturnType<typeof vi.fn>).mock.calls.find(c=>c[0]==='click'&&c[2]===true)![1];
  const outside={target:{closest:()=>null}};
- grip(root,'a').props.onPointerdown(pointer(20));listener(outside);await settle();
+ choose();listener(outside);await settle();
  expect(all(root).some(n=>n.props.role==='dialog')).toBe(true);
- dialog.props.onPointermove(pointer(140));await dialog.props.onPointerup(pointer(140));listener(outside);await settle();
+ sortable().options.onStart({item:{dataset:{trackId:"a"}}});drop();listener(outside);await settle();
  expect(all(root).some(n=>n.props.role==='dialog')).toBe(true);
 });
 

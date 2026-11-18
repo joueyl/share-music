@@ -1,6 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core';
 
-// Android preview reuses the existing pages and browser transport, not desktop IPC.
+// Independent APK UI shares browser transport and never enables desktop IPC.
 export function isDesktopRuntime(): boolean {
-  return import.meta.env.VITE_ANDROID_PREVIEW !== '1' && isTauri();
+  return import.meta.env.VITE_CLIENT_TARGET !== 'apk' && import.meta.env.VITE_ANDROID_PREVIEW !== '1' && isTauri();
 }
