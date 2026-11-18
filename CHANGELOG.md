@@ -2,6 +2,9 @@
 
 ## [未发布]
 
+### 优化
+- Android 改为 Release 优化构建并继续使用自动 Debug 测试证书：生成 Gradle 工程后仅为 release build type 配置测试签名，关闭应用/JNI 调试和明文 HTTP；Android job 单独启用体积优化、关闭调试信息、剥离符号及 thin LTO，不改变桌面签名与编译参数。产物改为 `android-arm64-release-testsigned`，同步汇总校验与测试签名说明；CI 校验测试证书、不可调试标记及 ARM64 原生库无调试符号，并打印实际体积。不新增正式密钥、升版或覆盖已发布附件；实际 APK 及瘦身体积以本次手动 Actions 结果为准，仍不代表生产签名或实机验收。
+
 ## [1.4.10] - 2026-11-18
 
 ### 优化

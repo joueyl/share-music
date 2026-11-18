@@ -56,6 +56,7 @@ jobs:
           npm run test:packaging
           npm run test:apk
           node --test scripts/configure-android-sdk.test.mjs
+          node --test scripts/configure-android-test-release.test.mjs scripts/check-android-release.test.mjs
           npm test
           npm run build -w @music-share/client
           npm run build:apk
@@ -247,6 +248,12 @@ jobs:
       NDK_VERSION: '27.2.12479018'
       ANDROID_API_LEVEL: '36'
       BUILD_TOOLS_VERSION: '36.0.0'
+      # Android-only Release optimization; desktop build profiles are unchanged.
+      CARGO_PROFILE_RELEASE_DEBUG: '0'
+      CARGO_PROFILE_RELEASE_STRIP: symbols
+      CARGO_PROFILE_RELEASE_OPT_LEVEL: s
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '1'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -281,7 +288,7 @@ jobs:
       - name: Cache Cargo dependencies
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         with:
-          prefix-key: android-rust-v1
+          prefix-key: android-rust-release-testsigned-v1
           workspaces: apps/client/src-tauri -> target
           key: android-arm64-${{ env.NDK_VERSION }}
           cache-bin: 'false'
@@ -297,28 +304,36 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/configure-android-sdk.mjs
-      - name: Build ARM64 debug APK with automatic debug signing
+          node scripts/configure-android-test-release.mjs
+      - name: Build optimized ARM64 Release APK with test signing
         working-directory: apps/client
         run: |
           set -euo pipefail
-          npm run tauri -- android build --ci --debug --apk --target aarch64 --config src-tauri/tauri.android.conf.json
+          npm run tauri -- android build --ci --apk --target aarch64 --config src-tauri/tauri.android.conf.json
           node ../../scripts/check-apk-build.mjs
-      - name: Verify and collect debug APK
+      - name: Verify Release mode, stripped symbols and test certificate
         run: |
           set -euo pipefail
-          mapfile -d '' apks < <(find apps/client/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -path '*/debug/*' -print0)
+          mapfile -d '' apks < <(find apps/client/src-tauri/gen/android/app/build/outputs/apk -type f -name '*.apk' -path '*/release/*' -print0)
           if [ "${#apks[@]}" -ne 1 ]; then
-            echo '::error::Expected exactly one ARM64 debug APK; refusing missing or ambiguous outputs'
+            echo '::error::Expected exactly one ARM64 Release APK; refusing missing or ambiguous outputs'
             exit 1
           fi
           tools="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"
-          "$tools/apksigner" verify --verbose "${apks[0]}"
+          "$tools/apksigner" verify --verbose --print-certs "${apks[0]}" > "$RUNNER_TEMP/android-test-certificate.txt"
+          grep -E '^Signer #1 certificate DN:.*CN=Android Debug' "$RUNNER_TEMP/android-test-certificate.txt"
           "$tools/zipalign" -c 4 "${apks[0]}"
+          "$tools/aapt" dump badging "${apks[0]}" > "$RUNNER_TEMP/android-release-badging.txt"
+          if grep -q '^application-debuggable' "$RUNNER_TEMP/android-release-badging.txt"; then
+            echo '::error::Release APK must not be debuggable'
+            exit 1
+          fi
+          node scripts/check-android-release.mjs "${apks[0]}"
           node scripts/ci-release.mjs collect-android "${apks[0]}"
-      - name: Upload debug APK and checksums
+      - name: Upload test-signed Release APK and checksums
         uses: actions/upload-artifact@v4
         with:
-          name: music-share-android-arm64-debug-${{ steps.release.outputs.version }}
+          name: music-share-android-arm64-release-testsigned-${{ steps.release.outputs.version }}
           path: release-artifacts/
           if-no-files-found: error
           retention-days: 30

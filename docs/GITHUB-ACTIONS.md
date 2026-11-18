@@ -1,6 +1,6 @@
 # GitHub Actions 自动打包
 
-桌面与 Android APK 现共用一个版本工作流。main 只运行检查；匹配的版本标签统一构建四个桌面目标和 Android ARM64 Debug APK，全部成功后汇总到同一 Release 草稿。Android 仍是 Debug 试用包，不代表正式签名或实机验收，见 [Android APK 配置与前置条件](ANDROID-APK.md)。
+桌面与 Android APK 现共用一个版本工作流。main 只运行检查；匹配的版本标签统一构建四个桌面目标和 Android ARM64 Release（测试签名）APK，全部成功后汇总到同一 Release 草稿。Android 为 Release 优化构建，但仍使用 Debug 测试证书，不代表正式签名或实机验收，见 [Android APK 配置与前置条件](ANDROID-APK.md)。
 
 工作流：`.github/workflows/desktop-release.yml`，名称为 **Client installers**。现覆盖 Windows x64、Linux x64 和 macOS Intel / Apple Silicon 四个桌面目标及 Android ARM64，并支持配置签名后的应用内更新。
 
@@ -34,7 +34,7 @@ git tag v0.1.2
 git push origin v0.1.2
 ```
 
-标签必须与项目版本完全一致。四个桌面目标和 Android 全部成功后，汇总任务严格核对五份 Artifact 的版本、完整文件集、统一说明及真实 SHA-256；还检查 APK 独立入口标记和不可省略的 Debug 警告。缺少 Android、混入旧包、签名/校验失败或说明不一致，都不会创建草稿。通过后创建同名 **Draft Release**，包含六个安装包（Windows 一个、Linux 两个、macOS 两个及 Android 一个）、ANDROID-DEBUG-NOTICE.txt、SHA256SUMS.txt 和 RELEASE-NOTES.md，共九个附件；启用桌面签名更新时加上两份 macOS 更新压缩包、四份签名和 latest.json，共十六个附件。
+标签必须与项目版本完全一致。四个桌面目标和 Android 全部成功后，汇总任务严格核对五份 Artifact 的版本、完整文件集、统一说明及真实 SHA-256；还检查 APK 独立入口标记和不可省略的测试签名警告。缺少 Android、混入旧包、签名/校验失败或说明不一致，都不会创建草稿。通过后创建同名 **Draft Release**，包含六个安装包（Windows 一个、Linux 两个、macOS 两个及 Android 一个）、ANDROID-TEST-SIGNATURE-NOTICE.txt、SHA256SUMS.txt 和 RELEASE-NOTES.md，共九个附件；启用桌面签名更新时加上两份 macOS 更新压缩包、四份签名和 latest.json，共十六个附件。
 
 Android APK 不是桌面 Tauri Updater 目标，latest.json 仍只含四个桌面平台；APK 不伪造更新签名或生产签名。发布者验收后再点击 **Publish release** 公开整个版本。恢复发布也必须来自同一标签提交的完整五目标构建，并重新校验，不允许跳过 Android。
 
@@ -48,7 +48,7 @@ Android APK 不是桌面 Tauri Updater 目标，latest.json 仍只含四个桌�
 | Linux | ubuntu-22.04 | x64 | .deb、.AppImage |
 | macOS Intel | macos-15-intel | x64 | .dmg |
 | macOS Apple Silicon | macos-15 | arm64 | .dmg |
-| Android 试用 | ubuntu-22.04 | ARM64 | -android-arm64-debug.apk |
+| Android 试用 | ubuntu-22.04 | ARM64 | -android-arm64-release-testsigned.apk |
 
 对应系统原生编译，不交叉编译；macOS 两种架构分别发布，不是 Universal Binary。Linux ARM64 尚未配置。Runner 标签参考 [GitHub 官方镜像列表](https://github.com/actions/runner-images#available-images)，今后可能随镜像生命周期调整。
 

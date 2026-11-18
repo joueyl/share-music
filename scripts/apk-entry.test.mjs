@@ -27,11 +27,14 @@ test('business controllers are single-source and consumed by both page trees',()
   ['useRoomSession','views/Room.vue','apk/pages/ListenPage.vue'],
  ]){assert.match(read('apps/client/src/'+desktop),new RegExp(hook+'\\(\\)'));assert.match(read('apps/client/src/'+apk),new RegExp(hook+'\\(\\)'));assert.match(read('apps/client/src/features/'+hook+'.ts'),new RegExp('export function '+hook));}
 });
-test('Actions checks both clients before packaging the explicit Android config and uploads a debug artifact',()=>{
+test('Actions builds stripped non-debuggable Release APKs with test signing only',()=>{
  assert.equal(existsSync(new URL('../.github/workflows/android-apk.yml',import.meta.url)),false);
- const yaml=read('.github/workflows/desktop-release.yml');for(const expected of ['workflow_dispatch:','build:apk','check-apk-build.mjs','needs: verify','src-tauri/tauri.android.conf.json','apksigner','upload-artifact@v4'])assert.ok(yaml.includes(expected),expected);
+ const yaml=read('.github/workflows/desktop-release.yml').replace(/\r\n/g,'\n');for(const expected of ['workflow_dispatch:','build:apk','check-apk-build.mjs','needs: verify','src-tauri/tauri.android.conf.json','apksigner','upload-artifact@v4'])assert.ok(yaml.includes(expected),expected);
  const android=yaml.slice(yaml.indexOf('  android:\n'),yaml.indexOf('  release-draft:\n'));
  assert.doesNotMatch(android,/TAURI_SIGNING_PRIVATE_KEY|KEYSTORE_PASSWORD|gh release/);
+ assert.doesNotMatch(android,/android build[^\n]*--debug|\*\/debug\/\*/);
+ for(const expected of ['configure-android-test-release.mjs','check-android-release.mjs','CARGO_PROFILE_RELEASE_DEBUG: \'0\'','CARGO_PROFILE_RELEASE_STRIP: symbols','CARGO_PROFILE_RELEASE_OPT_LEVEL: s','CARGO_PROFILE_RELEASE_LTO: thin','CARGO_PROFILE_RELEASE_CODEGEN_UNITS: \'1\'','*/release/*','application-debuggable','CN=Android Debug','android-arm64-release-testsigned'])assert.ok(android.includes(expected),expected);
+ const desktop=yaml.slice(yaml.indexOf('  build:\n'),yaml.indexOf('  android:\n'));assert.doesNotMatch(desktop,/CARGO_PROFILE_RELEASE/);
  assert.match(yaml,/needs: \[build, build-unix, android\]/);
 });
 test('Android enables only scoped secure-login IPC with Keystore ciphertext and no plaintext fallback',()=>{

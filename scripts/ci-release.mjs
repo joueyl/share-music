@@ -39,9 +39,9 @@ export const RELEASE_TARGETS={
  'macos-x64':[{directory:'dmg',extension:'.dmg'}],
  'macos-arm64':[{directory:'dmg',extension:'.dmg'}],
 };
-export const ANDROID_TARGET='android-arm64-debug';
-export const ANDROID_NOTICE_NAME='ANDROID-DEBUG-NOTICE.txt';
-export const ANDROID_NOTICE='Android ARM64 DEBUG TEST BUILD — experimental, not a production-signed APK.\nEach fresh runner may use a different debug key; replacing a build may require uninstalling and will erase local data.\nNo Android automatic updater, background-playback or real-device acceptance is implied.\n';
+export const ANDROID_TARGET='android-arm64-release-testsigned';
+export const ANDROID_NOTICE_NAME='ANDROID-TEST-SIGNATURE-NOTICE.txt';
+export const ANDROID_NOTICE='Android ARM64 optimized RELEASE BUILD with a temporary DEBUG TEST CERTIFICATE, not a production signing identity.\nRelease mode disables debugging and strips native debug information; test signing does not make this a debug build.\nEach fresh runner may use a different test key; replacing a build may require uninstalling and will erase local data.\nNo Android automatic updater, background-playback, app-store approval or real-device acceptance is implied.\n';
 const UPDATE_TARGETS={
  'windows-x64':{platform:'windows-x86_64',directory:'nsis',extension:'.exe'},
  'linux-x64':{platform:'linux-x86_64',directory:'appimage',extension:'.AppImage'},
@@ -63,7 +63,7 @@ async function sha256(path){
  await finished(stream,{cleanup:true}); // Release Windows file handles before moving artifacts.
  return hash.digest('hex');
 }
-function notesFor(root,version){return `# 共鸣 Music Share v${version}\n\n${releaseNotes(readFileSync(join(root,'CHANGELOG.md'),'utf8'),version)}\n## Android 试用包\n\n本版本包含 ARM64 Debug APK，尚非固定生产密钥签名。不同构建的签名可能变化，覆盖安装失败时需卸载，卸载会丢失本地数据。详见 ${ANDROID_NOTICE_NAME}；构建通过不代表实机或后台播放验收通过。\n`;}
+function notesFor(root,version){return `# 共鸣 Music Share v${version}\n\n${releaseNotes(readFileSync(join(root,'CHANGELOG.md'),'utf8'),version)}\n## Android 试用包\n\n本版本包含 ARM64 Release 优化 APK，但使用 Debug 测试证书，尚非固定生产密钥签名。构建模式与签名身份不同：本包关闭调试并剥离原生调试符号。不同构建的测试签名可能变化，覆盖安装失败时需卸载，卸载会丢失本地数据。详见 ${ANDROID_NOTICE_NAME}；构建通过不代表实机或后台播放验收通过。\n`;}
 function emptyOutput(root){const output=join(root,'release-artifacts');mkdirSync(output,{recursive:true});if(readdirSync(output).length)throw new Error('release-artifacts 非空，请使用干净的构建目录');return output;}
 export async function collectRelease(root,target='windows-x64',env=process.env){
  const {enabled,key}=updaterSettings(root,env),formats=releaseFormats(target,enabled),version=checkVersions(root),files=[];
@@ -137,7 +137,7 @@ export async function mergeRelease(root,env=process.env){
  if(androidEntries.some(e=>!e.isFile())||JSON.stringify(androidEntries.map(e=>e.name).sort())!==JSON.stringify(expectedAndroid))throw new Error('Android 附件不完整或含多余文件');
  if(readFileSync(join(androidDirectory,'RELEASE-NOTES.md'),'utf8').replace(/\r\n/g,'\n')!==notes)throw new Error('Android 版本说明不匹配');
  validateAndroidMarker(readFileSync(join(androidDirectory,'client-target.json'),'utf8'));
- if(readFileSync(join(androidDirectory,ANDROID_NOTICE_NAME),'utf8')!==ANDROID_NOTICE)throw new Error('Android Debug 试用说明不匹配');
+ if(readFileSync(join(androidDirectory,ANDROID_NOTICE_NAME),'utf8')!==ANDROID_NOTICE)throw new Error('Android 测试签名说明不匹配');
  const androidFiles=[];
  for(const name of androidNames){const source=join(androidDirectory,name);androidFiles.push({source,name,hash:await sha256(source)});}
  const androidChecksum=androidFiles.map(f=>`${f.hash}  ${f.name}\n`).join('');
@@ -156,7 +156,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   if(process.argv.length<3||process.argv.length>4||(process.argv[3]&&!['collect','collect-android'].includes(process.argv[2])))throw new Error('用法：node scripts/ci-release.mjs prepare|collect [平台]|collect-android APK路径|merge');
   if(process.argv[2]==='prepare'){const result=prepareRelease(root);console.log(`已验证 v${result.version} 的版本、标签和生产服务配置`);}
   else if(process.argv[2]==='collect'){const target=process.argv[3]??'windows-x64';validateBuildHost(target);const result=await collectRelease(root,target);console.log(`已收集 v${result.version} ${result.target} 安装包、校验文件和更新说明：${result.output}`);}
-  else if(process.argv[2]==='collect-android'){const result=await collectAndroidRelease(root,process.argv[3]);console.log(`已收集 v${result.version} Android Debug APK 和试用说明：${result.output}`);}
+  else if(process.argv[2]==='collect-android'){const result=await collectAndroidRelease(root,process.argv[3]);console.log(`已收集 v${result.version} Android 测试签名 Release APK 和试用说明：${result.output}`);}
   else if(process.argv[2]==='merge'){const result=await mergeRelease(root);console.log(`已验证并汇总 v${result.version} 的 ${result.files.length} 个附件文件：${result.output}`);}
   else throw new Error('未知命令');
  }catch(error){console.error(error.message);process.exitCode=1;}

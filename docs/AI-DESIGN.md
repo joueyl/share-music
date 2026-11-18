@@ -159,7 +159,7 @@
 
 ## 7. 技术与真实数据边界
 
-- 桌面与 Android 版本打包共用 Client installers 工作流：main 只检查，标签或手动运行才生成安装包；Release 汇总及恢复必须包含四个桌面目标和 Android。APK 保留 Debug 试用说明，不加入桌面 updater；详细规则见 [GitHub Actions](GITHUB-ACTIONS.md)。
+- 桌面与 Android 版本打包共用 Client installers 工作流：main 只检查，标签或手动运行才生成安装包；Release 汇总及恢复必须包含四个桌面目标和 Android。APK 使用 Release 优化构建但保留测试签名说明，不加入桌面 updater；详细规则见 [GitHub Actions](GITHUB-ACTIONS.md)。
 
 - Android 使用独立 APK 页面及浏览器 HTTP/WebSocket/唯一 Audio 路径；禁用桌面 IPC、原生音频缓存、桌面更新和窗口按钮，仅向本地 main 窗口开放独立安全登录插件。Mac 记住密码使用钥匙串，Android 使用 Keystore + AES-GCM 和不备份私有文件，网页不自行持久化密码，详见[安全记住密码](SAVED-LOGIN.md)。仍不提供安卓原生通知、后台/锁屏保活或系统媒体控制；前端与隔离测试通过不等于原生编译、钥匙串/Keystore 或实机验收通过。
 

@@ -75,4 +75,4 @@ npm run tauri -w @music-share/client -- signer generate -w "$env:USERPROFILE\.ta
 
 验证命令：`npm run test:updater`、`npm run test:ci-release`、`npm test`。测试使用临时生成的测试签名，不能替代真实 GitHub Actions 构建、签名发布和各系统升级验收。
 
-Android Debug APK 作为同版 Release 的试用附件，不加入桌面 latest.json，也不使用 Tauri 桌面更新签名代替 APK 签名。
+Android Release 测试签名 APK 作为同版 Release 的试用附件，不加入桌面 latest.json，也不使用 Tauri 桌面更新签名代替 APK 签名。

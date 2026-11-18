@@ -168,7 +168,7 @@ Web 页面提供窄屏顶部导航、底部全局播放器、触控控制和窄�
 
 “版本与更新日志”可查看当前版本和内置更新记录。使用 `npm run version:check` 检查版本一致性，`npm run release:version -- patch` 准备下一个修订版本，`npm run release:notes -- 版本号` 导出 GitHub Release 说明。详细流程见 [版本发布说明](docs/RELEASING.md)，变更记录见 [更新日志](CHANGELOG.md)。版本命令不自动发布 GitHub；已接入 joueyl/share-music 的桌面更新，首次配置签名后由 Actions 自动生成更新文件，详见 [GitHub 更新配置](docs/UPDATER.md)。
 
-仓库附带 **Client installers** GitHub Actions 工作流：main 只运行检查；手动或版本标签打包 Windows x64、Linux x64、macOS Intel / Apple Silicon 及 Android ARM64 Debug APK，标签的五个目标全部成功并通过校验才会创建包含手机包的统一 Release 草稿；Android 保留试用标识和签名限制。配置方式、产物下载、macOS 签名限制与首次运行说明见 [GitHub Actions 自动打包](docs/GITHUB-ACTIONS.md)。
+仓库附带 **Client installers** GitHub Actions 工作流：main 只运行检查；手动或版本标签打包 Windows x64、Linux x64、macOS Intel / Apple Silicon 及 Android ARM64 Release（测试签名）APK，标签的五个目标全部成功并通过校验才会创建包含手机包的统一 Release 草稿；Android 保留试用标识和签名限制。配置方式、产物下载、macOS 签名限制与首次运行说明见 [GitHub Actions 自动打包](docs/GITHUB-ACTIONS.md)。
 
 ## MySQL 数据迁移与 API（2026-10-29）
 

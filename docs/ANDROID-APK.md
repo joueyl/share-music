@@ -34,7 +34,7 @@ Android 环境初始化显式指定 `setup-android` 的 `packages: platform-tool
 1. CI 使用 Node 24、Rust 1.90.0、Java 17、NDK 27.2.12479018，固定安装 Android API 36 与 build-tools 36.0.0，目标 ARM64。初始化工程后由 `scripts/configure-android-sdk.mjs` 将 `compileSdk`、`targetSdk` 和 `buildToolsVersion` 同步为安装版本，不再跟随 CLI 模板请求不可获取的 API 37；保留 `minSdk`。模板字段缺失或重复时明确失败，不盲目继续。后续插件或原生依赖的兼容性仍需远端编译验证。
 2. `npm ci` 后运行 `tauri android init --ci --skip-targets-install`，每次从当前锁定 CLI 生成试用工程，避免提交生成文件和本机路径；后续需要定制 Manifest/Kotlin 时再改为维护已提交工程。
 3. `tauri.android.conf.json` 指定 `npm run build:apk`、`frontendDist: ../dist-apk`；Vite 在 `android-preview` 下构建 `apk.html` 并输出为 `index.html`。`.env.android-preview` 仅含公开的运行时开关。CI 使用校验过的服务地址；显式 `VITE_SERVER_URL` 始终优先；未配置时，仅 APK 打包回退到公开的生产服务地址，`dev:apk` 使用独立的 `apk-development` 模式及公开本地地址配置，默认使用 `http://127.0.0.1:3000`，不会读取生产后端作为开发默认值。
-4. 前置 verify job 对两端运行类型、客户端测试、入口/SDK 配置检查及两个构建；通过后才执行 `tauri android build --ci --debug --apk --target aarch64 --config src-tauri/tauri.android.conf.json`。打包后再次检查 `dist-apk` 标记。新合并工作流仍需远端运行验证；本地原生开发需先安装 SDK/NDK/Java 与 Rust Android target。
+4. 前置 verify job 对两端运行类型、客户端测试、入口/SDK/测试签名配置及两个构建；生成 Gradle 工程后追加 Release 专用测试签名配置，通过后执行 `tauri android build --ci --apk --target aarch64 --config src-tauri/tauri.android.conf.json`。打包后再次检查 `dist-apk` 标记。Release 的 Rust 配置只在 Android job 中启用 `opt-level=s`、`debug=0`、`strip=symbols`、thin LTO 和单 codegen unit，不改变桌面构建。本地原生开发需先安装 SDK/NDK/Java 与 Rust Android target。
 
 ## 本地命令
 
@@ -47,7 +47,7 @@ Android 环境初始化显式指定 `setup-android` 的 `packages: platform-tool
 
 ## GitHub 配置
 
-当前使用 **Debug 自动签名**，不需要配置 Android 签名 Secrets。Gradle 在临时 runner 上自动生成/使用调试密钥；工作流不下载公共私钥、不保存或上传 debug keystore，也不读取正式签名 Secrets。
+当前使用 **Release 优化构建 + Debug 测试证书签名**，两者相互独立：构建命令不带 `--debug`，Gradle 的 release build type 显式使用 `signingConfigs.getByName("debug")`，并设置 `isDebuggable=false`、`isJniDebuggable=false` 与禁止明文 HTTP。不需要配置 Android 签名 Secrets；Gradle 在临时 runner 上自动生成/使用测试密钥，工作流不下载私钥、不保存或上传 keystore，也不读取正式签名 Secrets。
 
 APK 可作为版本 Release 中明确标注的实验性下载附件，但仍仅用于自行安装试用，不用于 Google Play 或冒充正式生产签名。每个全新 runner 的调试密钥可能不同，不能保证后续 APK 可覆盖安装；签名不匹配时需要先卸载旧包，卸载会清除本地数据。正式发布时应另行配置并离线备份固定的私人签名密钥，不使用 debug 密钥发布。
 
@@ -57,8 +57,15 @@ APK 可作为版本 Release 中明确标注的实验性下载附件，但仍仅�
 
 工作流已推送到默认分支后，打开 **Actions → Client installers → Run workflow**，选择包含适配的分支可手动打包全部目标；正式版本随匹配的版本标签构建并进入统一 Release 草稿。
 
-工作流安装依赖，调用显式指定 Android 配置的 `tauri android build --ci --debug --apk --target aarch64`，预期恰好一个 debug APK；保留 Gradle 自动生成的调试签名，用 Android build-tools 验证签名和 ZIP 对齐，并生成 SHA-256 校验清单，不对已签名 APK 二次修改。
+工作流安装依赖，调用显式指定 Android 配置的 `tauri android build --ci --apk --target aarch64`，仅收集 `outputs/apk/**/release/` 中恰好一个 APK；用 Android build-tools 验证签名、证书 DN 为 Android Debug 和 ZIP 对齐，aapt 确认 APK 不可调试，再读取 ARM64 ELF section table，拒绝残留调试信息及静态符号表。输出实际 APK/原生库体积后生成 SHA-256，不二次改写已签名 APK。
 
-成功后下载 `music-share-android-arm64-debug-版本号` Artifact（保留 30 天），包含带 `-debug.apk` 后缀的 APK、`SHA256SUMS-android-arm64-debug.txt`、`ANDROID-DEBUG-NOTICE.txt` 试用限制、`client-target.json` 独立入口标记与版本说明。Release 汇总会再次核对 APK、入口标记、版本说明、Debug 警告和 SHA-256，发布附件含 APK、Debug 说明及统一校验清单；入口标记仅用于构建溯源检查，不混入桌面 updater。只覆盖 ARM64，不含 ARMv7/x86 模拟器包或 AAB。构建及签名校验通过不等于 Android 16 KiB 原生库兼容性、后台播放或应用商店验收通过；本次未执行新统一工作流或进行实机验收，既有独立构建成功不代表新汇总流程已经远端通过。
+成功后下载 `music-share-android-arm64-release-testsigned-版本号` Artifact（保留 30 天），包含带 `-release-testsigned.apk` 后缀的 APK、`SHA256SUMS-android-arm64-release-testsigned.txt`、`ANDROID-TEST-SIGNATURE-NOTICE.txt` 试用限制、`client-target.json` 独立入口标记与版本说明。Release 汇总会再次核对 APK、入口标记、版本说明、测试签名警告和 SHA-256，发布附件含 APK、测试签名说明及统一校验清单；入口标记仅用于构建溯源检查，不混入桌面 updater。只覆盖 ARM64，不含 ARMv7/x86 模拟器包或 AAB。构建及签名校验通过不等于 Android 16 KiB 原生库兼容性、后台播放或应用商店验收通过；优化后的实际体积以本次 Actions 输出为准，不能仅靠测试或配置声称已经缩到指定大小；构建通过也不代表实机验收。
 
 参考：[Tauri Android CLI](https://v2.tauri.app/reference/cli/#android-build)、[Android 前置环境](https://v2.tauri.app/start/prerequisites/#android)、[Android 签名](https://v2.tauri.app/distribute/sign/android/)。
+
+## 本次优化的核验
+
+- `node --test scripts/configure-android-test-release.test.mjs scripts/check-android-release.test.mjs`：隔离验证 Gradle 注入幂等、模板失效拒绝、ARM64/ELF 边界、调试节及符号拒绝。
+- `scripts/configure-android-test-release.mjs` 只追加生成工程中的 Release 配置，不改 Debug 构建、不提交生成工程或任何签名材料。
+- Release 资源优化继续使用锁定 Tauri 模板及其原生插件反射保留规则，不以删除业务能力瘦身。
+- APK 仍是测试签名，不用于 Google Play；固定生产签名、后续可覆盖升级和实机功能是独立验收项。

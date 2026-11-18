@@ -15,6 +15,8 @@ try {
   'apps/client/apk.html',
   'apps/client/src/apk/main.ts',
   'apps/client/src/apk/ApkApp.vue',
+  'scripts/configure-android-test-release.mjs',
+  'scripts/check-android-release.mjs',
  ];
  const missing=required.filter(path=>!existsSync(resolve(root,path)));
  if(!read('apps/client/src-tauri/src/lib.rs').includes('tauri::mobile_entry_point'))missing.push('Rust Android mobile_entry_point');
