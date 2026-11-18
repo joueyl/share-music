@@ -40,6 +40,8 @@ test('Android enables only scoped secure-login IPC with Keystore ciphertext and 
  assert.doesNotMatch(plugin,/getSharedPreferences|localStorage|Log\.|printStackTrace|invoke\.reject\(error/);
  const mac=read('apps/client/src-tauri/src/saved_login.rs');assert.match(mac,/#\[cfg\(target_os = "macos"\)\]/);assert.match(mac,/generic_password/);assert.match(mac,/Err\(error\) if error.code\(\) == NOT_FOUND/);
  assert.match(read('apps/client/src/apk/pages/LoginPage.vue'),/v-model="remember"/);
+ const commands=read('apps/client/src-tauri/plugins/saved-login/src/lib.rs');
+ for(const name of ['can_remember_login','load_saved_login','save_login','clear_saved_login'])assert.match(commands,new RegExp('async fn '+name+'<R: Runtime>\\(_app: tauri::AppHandle<R>'));
 });
 test('APK artifact guard rejects a desktop document and missing assets',()=>{
  const root=mkdtempSync(resolve(tmpdir(),'tone-apk-entry-'));
