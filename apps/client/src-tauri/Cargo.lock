@@ -2341,7 +2341,7 @@ dependencies = [
 
 [[package]]
 name = "music-share-desktop"
-version = "1.4.13"
+version = "1.4.14"
 dependencies = [
  "futures-util",
  "libloading 0.8.9",
@@ -4293,9 +4293,15 @@ dependencies = [
 name = "tauri-plugin-android-playback"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
+ "rustls 0.22.4",
  "serde_json",
  "tauri",
  "tauri-plugin",
+ "tokio",
+ "tokio-tungstenite",
+ "url",
+ "webpki-roots",
 ]
 
 [[package]]

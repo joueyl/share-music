@@ -6,6 +6,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { apiResponse } from './api-response';
 import { CloudPlayer, type PlaybackDiagnostic } from './cloud-player';
 import { AndroidPlayback } from './apk/android-playback';
+import { AndroidRoomSocket, type RoomSocketPort } from './apk/android-room-socket';
 import { AudioWaveform, releaseWaveformAudio } from './audio-waveform';
 import { loadPlaybackSource } from './playback-source';
 import { rememberTrackArtwork, trackArtwork } from './track-artwork';
@@ -15,7 +16,7 @@ import type { ArtworkFrame } from './system-artwork';
 import { listen } from '@tauri-apps/api/event';
 import type { ChatMessage, Command, RoomSnapshot, TrackMetadata } from '@music-share/shared';
 type Listener = (event: any) => void;
-let socket: WebSocket | undefined, token = '', base = '', joinedRoom: string | null = null;
+let socket: RoomSocketPort | undefined, token = '', base = '', joinedRoom: string | null = null;
 let browserGeneration = 0, reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let roomLeft = false;
 const pendingChats = new Set<(error: Error) => void>();
@@ -91,14 +92,24 @@ export async function login(serverUrl: string, name: string, password: string, r
 function connectBrowser() {
   if (!token) return;
   const generation = browserGeneration;
-  const current = new WebSocket(base.replace(/^http/, 'ws') + '/ws');
+  const url = base.replace(/^http/, 'ws') + '/ws';
+  const current: RoomSocketPort = androidPlayback ? new AndroidRoomSocket(url) : new WebSocket(url);
   socket = current;
+  let authenticated = false;
   const active = () => generation === browserGeneration && current === socket && !!token;
-  current.onopen = () => { if (active()) current.send(JSON.stringify({ type: 'auth', token })); };
+  const sendDuringHandshake = (message: unknown) => {
+    const sent = current.send(JSON.stringify(message));
+    if (sent) void sent.catch(() => {});
+  };
+  current.onopen = () => { if (active()) sendDuringHandshake({ type: 'auth', token }); };
   current.onmessage = event => {
     if (!active()) return;
     const message = JSON.parse(event.data);
-    if (message.type === 'authenticated') { emit('connection', { connected: true }); if (joinedRoom) current.send(JSON.stringify({ type: 'join', roomId: joinedRoom })); }
+    if (message.type === 'authenticated') {
+      authenticated = true;
+      emit('connection', { connected: true });
+      if (joinedRoom) sendDuringHandshake({ type: 'join', roomId: joinedRoom });
+    }
     else emit('server-message', message);
   };
   current.onclose = event => {
@@ -106,8 +117,13 @@ function connectBrowser() {
     cancelChats('CHAT_DISCONNECTED');
     if (androidPlayback) clearCloud(); else audio?.pause();
     emit('connection', { connected: false });
-    if (event.code === 4001 || event.code === 4009) { emit('server-message', { type: 'error', error: 'SESSION_EXPIRED' }); return; }
-    reconnectTimer = setTimeout(() => { if (active()) connectBrowser(); }, 2000);
+    if (androidPlayback && event.code === 4003) { emit('server-message', { type: 'error', error: '服务器不允许当前 Android 连接，请检查 HTTPS 地址和允许的来源' }); return; }
+    // 4001 also means a missed heartbeat after authentication. Retry once with
+    // the existing token; a 4001 before auth still means the session is invalid.
+    if (event.code === 4009 || event.code === 4001 && (!androidPlayback || !authenticated)) {
+      emit('server-message', { type: 'error', error: 'SESSION_EXPIRED' }); return;
+    }
+    reconnectTimer = setTimeout(() => { reconnectTimer = undefined; if (active()) connectBrowser(); }, 2000);
   };
 }
 export async function logout(): Promise<void> {
@@ -139,7 +155,7 @@ export async function updateRoomSettings(room: RoomSnapshot, name: string, setti
 export async function send(message: unknown): Promise<void> {
 
   if (socket?.readyState !== WebSocket.OPEN) throw new Error('控制连接未就绪');
-  socket.send(JSON.stringify(message));
+  await socket.send(JSON.stringify(message));
 }
 export async function join(roomId: string): Promise<void> {
   cancelChats('NOT_IN_ROOM');
@@ -205,6 +221,12 @@ export async function capabilities(): Promise<{ native: boolean; reason: string;
 }
 
 const androidPlayback = import.meta.env.VITE_CLIENT_TARGET === 'apk' && isNativeShell() ? new AndroidPlayback() : null;
+if (androidPlayback) document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !token || !reconnectTimer || socket?.readyState !== WebSocket.CLOSED) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = undefined;
+  connectBrowser();
+});
 let audio = androidPlayback || typeof Audio === 'undefined' ? null : new Audio();
 export function createPlaybackWaveform() { return audio&&getRuntimeProfile().audioAnalysis ? new AudioWaveform(() => audio) : null; }
 function replacePlaybackAudio(previous: HTMLAudioElement) {
@@ -253,7 +275,7 @@ export async function browserAudio(roomId:string,trackId:string,track:Pick<Track
  const data=await new Blob(parts).arrayBuffer();
  return data;
 }
-function clearCloud() { cloudPlayer?.clear(); }
+function clearCloud() { cloudPlayer?.clear(); androidPlayback?.stopBackground(); }
 export async function syncCloud(room: RoomSnapshot, clockOffset: number) {
   if (room.playlist) await cloudPlayer?.sync(room, clockOffset);
 }

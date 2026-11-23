@@ -1,7 +1,7 @@
 {
   "identifier": "android-playback",
-  "description": "Only the bundled Android main window can control the native music player.",
+  "description": "Only the bundled Android main window can control native playback and its room connection.",
   "platforms": ["android"],
   "windows": ["main"],
-  "permissions": ["android-playback:allow-operate"]
+  "permissions": ["android-playback:allow-operate", "android-playback:allow-room-connect", "android-playback:allow-room-receive", "android-playback:allow-room-send", "android-playback:allow-room-close"]
 }

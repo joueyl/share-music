@@ -13,6 +13,7 @@ import java.net.URL
 /** Seekable, fixed-size audio from the same HTTPS providers accepted by the room server. */
 internal class TrackDataSource(url: String, private val length: Long, private val cacheDir: File) : MediaDataSource() {
     private val initial = checkedUrl(url)
+    private var resolved = initial
     private val chunks = LinkedHashMap<Long, ByteArray>(8, 0.75f, true)
     private var strongETag: String? = null
     @Volatile private var closed = false
@@ -54,11 +55,12 @@ internal class TrackDataSource(url: String, private val length: Long, private va
 
     private fun fetchChunk(start: Long): ByteArray {
         val end = minOf(length, start + CHUNK) - 1
-        var url = initial
+        var url = resolved
         repeat(4) {
             if (closed) throw IOException("SOURCE_CLOSED")
             val response = url.openConnection() as HttpURLConnection
             connection = response
+            var reusable = false
             try {
                 if (closed) throw IOException("SOURCE_CLOSED")
                 response.instanceFollowRedirects = false
@@ -93,10 +95,12 @@ internal class TrackDataSource(url: String, private val length: Long, private va
                             }
                         }
                     }
+                    resolved = url
+                    reusable = true
                     return bytes
                 } else throw IOException("SOURCE_HTTP")
             } finally {
-                response.disconnect()
+                if (!reusable || closed) response.disconnect()
                 connection = null
             }
         }

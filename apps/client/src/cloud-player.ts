@@ -1,4 +1,4 @@
-import { positionAt, hasRemoteAudio, type RoomSnapshot, type TrackMetadata } from '@music-share/shared';
+import { positionAt, hasRemoteAudio, type Playback, type RoomSnapshot, type TrackMetadata } from '@music-share/shared';
 import type { PlaybackSource } from './playback-source';
 
 export type PlaybackDiagnostic = { positionMs: number } & (
@@ -12,8 +12,9 @@ export type PlaybackMedia = Pick<HTMLAudioElement,
   'src' | 'currentTime' | 'readyState' | 'paused' | 'seeking' | 'buffered' | 'crossOrigin' |
   'load' | 'play' | 'pause' | 'removeAttribute' | 'onloadedmetadata' | 'oncanplay' | 'onseeked' |
   'onerror' | 'onwaiting' | 'onplaying'> & {
-  loadNativeSource?(url: string, sizeBytes: number): void;
+  loadNativeSource?(url: string, sizeBytes: number, initialSeek?: { positionMs: number; sampledAtMs: number }): void;
   readonly nativeDurationMs?: number;
+  readonly nativeSampledAtMs?: number;
   readonly error: { code: number } | null;
 };
 
@@ -39,6 +40,11 @@ export class CloudPlayer {
   private diagnostic?: (event: PlaybackDiagnostic) => void;
   private reportedWaiting = false;
   private renewNativeSource?: () => Promise<string | PlaybackSource>;
+  private nativeStarted = false;
+  private nativePreparedEpoch?: number;
+  private nativeDrift?: { direction: number; since: number; position: number };
+  private nativeCorrectionStartedAt?: number;
+  private nativeSeekDurationMs = 0;
 
   setDiagnostic(observer?: (event: PlaybackDiagnostic) => void) {
     this.diagnostic = observer;
@@ -52,6 +58,35 @@ export class CloudPlayer {
   private playablePosition(positionMs: number) {
     const duration = this.audio.nativeDurationMs;
     return duration && duration > 0 ? Math.min(duration, positionMs) : positionMs;
+  }
+
+  private waitingForStart(p: Playback, serverNow: number) {
+    if (!this.audio.loadNativeSource) return serverNow < p.effectiveAtServerMs;
+    // After the transition is applied, effectiveAtServerMs anchors the leader's
+    // sampled progress. It is not a new invitation to pause the follower.
+    if (this.nativeStarted) return false;
+    if (!this.room?.pending || (this.room.pending.committed && serverNow >= p.effectiveAtServerMs)) {
+      this.nativeStarted = true;
+      return false;
+    }
+    return true;
+  }
+
+  private shouldCorrectNative(drift: number, position: number, at: number, fresh: boolean) {
+    if (this.now() < this.correctAfter || !fresh || this.audio.paused || this.audio.readyState < 3 || Math.abs(drift) <= 600) {
+      this.nativeDrift = undefined;
+      return false;
+    }
+    const direction = Math.sign(drift);
+    const observed = this.nativeDrift;
+    if (!observed || observed.direction !== direction) {
+      this.nativeDrift = { direction, since: at, position };
+      return false;
+    }
+    if (at - observed.since < 500) return false;
+    // An unchanged decoder position may be waiting on data, not drifting.
+    if (position - observed.position < 100) { this.nativeDrift = undefined; return false; }
+    return true;
   }
 
   constructor(
@@ -78,11 +113,19 @@ export class CloudPlayer {
     };
     audio.onloadedmetadata = audio.oncanplay = () => this.prepare();
     audio.onseeked = () => {
-      this.correctAfter = this.now() + 1500;
+      const at = this.now();
+      if (this.nativeCorrectionStartedAt !== undefined) {
+        this.nativeSeekDurationMs = Math.min(1000, Math.max(0, at - this.nativeCorrectionStartedAt));
+        this.nativeCorrectionStartedAt = undefined;
+        this.correctAfter = at + 3000;
+      } else {
+        this.correctAfter = at + 1500;
+      }
       this.prepare();
     };
     audio.onerror = () => {
       this.listeningSample=undefined;
+      this.nativeDrift = undefined; this.nativeCorrectionStartedAt = undefined;
       this.diagnostic?.({ kind: 'media-error', code: audio.error?.code ?? 0, positionMs: this.diagnosticPosition() });
       const renew = this.renewNativeSource;
       if (audio.loadNativeSource && renew) {
@@ -154,7 +197,15 @@ export class CloudPlayer {
       this.releaseSource = typeof result === 'string' ? undefined : result.release;
       if (this.audio.loadNativeSource) {
         if (typeof result === 'string' || !result.sizeBytes) throw new Error('PLAYBACK_AUDIO_METADATA_INVALID');
-        this.audio.loadNativeSource(url, result.sizeBytes);
+        const room = this.room, at = this.now();
+        // A room already playing doesn't need a new prepare/ready round trip.
+        // Let Android position directly from onPrepared instead of polling once to
+        // learn that it can seek and then crossing the bridge again.
+        const initial = room && !room.pending && room.playback.playState === 'playing'
+          ? { positionMs: Math.max(0, Math.round(positionAt(room.playback, at + this.offset))), sampledAtMs: at }
+          : undefined;
+        this.nativePreparedEpoch = initial ? this.epoch : undefined;
+        this.audio.loadNativeSource(url, result.sizeBytes, initial);
       } else {
         this.audio.crossOrigin = 'anonymous';
         this.audio.src = url; this.audio.load();
@@ -177,7 +228,8 @@ export class CloudPlayer {
     // A seek must finish against its original target, not chase a moving clock
     // forever when decoding/seek completion takes longer than the drift limit.
     const target = this.seekTarget ?? this.playablePosition(pending && !pending.committed ? p.positionMs : positionAt(p, this.now() + this.offset));
-    if (Math.abs(this.audio.currentTime * 1000 - target) > 250) {
+    const nativePositioned = !pending && this.nativePreparedEpoch === p.sourceEpoch;
+    if (!nativePositioned && Math.abs(this.audio.currentTime * 1000 - target) > 250) {
       this.listeningSample=undefined;
       this.seekTarget = target;
       this.audio.currentTime = target / 1000;
@@ -185,6 +237,7 @@ export class CloudPlayer {
     }
     if (this.audio.readyState < 3) return;
     this.ready = true;
+    this.nativePreparedEpoch = undefined;
     this.seekTarget = undefined;
     if (pending && !pending.committed) void this.send({ type: 'ready', roomId: this.room.id, transitionId: pending.id, sourceEpoch: this.epoch }).catch(() => {});
   }
@@ -203,13 +256,15 @@ export class CloudPlayer {
     this.seekTarget = undefined; this.correctAfter = 0;
     this.healthSample = undefined; this.stalledSince = undefined; this.recovered = false;
     this.reportedWaiting = false;
+    this.nativeStarted = false; this.nativePreparedEpoch = undefined; this.nativeDrift = undefined;
+    this.nativeCorrectionStartedAt = undefined; this.nativeSeekDurationMs = 0;
   }
 
   private checkPlaybackHealth() {
     const p = this.room!.pending?.playback ?? this.room!.playback;
     const at = this.now(), position = this.audio.currentTime * 1000;
     if (this.loading || !this.source || !this.audio.src || p.sourceEpoch !== this.epoch ||
-        this.room!.pending && !this.room!.pending.committed || p.playState !== 'playing' || at + this.offset < p.effectiveAtServerMs) {
+        this.room!.pending && !this.room!.pending.committed || p.playState !== 'playing' || this.waitingForStart(p, at + this.offset)) {
       this.healthSample = undefined; this.stalledSince = undefined; return;
     }
     const previous = this.healthSample;
@@ -223,6 +278,7 @@ export class CloudPlayer {
     this.healthSample = { at, position };
     if (at - (this.stalledSince ?? at) < 8000) return;
     this.listeningSample = undefined;
+    this.nativeDrift = undefined; this.nativeCorrectionStartedAt = undefined;
     this.ready = false; this.seekTarget = undefined;
     this.audio.pause();
     this.stalledSince = at;
@@ -246,19 +302,30 @@ export class CloudPlayer {
     if (!this.ready || this.room.pending && !this.room.pending.committed) {this.listeningSample=undefined;return;}
     const p = this.room.pending?.playback ?? this.room.playback;
     if (p.sourceEpoch !== this.epoch) {this.listeningSample=undefined;return;}
-    const now = this.now() + this.offset;
-    const target = this.playablePosition(positionAt(p, now));
-    if (now < p.effectiveAtServerMs) { this.listeningSample=undefined;this.audio.pause(); return; }
+    const at = this.now(), now = at + this.offset;
+    if (this.waitingForStart(p, now)) { this.listeningSample=undefined;this.audio.pause(); return; }
     // Never restart a seek while the browser is still fetching/decoding its target.
     if (this.audio.seeking) {this.listeningSample=undefined;return;}
-    const drift = this.audio.currentTime * 1000 - target;
-    if (Math.abs(drift) > (p.playState === 'playing' ? 600 : 250) && (p.playState !== 'playing' || this.now() >= this.correctAfter)) {
+    const native = !!this.audio.loadNativeSource;
+    const nativePlaying = native && p.playState === 'playing';
+    const sampledAt = native ? this.audio.nativeSampledAtMs ?? 0 : at;
+    const fresh = !native || (sampledAt > 0 && sampledAt <= at && at - sampledAt <= 500);
+    const sampledAtServerMs = sampledAt + this.offset;
+    const target = this.playablePosition(positionAt(p, nativePlaying && fresh ? sampledAtServerMs : now));
+    const position = this.audio.currentTime * 1000, drift = position - target;
+    if (nativePlaying ? this.shouldCorrectNative(drift, position, sampledAt, fresh) :
+        Math.abs(drift) > (p.playState === 'playing' ? 600 : 250) && (p.playState !== 'playing' || at >= this.correctAfter)) {
       this.listeningSample=undefined;
       if (p.playState === 'playing' && !this.audio.paused) {
         this.diagnostic?.({ kind: 'correction', driftMs: Math.round(drift), positionMs: this.diagnosticPosition() });
       }
       if (p.playState !== 'playing') this.audio.pause();
-      this.audio.currentTime = target / 1000; return;
+      if (nativePlaying) {
+        this.nativeDrift = undefined;
+        this.nativeCorrectionStartedAt = at;
+        this.audio.currentTime = this.playablePosition(positionAt(p, now + this.nativeSeekDurationMs)) / 1000;
+      } else this.audio.currentTime = target / 1000;
+      return;
     }
     if (p.playState !== 'playing') { this.listeningSample=undefined;this.audio.pause(); return; }
     if (this.audio.readyState < 3) {this.listeningSample=undefined;return;}
@@ -272,19 +339,20 @@ export class CloudPlayer {
         this.emit('server-message', { type: 'error', error: '请点击页面以允许播放' });
       });
     }
-    else {
-      const at=this.now(),position=this.audio.currentTime*1000,previous=this.listeningSample;
+    else if(fresh&&sampledAt!==this.listeningSample?.at) {
+      const previous=this.listeningSample;
       if(previous){
-        const elapsed=at-previous.at,advanced=position-previous.position;
+        const elapsed=sampledAt-previous.at,advanced=position-previous.position;
         // Never count suspended timers, buffering, seeks or synchronization jumps.
         if(elapsed>0&&elapsed<=2500&&advanced>0&&advanced<=elapsed+250)this.listenedMs+=Math.min(elapsed,advanced);
       }
-      this.listeningSample={at,position};
+      this.listeningSample={at:sampledAt,position};
     }
     this.emit('media-status', { status: this.audio.paused ? 'buffering' : 'playing', detail: this.audio.loadNativeSource ? 'Android 原生播放 · WebSocket 同步' : '音乐直链 · WebSocket 同步', bufferedMs: this.bufferedMs(), driftMs: drift, receiveBps: 0 });
-    if (!this.room.pending && this.now() - this.reported > 1000 && !this.audio.paused) {
-      this.reported = this.now();
-      void this.send({ type: 'progress', roomId: this.room.id, sourceEpoch: this.epoch, positionMs: this.audio.currentTime * 1000, sampledAtServerMs: now, listenedMs:this.listenedMs }).catch(() => {});
+    if (!this.room.pending && fresh && (!native || sampledAtServerMs >= p.effectiveAtServerMs) &&
+        at - this.reported > 1000 && !this.audio.paused) {
+      this.reported = at;
+      void this.send({ type: 'progress', roomId: this.room.id, sourceEpoch: this.epoch, positionMs: position, sampledAtServerMs, listenedMs:this.listenedMs }).catch(() => {});
     }
   }
 }

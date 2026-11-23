@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import type { Playback, RoomSnapshot } from '@music-share/shared';
-import { CloudPlayer } from '../src/cloud-player';
+import { CloudPlayer, type PlaybackMedia } from '../src/cloud-player';
 import { loadPlaybackSource } from '../src/playback-source';
 
 class FakeAudio {
@@ -17,6 +17,14 @@ class FakeAudio {
   buffered() { this.readyState = 3; this.oncanplay?.(); }
   seeked() { this.seeking = false; this.readyState = 3; this.onseeked?.(); }
   advance(seconds: number) { this.position += seconds; }
+}
+
+class FakeAndroidAudio extends FakeAudio {
+  nativeSampledAtMs = 0;
+  initialSeek?: { positionMs: number; sampledAtMs: number };
+  loadNativeSource(url: string, _size: number, initialSeek?: { positionMs: number; sampledAtMs: number }) {
+    this.src = url; this.initialSeek = initialSeek; this.load();
+  }
 }
 
 it('requests CORS-readable audio and falls back to ordinary playback once when analysis is blocked', async () => {
@@ -64,6 +72,86 @@ function setup() {
   const player = new CloudPlayer(audio as unknown as HTMLAudioElement, url, send, emit, () => time);
   return { audio, url, send, emit, player, setTime: (value: number) => { time = value; } };
 }
+
+function setupAndroid() {
+  let time = 100000;
+  const audio = new FakeAndroidAudio();
+  const send = vi.fn(async (_message: unknown) => {});
+  const player = new CloudPlayer(audio as unknown as PlaybackMedia,
+    async () => ({ url: 'https://m801.music.126.net/song.mp3', sizeBytes: 4, release: () => {} }),
+    send, vi.fn(), () => time);
+  function tick(at: number, positionMs: number, sampledAt = at) {
+    time = at;
+    audio.advance(positionMs / 1000 - audio.currentTime);
+    audio.nativeSampledAtMs = sampledAt;
+    player.tick();
+  }
+  return { audio, send, player, tick };
+}
+
+it('passes the active room position to native preparation without a second startup seek', async () => {
+  const { player, audio, send, tick } = setupAndroid();
+  const active = room(1, 40000);
+  active.pending = null;
+  active.playback.effectiveAtServerMs = 98000;
+  await player.sync(active, 0);
+  expect(audio.initialSeek).toEqual({ positionMs: 42000, sampledAtMs: 100000 });
+  audio.advance(42.4); // Already positioned by onPrepared in the native player.
+  audio.buffered();
+  tick(100700, 42400);
+  expect(audio.play).toHaveBeenCalledOnce();
+  expect(audio.seeks).toEqual([]);
+  expect(send).not.toHaveBeenCalled();
+});
+
+it('waits for the Android transition but does not pause when another member sends a newer progress anchor', async () => {
+  const { player, audio, tick } = setupAndroid();
+  const active = room();
+  active.playback.effectiveAtServerMs = 100200;
+  await player.sync(active, 0);
+  audio.buffered();
+  active.pending!.committed = true;
+  await player.sync(active, 0);
+  tick(100100, 0);
+  expect(audio.play).not.toHaveBeenCalled();
+  tick(100200, 0);
+  expect(audio.play).toHaveBeenCalledOnce();
+  audio.pause.mockClear();
+
+  active.pending = null;
+  active.playback = { ...active.playback, leaderId: 'peer', positionMs: 1000, effectiveAtServerMs: 101250 };
+  await player.sync(active, 0);
+  tick(101100, 950);
+  expect(audio.pause).not.toHaveBeenCalled();
+  expect(audio.seeks).toEqual([]);
+});
+
+it('reports Android playback using the decoder timestamp and skips stale samples', async () => {
+  const { player, audio, send, tick } = setupAndroid();
+  const active = room(); active.pending = null; active.playback.effectiveAtServerMs = 100200;
+  await player.sync(active, 200);
+  audio.buffered();
+  tick(100000, 0);
+  tick(101500, 500, 100500);
+  expect(send).not.toHaveBeenCalled();
+  tick(101600, 1300, 101300);
+  expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ positionMs: 1300, sampledAtServerMs: 101500 }));
+  expect(audio.seeks).toEqual([]);
+});
+
+it('ignores transient Android drift, then seeks only if a large offset persists while audio advances', async () => {
+  const { player, audio, tick } = setupAndroid();
+  const active = room(); active.pending = null; active.playback.effectiveAtServerMs = 100000;
+  await player.sync(active, 0);
+  audio.buffered();
+  tick(100000, 0);
+  tick(101000, 250); tick(101300, 1300);
+  expect(audio.seeks).toEqual([]);
+  tick(102000, 1000); tick(102450, 1450);
+  expect(audio.seeks).toEqual([]);
+  tick(102500, 1500);
+  expect(audio.seeks).toEqual([2.5]);
+});
 
 it('waits for the requested seek position to buffer before reporting ready; ticks do not restart a pending seek', async () => {
   const { player, audio, send } = setup();

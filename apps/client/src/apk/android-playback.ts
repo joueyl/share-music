@@ -3,13 +3,13 @@ import type { PlaybackMedia } from '../cloud-player';
 
 type NativeState = {
   prepared: boolean; playing: boolean; seeking: boolean; buffering: boolean;
-  positionMs: number; durationMs: number; errorCode: number;
+  positionMs: number; durationMs: number; errorCode: number; sampledAtMs: number;
 };
 type Operation =
-  | { action: 'load'; url: string; sizeBytes: number; volume: number }
+  | { action: 'load'; url: string; sizeBytes: number; volume: number; initialMs?: number; initialAtMs?: number }
   | { action: 'seek'; positionMs: number }
   | { action: 'volume'; volume: number }
-  | { action: 'clear' | 'state' | 'play' | 'pause' };
+  | { action: 'clear' | 'state' | 'play' | 'pause' | 'background-stop' };
 
 /** The shared room clock drives a native player instead of an HTML element in packaged Android. */
 export class AndroidPlayback implements PlaybackMedia {
@@ -20,6 +20,7 @@ export class AndroidPlayback implements PlaybackMedia {
   seeking = false;
   error: { code: number } | null = null;
   nativeDurationMs = 0;
+  nativeSampledAtMs = 0;
   // Android's MediaDataSource does not expose a time-based buffered range.
   readonly buffered = {
     length: 0,
@@ -49,14 +50,19 @@ export class AndroidPlayback implements PlaybackMedia {
     void this.dispatch({ action: 'seek', positionMs: Math.max(0, Math.round(value * 1000)) });
   }
 
-  loadNativeSource(url: string, sizeBytes: number) {
-    this.src = url; this.sizeBytes = sizeBytes; this.load();
+  loadNativeSource(url: string, sizeBytes: number, initialSeek?: { positionMs: number; sampledAtMs: number }) {
+    this.src = url; this.sizeBytes = sizeBytes; this.load(initialSeek);
   }
 
-  load() {
+  load(initialSeek?: { positionMs: number; sampledAtMs: number }) {
     if (!this.src) return;
     this.reset();
-    void this.dispatch({ action: 'load', url: this.src, sizeBytes: this.sizeBytes, volume: this.volume });
+    void this.dispatch({ action: 'load', url: this.src, sizeBytes: this.sizeBytes, volume: this.volume,
+      ...(initialSeek ? { initialMs: initialSeek.positionMs, initialAtMs: initialSeek.sampledAtMs } : {}) });
+  }
+
+  stopBackground() {
+    void this.dispatch({ action: 'background-stop' });
   }
 
   removeAttribute(name: string) {
@@ -90,6 +96,7 @@ export class AndroidPlayback implements PlaybackMedia {
     ++this.revision;
     this.positionMs = 0; this.readyState = 0; this.error = null;
     this.nativeDurationMs = 0;
+    this.nativeSampledAtMs = 0;
     this.paused = true; this.seeking = false; this.wanted = false; this.waiting = false;
   }
 
@@ -126,6 +133,7 @@ export class AndroidPlayback implements PlaybackMedia {
     const previousReady = this.readyState, wasSeeking = this.seeking, revision = this.revision;
     const wasWaiting = this.waiting;
     this.positionMs = state.positionMs;
+    this.nativeSampledAtMs = state.sampledAtMs;
     this.nativeDurationMs = state.durationMs;
     this.seeking = state.seeking;
     this.paused = !state.playing;
