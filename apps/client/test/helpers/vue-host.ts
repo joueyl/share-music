@@ -1,6 +1,6 @@
 import { vi } from 'vitest';
 import { createRenderer } from 'vue';
-export function node(type: string, text = ''): any { return { type, text, tagName: type.toUpperCase(), value: '', checked: false, getRootNode: () => ({}), addEventListener: vi.fn(), removeEventListener: vi.fn(), props: {}, children: [], parent: null, setCustomValidity: vi.fn(), reportValidity: vi.fn() }; }
+export function node(type: string, text = ''): any { return { type, text, tagName: type.toUpperCase(), value: '', checked: false, style: { display: '' }, getRootNode: () => ({}), addEventListener: vi.fn(), removeEventListener: vi.fn(), props: {}, children: [], parent: null, setCustomValidity: vi.fn(), reportValidity: vi.fn() }; }
 export const renderer = createRenderer<any, any>({
  createElement: tag => node(tag), createText: text => node('text', text), createComment: text => node('comment', text),
  setText: (n, text) => { n.text = text; }, setElementText: (n, text) => { n.text = text; n.children = []; },

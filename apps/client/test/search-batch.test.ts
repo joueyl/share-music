@@ -44,7 +44,7 @@ it('toggles the APK source menu with the same trigger and closes it before the s
  expect(menu()).toBeUndefined();
  expect(all(root).some(item=>item.props.role==='dialog')).toBe(true);
  trigger().props.onClick();await settle();
- all(root).find(item=>item.type==='button'&&text(item)==='QQ 音乐').props.onClick();await settle();
+ all(menu()).find(item=>item.type==='button'&&text(item).includes('QQ 音乐')).props.onClick();await settle();
  expect(trigger().props['aria-label']).toContain('QQ 音乐');
  expect(trigger().focus).toHaveBeenCalledWith({preventScroll:true});
  await all(root).find(item=>item.type==='form').props.onSubmit({preventDefault(){}});await settle();
