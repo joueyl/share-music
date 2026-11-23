@@ -38,6 +38,8 @@ npm run desktop
 
 开发启动器直接启动 Tauri。
 
+Android 真机或模拟器调试使用 `npm run android`；首次生成 Android 工程及连接设备的步骤见 [Android 本地开发](docs/ANDROID-APK.md#原生调试)。只需在电脑浏览器查看 APK 界面时，使用 `npm run dev:apk`。
+
 服务器默认绑定 `127.0.0.1:3000`。客户端按 Vite 环境变量自动连接，注册账号后即可创建房间。密码至少 10 个字符，账号保存在服务端 MySQL。
 
 ### 客户端服务器地址

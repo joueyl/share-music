@@ -4,6 +4,8 @@ import { readFileSync,existsSync,mkdtempSync,mkdirSync,writeFileSync,rmSync } fr
 import { tmpdir } from 'node:os';
 import { resolve,dirname,basename } from 'node:path';
 import { checkApkBuild } from './check-apk-build.mjs';
+import { apkEntryPlugin } from '../apps/client/apk-entry.ts';
+import { androidDevPorts } from '../apps/client/android-dev-forward.mjs';
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 test('desktop and APK use distinct documents, page trees and output directories',()=>{
  assert.match(read('apps/client/index.html'),/src\/main.ts/);
@@ -26,6 +28,44 @@ test('business controllers are single-source and consumed by both page trees',()
   ['usePlayerControls','components/GlobalPlayer.vue','apk/components/ApkPlayer.vue'],
   ['useRoomSession','views/Room.vue','apk/pages/ListenPage.vue'],
  ]){assert.match(read('apps/client/src/'+desktop),new RegExp(hook+'\\(\\)'));assert.match(read('apps/client/src/'+apk),new RegExp(hook+'\\(\\)'));assert.match(read('apps/client/src/features/'+hook+'.ts'),new RegExp('export function '+hook));}
+});
+test('native Android dev uses the independent APK entry over loopback without opening a browser',()=>{
+ const root=JSON.parse(read('package.json'));
+ const client=JSON.parse(read('apps/client/package.json'));
+ const android=JSON.parse(read('apps/client/src-tauri/tauri.android.conf.json'));
+ const desktop=JSON.parse(read('apps/client/src-tauri/tauri.conf.json'));
+ assert.equal(root.scripts.android,'npm run tauri -w @music-share/client -- android dev --host 127.0.0.1');
+ assert.equal(android.build.devUrl,'http://127.0.0.1:11421');
+ assert.equal(android.build.beforeDevCommand,'npm run dev:android-webview');
+ assert.equal(client.scripts['dev:android-webview'],'node android-dev-forward.mjs && vite --mode apk-development --host 127.0.0.1 --port 11421');
+ assert.doesNotMatch(client.scripts['dev:apk'],/android-dev-forward/);
+ assert.equal(desktop.build.devUrl,'http://127.0.0.1:11420');
+});
+test('Android debug forwards the frontend and configured local API port only',()=>{
+ const frontend='http://127.0.0.1:11421';
+ assert.deepEqual(androidDevPorts(frontend,'http://127.0.0.1:3000'),['11421','3000']);
+ assert.deepEqual(androidDevPorts(frontend,'http://localhost:3100'),['11421','3100']);
+ assert.deepEqual(androidDevPorts(frontend,'http://[::1]:3100'),['11421','3100']);
+ assert.deepEqual(androidDevPorts(frontend,'https://api.example.test'),['11421']);
+ assert.deepEqual(androidDevPorts(frontend,'http://127.0.0.1:11421'),['11421']);
+});
+test('APK dev proxy serves APK HTML for the root without rewriting module requests',()=>{
+ let middleware;
+ apkEntryPlugin().configureServer({middlewares:{use:fn=>{middleware=fn;}}});
+ for(const [method,url,expected] of [
+  ['GET','/','/apk.html'],
+  ['HEAD','/index.html?from=android','/apk.html?from=android'],
+  ['GET','/apk.html','/apk.html'],
+  ['GET','/@vite/client','/@vite/client'],
+  ['GET','/src/apk/main.ts','/src/apk/main.ts'],
+  ['POST','/','/'],
+ ]){
+  const req={method,url};
+  let next=false;
+  middleware(req,{},()=>{next=true;});
+  assert.equal(req.url,expected);
+  assert.equal(next,true);
+ }
 });
 test('Actions builds stripped non-debuggable Release APKs with test signing only',()=>{
  assert.equal(existsSync(new URL('../.github/workflows/android-apk.yml',import.meta.url)),false);

@@ -3,11 +3,14 @@ import { ref } from 'vue';
 import { Users, Settings2, X, Link, Check } from 'lucide-vue-next';
 import { useApp } from '../store';
 import { useDialogFocus } from '../useDialogFocus';
+import { useDialogDismiss } from '../useDialogDismiss';
 import type { Permissions, PermissionKey } from '@music-share/shared';
 
+const props = defineProps<{ animateDismiss?: boolean }>();
 const app = useApp(), emit = defineEmits<{ close: [] }>(), panel = ref<'members' | 'settings'>('members'), dialog = ref<HTMLElement | null>(null);
 const copied = ref(false);
-useDialogFocus(dialog, () => emit('close'));
+const { dialogVisible, dismiss, finishDismiss } = useDialogDismiss(() => emit('close'), () => !!props.animateDismiss);
+useDialogFocus(dialog, dismiss);
 
 const keys: PermissionKey[] = ['skip', 'seek', 'enqueue', 'playbackMode'];
 const labels: Record<PermissionKey, string> = { skip: '切歌 / 播放控制', stream: '旧版兼容字段', seek: '进度切换', enqueue: '播放列表控制', playbackMode: '播放模式修改' };
@@ -51,11 +54,12 @@ async function copyInvite() {
 
 <template>
   <Teleport to="body">
-    <div class="modal-backdrop tone-modal-backdrop" @click.self="emit('close')">
-      <section ref="dialog" class="tone-dialog members-dialog" role="dialog" aria-modal="true" aria-label="房间成员与权限">
+    <Transition name="apk-room-dialog" :appear="animateDismiss" :css="!!animateDismiss" @after-leave="finishDismiss">
+    <div v-show="dialogVisible" class="modal-backdrop tone-modal-backdrop" @click.self="dismiss">
+      <section ref="dialog" class="tone-dialog members-dialog" role="dialog" aria-modal="true" aria-label="房间成员与权限" :inert="!dialogVisible">
         <header class="dialog-heading">
           <h2>一起听的人</h2>
-          <button class="round-close" aria-label="关闭成员与权限" @click="emit('close')">
+          <button class="round-close" aria-label="关闭成员与权限" @click="dismiss">
             <X :size="20" />
           </button>
         </header>
@@ -113,6 +117,7 @@ async function copyInvite() {
         </template>
       </section>
     </div>
+    </Transition>
   </Teleport>
 </template>
 

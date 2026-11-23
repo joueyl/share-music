@@ -1,6 +1,5 @@
 /* APK-only design system and responsive layout. No desktop stylesheet dependency. */
-:root[data-client=apk]{color-scheme:light;font-family:"Microsoft YaHei","Segoe UI",sans-serif;color:#283448;background:#eef2f5;--accent:#4f80db;--text:#283448;--muted:#798394;--border:#e1e7ee;--surface:#ffffffb3;--window-corner-radius:0px;--apk-header:calc(64px + env(safe-area-inset-top,0px));--apk-tabs:calc(72px + env(safe-area-inset-bottom,0px));--apk-player:72px;--workspace-player:calc(var(--apk-tabs) + var(--apk-player));--mobile-tabbar:var(--apk-tabs);--mobile-player-height:var(--apk-player)}
-:root[data-client=apk]:has(.apk-player-expanded){--apk-player:min(228px,max(72px,calc(100dvh - var(--apk-tabs) - var(--apk-header) - 80px)))}
+:root[data-client=apk]{color-scheme:light;font-family:"Microsoft YaHei","Segoe UI",sans-serif;color:#283448;background:#eef2f5;--accent:#4f80db;--text:#283448;--muted:#798394;--border:#e1e7ee;--surface:#ffffffb3;--window-corner-radius:0px;--apk-header:calc(64px + env(safe-area-inset-top,0px));--apk-tabs:calc(72px + env(safe-area-inset-bottom,0px));--apk-mini-player-height:72px;--apk-player:var(--apk-mini-player-height);--workspace-player:calc(var(--apk-tabs) + var(--apk-player));--mobile-tabbar:var(--apk-tabs);--mobile-player-height:var(--apk-player)}
 *{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:#b8c7d9 transparent}
 body{margin:0;-webkit-text-size-adjust:100%;user-select:none}
 html,body,#app{width:100%;height:100%;min-width:0}
@@ -12,14 +11,14 @@ button:disabled{opacity:.45;cursor:not-allowed}
 button svg{flex-shrink:0}
 button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 input,select,textarea{min-width:0;max-width:100%;font-size:16px;color:var(--text);background:#fff;border:1px solid var(--border);border-radius:14px;padding:12px;user-select:text}
-input:not([type=checkbox]):not([type=range]),select{min-height:48px}
+input:not([type=checkbox]):not([type=range]),select{min-height:var(--apk-field-min,48px)}
 input[type=checkbox]{width:22px;height:22px;flex:0 0 22px;accent-color:var(--accent);margin:0}
 input[type=range]{accent-color:var(--accent);height:36px;min-height:36px;padding:0;border:0;background:transparent;touch-action:pan-y}
 textarea{width:100%;resize:vertical;min-height:60px}
 label{display:flex;flex-direction:column;gap:8px;font-size:13px;margin:0}
 h1,h2,h3,p{margin:0}h1{font-size:26px;line-height:1.4}h2{font-size:20px;line-height:1.5}h3{font-size:16px;line-height:1.5}p{line-height:1.7}small{font-size:12px;color:var(--muted);line-height:1.6}
-.primary,.secondary{min-height:48px;padding:10px 16px;border-radius:16px;font-size:14px;line-height:1.5;white-space:normal}
-.primary{background:var(--accent);color:white}.primary:hover:not(:disabled){background:#4272c9}.secondary{background:#ffffffc9;border:1px solid white;color:#344861}
+.primary,.secondary,.global-search-modal .search-result-card>header>button{min-height:48px;padding:10px 16px;border-radius:16px;font-size:14px;line-height:1.5;white-space:normal}
+.primary{background:var(--accent);color:white}.primary:hover:not(:disabled){background:#4272c9}.secondary,.global-search-modal .search-result-card>header>button{background:#ffffffc9;border:1px solid white;color:#344861}
 .icon-button,.round-close{width:44px;height:44px;min-width:44px;min-height:44px;background:transparent;border-radius:14px;padding:0;color:#65748b}
 .text-button{min-height:44px;background:transparent;color:var(--accent);padding:8px;font-size:13px}
 .full{width:100%}.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
@@ -30,7 +29,7 @@ h1,h2,h3,p{margin:0}h1{font-size:26px;line-height:1.4}h2{font-size:20px;line-hei
 .apk-account-menu{position:absolute;top:100%;right:12px;display:flex;flex-direction:column;align-items:stretch;gap:8px;min-width:200px;max-width:calc(100vw - 24px);max-height:calc(100dvh - var(--apk-header) - 16px);overflow:auto;z-index:40;background:#f7faff!important;box-shadow:0 12px 32px #38527520}
 .apk-workspace{flex:1;min-height:0;display:flex;flex-direction:column;width:100%}
 .apk-workspace>.route-page{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:12px max(16px,env(safe-area-inset-right,0px)) 20px max(16px,env(safe-area-inset-left,0px));scrollbar-gutter:stable}
-.apk-workspace>.route-page:has(.apk-discover){display:flex;flex-direction:column;overflow:visible}
+.apk-workspace>.route-page:has(.apk-discover){display:flex;flex-direction:column;padding:12px max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px));scrollbar-gutter:auto}
 .apk-card{padding:16px;background:var(--surface);border:1px solid white;border-radius:22px}
 .apk-message{padding:12px 16px;margin:8px 12px;background:#fff0e1;color:#966329;border-radius:14px;font-size:13px;line-height:1.7;overflow-wrap:anywhere;flex-shrink:0;user-select:text}
 .apk-hint{font-size:12px;line-height:1.7;color:var(--muted)}
@@ -41,10 +40,11 @@ h1,h2,h3,p{margin:0}h1{font-size:26px;line-height:1.4}h2{font-size:20px;line-hei
 .apk-remember{flex-direction:row;align-items:center;gap:10px;min-height:44px;cursor:pointer}.apk-remember:has(input:disabled){opacity:.55;cursor:not-allowed}
 /* Text fields own one inset focus border; composite fields delegate it to the wrapper. */
 html[data-client=apk] :is(input:where(:not([type=checkbox]):not([type=radio]):not([type=range])),textarea,select):focus{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:-2px;box-shadow:none}
-html[data-client=apk] :is(.shell,.modal-backdrop,.drawer-backdrop) select:focus,
-html[data-client=apk] .modal-backdrop .global-search-modal .music-source-picker select:focus{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:-2px;box-shadow:none}
-html[data-client=apk] :is(.apk-input,.global-search-form):has(input:focus){border-color:var(--accent);outline:2px solid var(--accent);outline-offset:-2px;box-shadow:none}
-html[data-client=apk] :is(.apk-input,.global-search-form) input:focus{border:0;outline:none;box-shadow:none}
+html[data-client=apk] :is(.shell,.modal-backdrop,.drawer-backdrop) select:focus{border-color:var(--accent);outline:2px solid var(--accent);outline-offset:-2px;box-shadow:none}
+html[data-client=apk] .apk-input:has(input:focus),
+html[data-client=apk] .music-search-controls:has(:is(input,select):focus){border-color:var(--accent);outline:2px solid var(--accent);outline-offset:-2px;box-shadow:none}
+html[data-client=apk] .apk-input input:focus,
+html[data-client=apk] .modal-backdrop .music-search-controls :is(input,select):focus{border:0;outline:none;box-shadow:none}
 .apk-segments{display:flex;gap:6px;padding:4px;background:#ffffff80;border-radius:18px}
 .apk-segments button{flex:1;min-width:0;min-height:44px;border-radius:14px;background:transparent;color:var(--muted);font-size:15px}
 .apk-segments [aria-pressed=true],.apk-segments [aria-selected=true]{background:var(--accent);color:white}
@@ -55,29 +55,55 @@ html[data-client=apk] :is(.apk-input,.global-search-form) input:focus{border:0;o
 .apk-navigation>a,.apk-navigation>button{flex:1;min-width:0;min-height:56px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;background:transparent;color:#8795ab;font-size:12px;line-height:1.5}
 .apk-navigation svg{box-sizing:content-box;padding:4px 16px;border-radius:24px}.apk-navigation [aria-current=page]{color:var(--accent);font-weight:600}.apk-navigation [aria-current=page] svg{background:#e7effc}
 .apk-player{position:fixed;inset:auto 0 var(--apk-tabs);right:var(--modal-scrollbar-gap,0px);height:var(--apk-player);background:#fff;z-index:35;border-top:2px solid #e1e8f2;overflow:auto}
-.apk-mini-player{min-height:70px;display:grid;grid-template-columns:minmax(0,1fr) repeat(4,44px);align-items:center;padding:6px 12px}
-.apk-playing-summary{min-width:0;display:flex;align-items:center;gap:8px}.apk-playing-summary .album-art{width:40px;height:40px;border-radius:10px;flex:0 0 40px}.apk-playing-summary>span{min-width:0}.apk-playing-summary strong,.apk-playing-summary small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.apk-playing-summary strong{font-size:13px;line-height:1.5}.apk-playing-summary small{font-size:11px}
-.apk-play{color:var(--accent)}.apk-mini-player .song-favorite{width:44px;height:44px;min-width:44px}.apk-expanded-controls{padding:0 16px 12px}.apk-transport{display:flex;justify-content:space-around}.apk-progress{display:flex;flex-direction:row;align-items:center;gap:12px;margin:4px 0;font-size:12px;color:var(--muted)}.apk-progress>input{flex:1;width:100%}.apk-progress>span{flex-shrink:0}
+.apk-mini-player{min-height:calc(var(--apk-mini-player-height) - 2px);display:grid;grid-template-columns:minmax(0,1fr) repeat(2,44px);align-items:center;padding:6px 12px}
+.apk-playing-summary{min-width:0;display:flex;align-items:center;gap:8px}.apk-playing-summary .album-art{width:40px;height:40px;border-radius:10px;flex:0 0 40px}.apk-playing-summary strong{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;line-height:1.5}
+.apk-mini-player .apk-play{color:var(--accent)}
 .apk-toast{position:fixed;top:calc(8px + env(safe-area-inset-top,0px));left:12px;right:12px;z-index:100;display:flex;align-items:center;gap:10px;padding:8px 12px;background:#fffbf3;border:1px solid #d9bf90;border-radius:14px;color:#7b6437;box-shadow:0 8px 24px #38527520;font-size:13px;line-height:1.7;overflow-wrap:anywhere;user-select:text}.apk-toast button{margin-left:auto;flex-shrink:0}
-.apk-discover{height:100%;min-height:0;display:flex;flex-direction:column;gap:12px}.apk-discover>*{flex-shrink:0}.apk-hero{padding:20px}.apk-hero h1{font-size:28px}.apk-hero p{margin-top:8px;font-size:14px;color:var(--muted)}
-.apk-discover-actions{display:flex;gap:12px}.apk-discover-actions button{flex:1;min-width:0}.apk-room-search{flex-shrink:0}.apk-categories{display:flex;gap:8px;overflow:auto;padding-bottom:4px}.apk-categories button{flex-shrink:0;min-height:44px;padding:8px 16px;background:#ffffffb3;color:var(--muted);border-radius:18px;font-size:14px}.apk-categories [aria-pressed=true]{background:var(--accent);color:white}
-.apk-section-heading{display:flex;align-items:center;gap:8px}.apk-section-heading h2{font-size:18px;flex:1}.apk-section-heading small{white-space:nowrap}
-.apk-discover>.apk-state,.apk-room-list{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain}.apk-room-list{display:flex;flex-direction:column;gap:12px;padding-right:4px}
-.apk-room-card{display:flex;align-items:center;gap:14px;flex-shrink:0;width:100%;text-align:left;padding:14px}.apk-room-info{flex:1;min-width:0}.apk-room-info strong{font-size:17px;line-height:1.5;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.apk-room-info small{display:block;margin-top:4px}
-.apk-room-art{width:56px;height:56px;flex:0 0 56px;display:grid;place-items:center;border-radius:16px;color:white;background:linear-gradient(135deg,#d7e4d7,#8ba49e)}.apk-room-art[data-mood=night]{background:linear-gradient(135deg,#d2e1f3,#869fbe)}.apk-room-art[data-mood=weekend]{background:linear-gradient(135deg,#f2dfc9,#bc9c82)}
-.apk-code-form{display:flex;flex-wrap:wrap;gap:8px}.apk-code-form label{width:100%}.apk-code-form input{flex:1;min-width:100px}
 .apk-music{display:flex;flex-direction:column;gap:16px;max-width:1100px;margin:auto}.apk-profile,.apk-collection-summary{display:flex;align-items:center;gap:14px;flex-wrap:wrap}.apk-profile>.album-art{width:64px;height:64px;border-radius:50%}.apk-profile>div,.apk-collection-summary>div{flex:1;min-width:0}.apk-profile h2,.apk-collection-summary h2{font-size:20px;overflow-wrap:anywhere}.apk-profile p,.apk-collection-summary p{font-size:13px;color:var(--muted)}.apk-profile .apk-profile-actions{display:flex;flex-wrap:wrap;gap:8px;flex:0 0 100%}.apk-profile-actions button{min-height:44px;font-size:12px;padding:8px 12px}
 .apk-bind{display:flex;flex-direction:column;gap:12px}.apk-bind label{display:flex;flex-direction:row;align-items:center;color:var(--accent)}
 .apk-subtabs{display:flex;gap:20px;border-bottom:1px solid var(--border)}.apk-subtabs button{min-height:44px;background:transparent;font-size:14px;color:var(--muted);border-bottom:2px solid transparent}.apk-subtabs [aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent)}
 .apk-collections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 12px}.apk-collections article{position:relative;min-width:0}.apk-collection-open{width:100%;padding:0;display:flex;flex-direction:column;align-items:stretch;gap:8px;text-align:left;background:transparent}.apk-collection-open .album-art{display:block;width:100%;aspect-ratio:1;object-fit:cover;border-radius:18px}.apk-collection-open strong{font-size:14px;line-height:1.5;overflow-wrap:anywhere;padding-right:32px}.apk-collections article>.icon-button{position:absolute;right:0;bottom:0}
 .apk-collection-summary>.album-art{width:88px;height:88px;flex:0 0 88px;border-radius:18px}.apk-selection{display:flex;align-items:center;justify-content:space-between;gap:12px}.apk-selection>label{flex-direction:row;align-items:center;gap:10px;font-size:14px}.apk-song-list{display:flex;flex-direction:column;gap:8px}.apk-song-row{display:flex;flex-direction:row;align-items:center;gap:12px;min-height:72px;padding:12px}.apk-song-row>span{flex:1;min-width:0}.apk-song-row strong{display:block;font-size:14px;line-height:1.6;overflow-wrap:anywhere}.apk-song-row small{display:block;overflow-wrap:anywhere}.apk-song-row[data-selected=true]{background:#f7faff;border-color:#cfddf1}.apk-song-row .song-favorite{min-width:44px;width:44px;height:44px}.apk-library-actions{display:flex;gap:10px;flex-wrap:wrap}.apk-library-actions .primary{flex:1}
-.apk-listen{min-height:100%;display:flex;flex-direction:column;gap:16px}.apk-listen-main{display:flex;flex-direction:column;gap:16px;min-width:0}.apk-presence{display:flex;align-items:center;justify-content:space-between;gap:12px}.apk-presence .secondary{min-height:44px;font-size:12px;padding:8px 12px}.apk-stage-choice select{width:100px;min-height:44px;padding:8px;font-size:14px}.apk-listen-stage{display:flex;flex-direction:column;gap:14px;min-width:0}.apk-model{height:clamp(160px,27dvh,260px);width:min(100%,340px);align-self:center;flex-shrink:0}.apk-current-song h1{font-size:24px;overflow-wrap:anywhere}.apk-current-song p{font-size:13px;color:var(--muted)}
-.apk-lyrics.lyrics-panel{min-height:180px;max-height:280px;display:flex;flex-direction:column;background:transparent;border:0}.apk-lyrics .lyric-scroll{flex:1;min-height:0;height:auto;overflow:auto;padding:32px 0;scroll-padding:32px}.apk-lyrics .lyric-line{font-size:15px;line-height:1.7;padding:8px 0;color:var(--muted);user-select:text}.apk-lyrics .lyric-line.active{font-size:19px;color:var(--accent)}.apk-listen-stage.lyrics-only .apk-lyrics{min-height:320px}
-.apk-chat-toggle{flex-shrink:0;background:#ffffffb3}.apk-presence>.secondary{flex:1;min-width:0}.apk-lyrics>header{display:none}.apk-chat-area .room-chat{position:fixed;top:calc(8px + env(safe-area-inset-top,0px));bottom:calc(var(--workspace-player) + 8px);right:8px;width:calc(100% - 16px);max-width:600px;min-height:0;background:#f4f7fc;border:1px solid white;border-radius:24px;padding:16px;z-index:33;display:flex;flex-direction:column;overflow:auto;box-shadow:0 12px 40px #38527530}
+.apk-listen{flex:1;min-height:110px;display:flex;flex-direction:column}.apk-listen-main{flex:1;display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0}
+.apk-listen-stage{flex:1;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:12px;min-width:0;min-height:0}
+.apk-listen-stage.is-paired{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+.apk-listen-stage>:is(.apk-room-artwork,.apk-room-lyrics){grid-area:1 / 1}
+.apk-listen-stage.is-paired>.apk-room-lyrics{grid-column:2}
+.apk-listen-stage.lyrics-only>.apk-room-lyrics{grid-column:1/-1}
+.apk-stage-fade-leave-active,.apk-vinyl-reveal-leave-active{pointer-events:none}
+@media(prefers-reduced-motion:no-preference){
+  .apk-stage-fade-enter-active,.apk-stage-fade-leave-active,.apk-vinyl-reveal-leave-active{transition:opacity var(--motion-normal) var(--motion-ease)}
+  .apk-stage-fade-enter-from,.apk-stage-fade-leave-to,.apk-vinyl-reveal-leave-to{opacity:0}
+  .apk-vinyl-reveal-enter-active{transition:opacity calc(var(--motion-normal) * 2) var(--motion-ease),transform calc(var(--motion-normal) * 2) var(--motion-ease)}
+  .apk-vinyl-reveal-enter-from{opacity:0;transform:translateY(8px)}
+}
+.apk-room-artwork{flex:1;min-width:0;min-height:0;container-type:size;display:grid;place-items:start center}
+.apk-room-artwork .apk-vinyl{display:block;width:min(100%,var(--apk-vinyl-max,342px),88.6cqh);padding:0;background:transparent;border-radius:16px}
+.apk-model{height:min(100cqh,300px);width:min(100%,340px)}
+.apk-room-presence{flex:none;min-height:44px;align-self:flex-start;gap:6px;padding:6px 12px;border-radius:16px;background:#ffffffa0;font-size:12px;color:#526981}
+.apk-room-presence>span{width:6px;height:6px;flex:0 0 6px;border-radius:50%;background:#8999aa}.apk-room-presence>span.online{background:#4bac96}
+.apk-room-lyrics{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:auto}.apk-room-lyrics>.apk-hint{text-align:center;padding:12px 8px}
+.apk-lyrics.lyrics-panel{flex:1;min-height:0;display:flex;flex-direction:column;background:transparent;border:0}
+.apk-lyrics .lyric-scroll{position:relative;flex:1;min-height:0;height:auto;overflow:auto;padding:24px 6px;scroll-padding:24px;scrollbar-gutter:stable both-edges}
+.apk-lyrics .lyric-line{font-size:15px;line-height:1.65;padding:8px 0;color:var(--muted);user-select:text;text-align:center;overflow-wrap:anywhere}
+.apk-lyrics .lyric-line.active{font-size:clamp(20px,5.5vw,28px);font-weight:700;color:var(--accent);filter:drop-shadow(0 0 3px #4f80db40)}
+.apk-lyrics .lyric-word{white-space:pre-wrap}
+.apk-lyrics .lyric-line.active .lyric-word{background:linear-gradient(to right,var(--accent) var(--fill),#64748b var(--fill));background-clip:text;-webkit-background-clip:text;color:transparent}
+@media(prefers-reduced-motion:no-preference){
+  .apk-lyrics.is-playing .lyric-line.active{animation:apk-lyric-glow 2s ease-in-out infinite alternate}
+}
+@keyframes apk-lyric-glow{to{filter:drop-shadow(0 0 6px #4f80dba8)}}
+.apk-lyrics>header{display:none}.apk-chat-area .room-chat{position:fixed;top:calc(8px + env(safe-area-inset-top,0px));bottom:calc(var(--workspace-player) + 8px);right:8px;width:calc(100% - 16px);max-width:600px;min-height:0;background:#f4f7fc;border:1px solid white;border-radius:24px;padding:16px;z-index:33;display:flex;flex-direction:column;overflow:auto;box-shadow:0 12px 40px #38527530}
 .room-chat-header{display:flex;align-items:center;gap:8px;min-height:44px;flex-shrink:0}.room-chat-messages{flex:1;min-height:80px;overflow:auto;overscroll-behavior:contain}.room-chat-empty{padding:24px 8px;display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;color:var(--muted);font-size:13px}.chat-message-meta{font-size:12px;color:var(--muted);display:flex;justify-content:space-between;gap:8px}.chat-message-bubble{font-size:14px;line-height:1.6;overflow-wrap:anywhere;white-space:pre-wrap;user-select:text}.chat-activity p{user-select:text}.room-chat-form{display:flex;gap:8px;position:relative;flex-wrap:wrap;flex-shrink:0}.room-chat-form textarea{flex:1;min-width:0;min-height:44px;height:44px;max-height:120px;resize:none}.room-chat-actions .primary{width:44px;min-height:44px;padding:0}.chat-error{width:100%;font-size:12px;color:#a64b40}.chat-quick-replies{display:flex;gap:8px;overflow:auto;margin:8px 0;flex-shrink:0}.chat-quick-replies button{min-height:44px;padding:8px;background:#ffffffb3;border-radius:16px;flex-shrink:0;font-size:13px}.chat-activity{display:flex;align-items:flex-start;gap:8px;background:#e7effc;padding:8px 10px;border-radius:14px;font-size:12px;color:var(--muted);margin:10px 0}.chat-activity p{flex:1;min-width:0;overflow-wrap:anywhere}.chat-activity time{font-size:10px;white-space:nowrap}
 /* Shared interaction widgets get APK surfaces here, not desktop layout imports. */
 html[data-client=apk] .modal-backdrop{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-start;justify-content:center;background:#28344840;padding:0;overflow:auto}
 html[data-client=apk] .modal,html[data-client=apk] .tone-dialog{width:100%;max-width:640px;max-height:100dvh;min-height:100dvh;overflow:auto;background:linear-gradient(135deg,#ddeeff,#f2f1ed 60%,#fff2df);padding:20px 20px calc(24px + env(safe-area-inset-bottom,0px));border:0;border-radius:0;display:flex;flex-direction:column;gap:16px}
+@media(prefers-reduced-motion:no-preference){
+  html[data-client=apk] .modal-backdrop:is(.apk-room-dialog-enter-active,.apk-room-dialog-leave-active){transition:opacity var(--motion-normal) var(--motion-ease);overflow:clip}
+  .apk-room-dialog-enter-active>.tone-dialog,.apk-room-dialog-leave-active>.tone-dialog{transition:transform var(--motion-normal) var(--motion-ease)}
+  .apk-room-dialog-enter-from,.apk-room-dialog-leave-to{opacity:0}
+  .apk-room-dialog-enter-from>.tone-dialog,.apk-room-dialog-leave-to>.tone-dialog{transform:translateY(12px)}
+}
 html[data-client=apk] .dialog-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}.dialog-heading p{font-size:13px;color:var(--muted)}
 html[data-client=apk] .round-close{background:#ffffff80}
 html[data-client=apk] .editor-name>span{display:flex;align-items:center;gap:8px}.editor-name input{flex:1;width:100%}.editor-name small{white-space:nowrap;font-size:11px}
@@ -85,22 +111,179 @@ html[data-client=apk] fieldset{border:0;margin:0;padding:0;min-width:0}legend{fo
 .visibility-options{display:flex;gap:10px}.visibility-options>button{flex:1;min-width:0;min-height:68px;background:#ffffffb3;border:1px solid white;border-radius:16px;gap:8px;padding:12px;text-align:left}.visibility-options strong{font-size:13px;display:block}.visibility-options small{display:block;font-size:11px;line-height:1.5;white-space:normal}.visibility-options .selected{border-color:var(--accent);color:var(--accent);background:#e7effc}.visibility-options i{display:none}
 html[data-client=apk] .editor-toggle{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;padding:12px;background:#ffffffb3;border-radius:16px}.editor-toggle strong{display:block;font-size:14px}.editor-toggle small{display:block;font-size:12px;color:var(--muted)}.editor-extra{font-size:13px;color:var(--muted)}.editor-extra summary{min-height:44px;padding:12px 0;cursor:pointer}.editor-extra label{margin:12px 0}.editor-footnote{font-size:12px;color:var(--muted);text-align:center}
 html[data-client=apk] .members-dialog .tabs{display:flex;gap:12px}.tabs button{min-height:44px;background:#ffffff80;border-radius:14px;padding:10px 16px}.tabs .active{color:var(--accent);background:#e7effc}.member-row{display:flex;align-items:center;gap:12px;padding:12px;background:#ffffffb3;border-radius:16px}.member-row>span:nth-child(2){flex:1;min-width:0;overflow-wrap:anywhere}.member-row small{display:block}.portrait{display:inline-grid;place-items:center;width:36px;height:36px;border-radius:50%;background:#e7effc;color:var(--accent);flex-shrink:0}.dot{width:6px;height:6px;border-radius:50%;background:#a5afbd;flex-shrink:0}.dot.online{background:#70a08a}.permission-row,.override-row{display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:12px;min-height:52px}.override-card{padding:16px;background:#ffffffb3;border-radius:20px}.override-row{flex-wrap:wrap}.override-row select{min-height:44px;font-size:16px}
-html[data-client=apk] .drawer-backdrop{position:fixed;inset:0 0 var(--workspace-player);z-index:60;display:flex;align-items:flex-end;background:#28344833;clip-path:none}
-html[data-client=apk] .queue-drawer{position:relative;inset:auto;width:100%;height:min(654px,calc(100dvh - var(--workspace-player) - 12px));max-height:100%;display:flex;flex-direction:column;min-height:0;padding:16px 12px 0;background:#f6f8fc;border-radius:28px 28px 0 0;border:1px solid white;overflow:visible}
+html[data-client=apk] .drawer-backdrop{position:fixed;inset:0;z-index:60;display:flex;align-items:flex-end;background:#28344833;clip-path:none}
+html[data-client=apk] .queue-drawer{position:relative;inset:auto;width:min(100%,480px);margin-inline:auto;height:min(540px,68dvh,calc(100dvh - env(safe-area-inset-top,0px) - 12px));max-height:100%;display:flex;flex-direction:column;min-height:0;padding:12px max(12px,env(safe-area-inset-right,0px)) env(safe-area-inset-bottom,0px) max(12px,env(safe-area-inset-left,0px));background:#f6f8fc;border-radius:28px 28px 0 0;border:1px solid white;overflow:visible}
+html[data-client=apk] .queue-drawer::before{content:"";width:44px;height:4px;background:#bbc7d8;border-radius:4px;align-self:center;margin:-6px 0 10px;flex-shrink:0}
+html[data-client=apk] .queue-sheet-grip{position:absolute;top:0;left:50%;transform:translateX(-50%);width:min(132px,45%);height:44px;cursor:grab}
+html[data-client=apk] .queue-drawer[data-swipe-dismiss] :is(.queue-sheet-grip,.drawer-heading){touch-action:none;user-select:none}
+html[data-client=apk] .queue-drawer[data-swipe-dismiss]{transition:transform var(--motion-normal) var(--motion-ease)}
+html[data-client=apk] .queue-drawer.has-sheet-offset{transform:translateY(var(--queue-sheet-offset))}
+html[data-client=apk] .drawer-backdrop:not(.drawer-leave-active)>.queue-drawer.is-sheet-dragging{transition:none;cursor:grabbing}
+html[data-client=apk] .drawer-backdrop:has(.is-sheet-dragging){overflow:clip}
 .drawer-heading{display:flex;align-items:center;justify-content:space-between;gap:12px}.drawer-heading p{font-size:12px;color:var(--muted)}.queue-tabs{display:flex;align-items:center;gap:14px;min-height:44px}.queue-tabs button{background:transparent;color:var(--muted)}.queue-tabs .active{color:var(--accent);border-bottom:2px solid var(--accent)}.queue-clear{margin-left:auto}.queue-next-heading{display:flex;align-items:center;justify-content:space-between;font-size:13px}.queue-next-heading span{font-size:11px;color:var(--muted)}
-html[data-client=apk] .queue-scroll{flex:1;min-height:0;overflow:auto}.queue-row{display:flex;align-items:center;gap:6px;border-radius:16px}.queue-track{flex:1;min-width:0}.queue-track strong,.queue-track small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.queue-track strong{font-size:14px}.queue-track small{font-size:11px}.queue-row .album-art{width:40px;height:40px;border-radius:10px;flex-shrink:0}.queue-row time,.queue-index{display:none}.track-actions{display:flex;align-items:center;gap:0;flex-shrink:0}.queue-footer .primary{width:100%;min-height:48px}.queue-more{position:relative}.queue-more summary{display:grid;place-items:center;min-width:44px;min-height:44px;cursor:pointer;list-style:none}.queue-more>div{position:absolute;right:0;bottom:100%;z-index:5;background:#fff;border:1px solid var(--border);padding:8px;border-radius:14px;box-shadow:0 4px 18px #38527520;min-width:110px}.queue-more button{display:flex;min-height:44px;width:100%;background:transparent;font-size:13px}.queue-playing-icon{flex-shrink:0;color:var(--accent)}
+html[data-client=apk] .queue-scroll{flex:1;min-height:0;overflow:auto}.queue-row{display:flex;align-items:center;gap:6px;border-radius:16px}.queue-track{flex:1;min-width:0}.queue-track strong,.queue-track small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.queue-track strong{font-size:14px}.queue-track small{font-size:11px}.queue-row .album-art{width:40px;height:40px;border-radius:10px;flex-shrink:0}.queue-row time,.queue-index{display:none}.track-actions{display:flex;align-items:center;gap:0;flex-shrink:0}.queue-footer .primary{width:100%;min-height:48px}.queue-more{position:relative}.queue-more summary{display:grid;place-items:center;min-width:44px;min-height:44px;cursor:pointer;list-style:none}.queue-more>div{position:absolute;right:0;bottom:100%;z-index:5;background:#fff;border:1px solid var(--border);padding:8px;border-radius:14px;box-shadow:0 4px 18px #38527520;min-width:110px}.queue-more button{display:flex;min-height:44px;width:100%;background:transparent;font-size:13px}
 html[data-client=apk] .search-backdrop{z-index:70;background:transparent}
 html[data-client=apk] .global-search-modal.modal{width:100%;max-width:none;height:100dvh;max-height:100dvh;min-height:0;gap:0;padding:0;display:flex;flex-direction:column}
-html[data-client=apk] .global-search-header{min-height:calc(64px + env(safe-area-inset-top,0px));height:auto;padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px;display:flex;align-items:center;gap:12px;background:#eaf2faf5}.global-search-header h2{font-size:20px;flex:1}.global-search-header p,.global-search-header kbd{display:none}.search-symbol{display:grid;place-items:center;width:36px;height:36px;background:var(--accent);color:white;border-radius:12px}
-html[data-client=apk] .global-search-body{display:flex;flex:1;min-height:0;padding:16px}.search-main{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}.search-main>.eyebrow,.search-main>h1,.search-discovery,.global-search-footer{display:none}
-html[data-client=apk] .global-search-form{display:flex;align-items:center;gap:8px;min-height:56px;padding:4px 4px 4px 12px;background:white;border:1px solid #d9e3ef;border-radius:16px;flex-shrink:0}.global-search-form>.music-autocomplete{flex:1;min-width:0}.music-autocomplete{position:relative;min-width:0}.music-autocomplete input{width:100%;background:none;border:0;padding:10px 0}.global-search-form .primary{min-width:64px;min-height:44px;border-radius:12px;padding:8px}.music-suggestions{position:absolute;inset:100% 0 auto;z-index:15;margin:4px 0 0;max-height:30dvh;overflow:auto;list-style:none;padding:8px;background:white;border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 24px #38527520}.music-suggestions li{display:flex;align-items:center;gap:8px;min-height:44px;font-size:14px;padding:8px}.music-suggestions .active{background:#e7effc}.music-suggestion-status{font-size:12px;padding:8px;background:#ffffffb3;color:var(--muted)}
-.search-history{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-height:44px;margin:8px 0;color:var(--muted);font-size:12px;flex-shrink:0}.search-history button{min-height:44px;padding:8px;background:#ffffffb3;border-radius:14px;font-size:12px}.search-kind-tabs{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;flex-shrink:0}.search-kind-tabs button{min-height:44px;padding:8px 12px;background:#ffffffb3;border-radius:14px;font-size:13px}.search-kind-tabs button.selected{background:var(--accent);color:white}.search-kind-tabs>span{font-size:12px;color:var(--muted)}
-html[data-client=apk] .search-result-card{display:flex;flex:1;flex-direction:column;min-height:160px;padding:12px;border-radius:20px;border:1px solid white;background:#ffffffb3}.search-result-card>header{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;flex-shrink:0}.search-result-card>header>button{min-height:44px;background:#e7effc;color:var(--accent);padding:8px 12px;border-radius:14px;font-size:13px}.search-result-card>header>span{font-size:12px;color:var(--muted)}.result-columns{display:none}.music-search-results{flex:1;min-height:0;overflow:auto}.search-song-row{display:grid;grid-template-columns:40px minmax(0,1fr) 44px;gap:4px 10px;padding:12px 0;align-items:center;border-bottom:1px solid var(--border)}.search-song-row>.search-song-number,.search-song-row>.search-album,.search-song-row>time{display:none}.search-song-row .album-art{width:40px;height:40px;border-radius:10px;grid-column:1;grid-row:1/3}.search-song-row>strong{grid-column:2;grid-row:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}.search-song-row>.search-artist{grid-column:2;grid-row:2;font-size:12px;color:var(--muted)}.search-song-row>.icon-button{grid-column:3;grid-row:1/3;color:var(--accent);background:#e7effc}.music-search-pagination{display:flex;align-items:center;justify-content:center;gap:12px;flex-shrink:0}.music-search-message{font-size:13px;line-height:1.7;overflow-wrap:anywhere;color:var(--muted);user-select:text}
+html[data-client=apk] .search-backdrop.modal-leave-active>.global-search-modal{pointer-events:none}
+@media(prefers-reduced-motion:no-preference){
+  html[data-client=apk] .search-backdrop:is(.modal-enter-active,.modal-leave-active){transition:opacity var(--motion-normal) var(--motion-ease)}
+  html[data-client=apk] .search-backdrop:is(.modal-enter-active,.modal-leave-active)>.global-search-modal{transition:transform var(--motion-normal) var(--motion-ease)}
+  html[data-client=apk] .search-backdrop:is(.modal-enter-from,.modal-leave-to)>.global-search-modal{transform:translateY(20px);opacity:1}
+}
+@media(prefers-reduced-motion:reduce){
+  html[data-client=apk] .search-backdrop:is(.modal-enter-from,.modal-leave-to),
+  html[data-client=apk] .search-backdrop:is(.modal-enter-from,.modal-leave-to)>.global-search-modal{transform:none;opacity:1}
+}
+html[data-client=apk] .global-search-header{min-height:calc(52px + env(safe-area-inset-top,0px));height:auto;padding:calc(4px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) 4px max(12px,env(safe-area-inset-left,0px));display:flex;align-items:center;gap:8px;background:#eaf2faf5}
+html[data-client=apk] .global-search-header h2{font-size:16px;flex:1;min-width:0}
+.global-search-header p,.global-search-header kbd{display:none}
+html[data-client=apk] .global-search-header .search-symbol{display:grid;place-items:center;width:26px;height:26px;flex:none;background:var(--accent);color:white;border-radius:8px}
+html[data-client=apk] .global-search-header svg{width:16px;height:16px}
+html[data-client=apk] .global-search-body{display:flex;flex:1;min-height:0;padding:10px max(12px,env(safe-area-inset-right,0px)) 10px max(12px,env(safe-area-inset-left,0px))}
+.search-main{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0}.search-main>.eyebrow,.search-main>h1,.search-discovery,.global-search-footer{display:none}
+html[data-client=apk] .music-search-controls{position:relative;display:flex;align-items:center;min-width:0;min-height:48px;flex-shrink:0;margin-bottom:8px;padding:1px 4px;background:#fff;border:1px solid #d9e3ef;border-radius:16px}
+html[data-client=apk] .music-search-controls .music-source-picker{position:relative;flex:none;margin:0;padding-inline-end:4px}
+html[data-client=apk] .music-search-controls .music-source-picker::after{content:"";position:absolute;inset-inline-end:0;inset-block-start:50%;width:1px;height:22px;transform:translateY(-50%);background:var(--border);pointer-events:none}
+html[data-client=apk] .music-search-controls :is(.music-source-label,.music-source-icon),html[data-client=apk] .music-search-controls .global-search-form>svg{display:none}
+html[data-client=apk] .apk-search-source-trigger{width:clamp(86px,24vw,102px);min-height:44px;padding:0 4px;justify-content:space-between;gap:2px;background:transparent;color:#344861;border-radius:8px;font-size:12px;white-space:nowrap}
+.apk-search-source-trigger>span{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.apk-search-source-trigger[aria-expanded=true] svg{transform:rotate(180deg)}
+.apk-search-source-options{position:absolute;inset-block-start:calc(100% + 5px);inset-inline-start:0;z-index:16;display:grid;gap:2px;width:max-content;min-width:126px;padding:4px;background:#fbfcfe;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 24px #38527520}
+.apk-search-source-options button{min-height:44px;padding:0 8px;justify-content:space-between;background:transparent;border-radius:8px;font-size:13px;white-space:nowrap}
+.apk-search-source-options button[aria-pressed=true]{background:#e6effe;color:#396ebf;font-weight:600}
+html[data-client=apk] .music-search-controls .global-search-form{display:flex;align-items:center;gap:4px;flex:1;min-width:0;min-height:44px;margin:0;padding:0 0 0 8px;border:0;background:transparent}
+html[data-client=apk] .music-search-controls .music-autocomplete{position:static}
+html[data-client=apk] .music-search-controls input{min-width:0;min-height:44px;font-size:16px}
+html[data-client=apk] .music-search-controls .global-search-form .primary{flex:0 0 auto;min-width:44px;min-height:44px;gap:4px;white-space:nowrap}
+html[data-client=apk] .music-search-controls .global-search-form button svg{width:16px;height:16px}
+@media(max-width:279px){
+  html[data-client=apk] .music-search-controls{flex-wrap:wrap}
+  html[data-client=apk] .music-search-controls .music-source-picker{flex-basis:100%;padding-inline-end:0}
+  html[data-client=apk] .music-search-controls .music-source-picker::after{display:none}
+  html[data-client=apk] .music-search-controls .global-search-form{flex-basis:100%}
+}
+.global-search-form>.music-autocomplete{flex:1;min-width:0}.music-autocomplete{position:relative;min-width:0}.music-autocomplete input{width:100%;background:none;border:0;padding:4px 0}
+.music-suggestions{position:absolute;inset:100% 0 auto;z-index:15;margin:4px 0 0;max-height:30dvh;overflow:auto;list-style:none;padding:4px;background:white;border:1px solid var(--border);border-radius:12px;box-shadow:0 8px 24px #38527520}
+.music-suggestions li{display:flex;align-items:center;gap:6px;min-height:44px;font-size:13px;padding:4px 6px}.music-suggestions .active{background:#e7effc}.music-suggestion-status{font-size:12px;padding:5px 6px;background:#ffffffb3;color:var(--muted)}
+html[data-client=apk] .search-history{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-height:0;margin:0 0 6px;color:var(--muted);font-size:11px;flex-shrink:0}
+html[data-client=apk] .search-history button{min-height:44px;padding:4px 8px;background:#ffffffb3;border-radius:12px;font-size:12px}
+html[data-client=apk] .search-kind-tabs{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px;flex-shrink:0}
+html[data-client=apk] .search-kind-tabs button{min-width:0;min-height:44px;padding:4px 8px;background:#ffffffb3;border-radius:12px;font-size:12px}
+html[data-client=apk] .search-kind-tabs button:is(:disabled,.selected){min-height:32px}
+html[data-client=apk] .search-kind-tabs button.selected{background:var(--accent);color:white}
+html[data-client=apk] .search-kind-tabs>span{font-size:11px;color:var(--muted)}
+html[data-client=apk] .search-result-card{display:flex;flex:1;flex-direction:column;min-height:112px;padding:6px 8px;border-radius:14px;border:1px solid white;background:#ffffffb3}
+html[data-client=apk] .search-result-card>header{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;flex-shrink:0}
+html[data-client=apk] .search-result-card>header>span{font-size:11px;color:var(--muted)}
+.result-columns{display:none}
+.music-search-results{flex:1;min-height:0;overflow:auto}
+html[data-client=apk] .global-search-modal .search-song-row{display:grid;grid-template-columns:30px minmax(0,1fr) 44px;gap:0 8px;padding:3px 0;min-height:52px;align-items:center;border-bottom:1px solid var(--border)}
+.search-song-row>.search-song-number,.search-song-row>.search-album,.search-song-row>time{display:none}
+html[data-client=apk] .global-search-modal .search-song-row .album-art{width:30px;height:30px;border-radius:8px;grid-column:1;grid-row:1/3}
+html[data-client=apk] .global-search-modal .search-song-row>strong{grid-column:2;grid-row:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;align-self:end}
+html[data-client=apk] .global-search-modal .search-song-row>.search-artist{grid-column:2;grid-row:2;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px;color:var(--muted);align-self:start}
+html[data-client=apk] .global-search-modal .search-song-row>.icon-button{grid-column:3;grid-row:1/3;color:var(--accent)}
+html[data-client=apk] .global-search-modal .search-song-row>.icon-button svg{width:16px;height:16px}
+html[data-client=apk] .music-search-pagination{display:flex;align-items:center;justify-content:center;gap:6px;flex-shrink:0;font-size:11px}
+html[data-client=apk] .music-search-pagination .text-button{min-width:44px}
+.music-search-message{font-size:12px;line-height:1.5;overflow-wrap:anywhere;color:var(--muted);user-select:text}
 .empty-state{padding:24px 12px;text-align:center;color:var(--muted);font-size:14px;line-height:1.7}.source-badge{padding:4px 8px;background:#ffffffb3;border-radius:10px;color:var(--muted);font-size:10px}.aside-note{font-size:12px;color:var(--muted);line-height:1.7}
-.up-next{padding:16px;background:#ffffff80;border:1px solid white;border-radius:20px}.up-next header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.up-next header>span{font-size:12px;color:var(--muted)}.up-next header>button{min-height:44px;padding:8px;background:#ffffff80;border-radius:12px;font-size:12px}.next-track-grid{display:flex;flex-direction:column;gap:12px;margin-top:12px}.next-track-grid>button{display:flex;align-items:center;gap:12px;background:transparent;text-align:left;padding:8px}.next-track-grid .album-art{width:42px;height:42px;border-radius:10px}.next-track-grid strong,.next-track-grid small{display:block}.next-empty{font-size:12px;color:var(--muted);line-height:1.7}
-@media(min-width:600px){.apk-room-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));align-content:start}.apk-collections{grid-template-columns:repeat(3,minmax(0,1fr))}.apk-player .apk-mini-player{max-width:960px;margin:auto}.apk-player .apk-expanded-controls{max-width:960px;margin:auto}}
-@media(min-width:760px) and (min-height:600px){.apk-listen{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);align-items:stretch;gap:20px}.apk-listen-main{min-width:0}.apk-chat-area{min-width:0;position:sticky;top:0;height:calc(100dvh - var(--apk-header) - var(--workspace-player) - 32px);min-height:260px}.apk-chat-toggle{display:none}.apk-chat-area .room-chat{position:static;width:100%;height:100%;max-width:none;box-shadow:none}.apk-collections{grid-template-columns:repeat(4,minmax(0,1fr))}}
-@media(max-height:560px){.apk-hero{padding:8px 12px}.apk-hero h1,.apk-hero p{display:none}.apk-login{justify-content:flex-start;gap:16px;padding-top:16px}.apk-login-brand>svg{display:none}.apk-chat-area .room-chat{padding:12px}.chat-quick-replies{display:none}.room-chat-messages{flex:1 0 80px}html[data-client=apk] .global-search-body{flex:none;min-height:280px}.search-history{display:none}}
-@media(orientation:landscape) and (max-height:599px){.apk-listen-stage:not(.lyrics-only){display:grid;grid-template-columns:minmax(120px,.8fr) minmax(0,1.2fr);grid-template-rows:auto 1fr;gap:12px}.apk-model{grid-column:1;grid-row:1/3;width:100%;height:220px}.apk-current-song{grid-column:2;grid-row:1}.apk-lyrics{grid-column:2;grid-row:2}}
-html[data-client=apk] .drawer-enter-from>.queue-drawer,html[data-client=apk] .drawer-leave-to>.queue-drawer{transform:translateY(24px)}
+/* Brilliant room arrangement. The same footer switches between mini and room controls. */
+:root[data-client=apk]:has(.apk-room-player){--apk-room-nav-gap:8px;--apk-player:min(calc(var(--apk-room-control-limit,236px) + var(--apk-room-nav-gap)),max(92px,calc(100dvh - var(--apk-header) - var(--apk-tabs) - 110px)))}
+.apk-room-header{justify-content:space-between}
+.apk-room-header .icon-button{flex-shrink:0;color:var(--accent)}
+.apk-room-header-title{display:grid;min-width:0;flex:1;justify-items:center;text-align:center}
+.apk-room-header-title strong,.apk-room-header-title small{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.apk-room-header-title strong{font-size:16px;color:var(--text);line-height:1.45}
+.apk-room-header-title small{font-size:11px}
+.apk-room-header-title small[data-state=offline]{color:#8c5b32}
+.apk-room-toast{top:calc(var(--apk-header) + 4px);left:max(12px,env(safe-area-inset-left,0px));right:max(12px,env(safe-area-inset-right,0px));max-height:max(64px,40dvh);overflow:auto}
+.apk-workspace>.route-page:has(.apk-listen){display:flex;flex-direction:column;padding-block:4px 8px;padding-inline:max(var(--apk-room-gutter,24px),env(safe-area-inset-left,0px)) max(var(--apk-room-gutter,24px),env(safe-area-inset-right,0px))}
+.apk-room-player{background:linear-gradient(135deg,#f0f2ef,#fbf2e4 85%);border:0;overscroll-behavior:contain}
+.apk-room-controls{width:min(100%,740px);margin:auto;display:grid;gap:4px;padding:4px max(var(--apk-room-gutter,24px),env(safe-area-inset-right,0px)) calc(4px + var(--apk-room-nav-gap,0px)) max(var(--apk-room-gutter,24px),env(safe-area-inset-left,0px))}
+.apk-room-song{display:flex;align-items:center;min-width:0;gap:6px;min-height:48px}
+.apk-room-track{flex:1;min-width:0}
+.apk-room-track h1,.apk-room-track p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.apk-room-track h1{font-size:24px;line-height:1.3}
+.apk-room-track p{font-size:13px;color:var(--muted);line-height:1.4}
+.apk-room-song>.song-favorite{min-width:44px;min-height:44px;color:var(--accent)}
+.apk-room-timeline{min-width:0;display:flex;flex-direction:column}
+.apk-room-timeline input{appearance:none;width:100%;height:44px;min-height:44px;margin:0;cursor:pointer;padding-inline:2px}
+.apk-room-timeline input:disabled{opacity:.6;cursor:not-allowed}
+.apk-room-timeline input::-webkit-slider-runnable-track{height:4px;border-radius:4px;background:linear-gradient(to right,var(--accent) 0 var(--apk-seek-fill),#cedbe8 var(--apk-seek-fill) 100%)}
+.apk-room-timeline input::-webkit-slider-thumb{appearance:none;width:14px;height:14px;margin-top:-5px;border-radius:50%;border:2px solid var(--accent);background:#fff}
+.apk-room-timeline input::-moz-range-track{height:4px;border-radius:4px;background:#cedbe8}
+.apk-room-timeline input::-moz-range-progress{height:4px;border-radius:4px;background:var(--accent)}
+.apk-room-time{display:grid;grid-template-columns:max-content minmax(0,1fr) max-content;gap:4px;font-size:11px;color:var(--muted);line-height:1.35;text-align:center;font-variant-numeric:tabular-nums}
+.apk-room-transport{display:grid;grid-template-columns:repeat(2,minmax(44px,1fr)) var(--apk-room-play-size,64px) repeat(2,minmax(44px,1fr));justify-items:center;align-items:center}
+.apk-room-transport .icon-button{color:#617b96}
+.apk-room-transport .apk-room-play{width:var(--apk-room-play-size,64px);height:var(--apk-room-play-size,64px);border-radius:50%;color:#fff;background:var(--accent);box-shadow:0 6px 16px #4f80db30}
+.apk-room-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:center}
+.apk-room-actions .text-button{gap:5px;padding:4px;color:#60748a}
+.apk-room-actions .text-button[aria-pressed=true]{background:#e7effc;color:var(--accent);border-radius:12px}
+.apk-room-preferences input[type=range]{width:100%}
+/* Tighten decorative geometry and headings without shrinking fields or tap targets. */
+@media(max-width:599px){
+  :root[data-client=apk]{--apk-header:calc(48px + env(safe-area-inset-top,0px));--apk-tabs:calc(48px + env(safe-area-inset-bottom,0px));--apk-mini-player-height:48px;--apk-field-min:44px;--apk-room-control-limit:208px;--apk-room-play-size:48px;--apk-room-gutter:12px;--apk-vinyl-max:246px}
+  h1{font-size:20px}h2{font-size:16px}
+  .primary,.secondary,.global-search-modal .search-result-card>header>button{min-height:44px;padding:7px 12px;border-radius:12px;font-size:13px}
+  .apk-header{gap:2px;padding:calc(2px + env(safe-area-inset-top,0px)) max(6px,env(safe-area-inset-right,0px)) 2px max(8px,env(safe-area-inset-left,0px))}
+  .apk-header>strong{font-size:16px}
+  .apk-header>svg,.apk-header>button>svg,.apk-mini-player>button>svg{width:18px;height:18px}
+  .apk-workspace>.route-page{padding:4px max(8px,env(safe-area-inset-right,0px)) 8px max(8px,env(safe-area-inset-left,0px))}
+  .apk-card{padding:8px;border-radius:14px}
+  .apk-login{--apk-login-short-gap:8px;gap:8px;padding:calc(12px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) calc(12px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px))}
+  .apk-login-brand{gap:2px}.apk-login-brand>svg{width:30px;height:30px}
+  .apk-login-form{gap:6px}.apk-login-form>label{gap:3px}
+  .apk-input{gap:6px;min-height:46px;padding-inline:8px}.apk-input input{padding-block:8px}
+  .apk-navigation{padding-top:2px}
+  .apk-navigation>a,.apk-navigation>button{min-height:44px;gap:2px}
+  .apk-navigation svg{width:16px;height:16px;padding:2px 10px}
+  .apk-mini-player{padding:1px 4px 1px 8px}
+  .apk-playing-summary{gap:5px}.apk-playing-summary .album-art{width:26px;height:26px;flex-basis:26px}
+  .apk-music,.apk-listen-main{gap:6px}
+  .apk-collections{gap:10px 8px}.apk-profile,.apk-collection-summary,.apk-song-row{gap:8px}
+  .apk-profile>.album-art{width:48px;height:48px}.apk-collection-summary>.album-art{width:52px;height:52px;flex-basis:52px}.apk-song-row{min-height:54px;padding:4px 8px}
+  .apk-listen-stage{gap:8px}
+  .apk-model{height:min(100cqh,156px);width:min(100%,216px)}
+  .apk-room-controls{gap:2px;padding-block:2px calc(2px + var(--apk-room-nav-gap,0px))}
+  .apk-room-track h1{font-size:18px}
+  .apk-room-track p,.apk-room-actions .text-button{font-size:12px}
+  .apk-room-transport svg,.apk-room-song .icon-button svg{width:18px;height:18px}
+  .apk-room-transport .apk-room-play svg{width:22px;height:22px}
+  .apk-room-song{min-height:44px}
+  .apk-lyrics .lyric-scroll{padding-block:12px;scroll-padding-block:12px}
+  html[data-client=apk] .modal,html[data-client=apk] .tone-dialog{gap:12px;padding:calc(12px + env(safe-area-inset-top,0px)) max(12px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(12px,env(safe-area-inset-left,0px))}
+  html[data-client=apk] .queue-drawer{padding:10px max(10px,env(safe-area-inset-right,0px)) env(safe-area-inset-bottom,0px) max(10px,env(safe-area-inset-left,0px));border-radius:22px 22px 0 0}
+  html[data-client=apk] .queue-drawer .drawer-heading h2{font-size:17px}
+  html[data-client=apk] .queue-drawer .queue-tabs{gap:10px;margin-top:4px}
+  html[data-client=apk] .queue-drawer .queue-row{min-height:48px;padding:1px 2px;border-radius:12px}
+  html[data-client=apk] .queue-drawer .queue-row .album-art{width:32px;height:32px;flex-basis:32px;border-radius:8px}
+  html[data-client=apk] .queue-drawer .queue-footer{padding:6px 0 8px}
+  html[data-client=apk] .queue-drawer .queue-footer .primary{min-height:44px;font-size:13px}
+  .apk-chat-area .room-chat{padding:10px}
+}
+@media(max-width:279px){.apk-room-transport,.apk-room-actions{display:flex;flex-wrap:wrap;justify-content:center}}
+@media(min-width:600px){.apk-collections{grid-template-columns:repeat(3,minmax(0,1fr))}.apk-player .apk-mini-player{max-width:960px;margin:auto}}
+@media(max-height:500px){
+  html[data-client=apk] .queue-drawer{height:min(320px,calc(100dvh - env(safe-area-inset-top,0px) - 12px));overflow-y:auto}
+  html[data-client=apk] .queue-drawer .queue-scroll{min-height:80px;flex-shrink:0}
+}
+@media(min-width:760px) and (min-height:600px){.apk-listen{--apk-vinyl-max:255px;display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:20px}.apk-chat-area{min-width:0;min-height:0}.apk-room-chat-trigger{display:none}.apk-chat-area .room-chat{position:static;width:100%;height:100%;max-width:none;box-shadow:none}.apk-collections{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media(max-height:560px){.apk-login{justify-content:flex-start;gap:var(--apk-login-short-gap,16px);padding-top:calc(16px + env(safe-area-inset-top,0px))}.apk-login-brand>svg{display:none}.apk-chat-area .room-chat{padding:12px}.chat-quick-replies{display:none}.room-chat-messages{flex:1 0 80px}html[data-client=apk] .global-search-body{flex:none;min-height:216px}html[data-client=apk] .search-history{display:none}}
+@media(orientation:landscape) and (min-width:600px) and (max-height:599px){
+  :root[data-client=apk]:has(.apk-room-player){--apk-room-control-limit:124px;--apk-room-play-size:52px;--apk-room-nav-gap:6px}
+  .apk-listen{--apk-vinyl-max:190px}
+  .apk-room-controls{grid-template:"song timeline" auto "actions transport" auto / minmax(0,1fr) minmax(0,1.2fr);column-gap:16px}
+  .apk-room-song{grid-area:song}.apk-room-timeline{grid-area:timeline}.apk-room-transport{grid-area:transport}.apk-room-actions{grid-area:actions}
+}
+@media(max-height:350px){
+  html[data-client=apk] .queue-drawer{overflow-y:auto}
+  html[data-client=apk] .queue-scroll{min-height:64px;flex-shrink:0}
+}
+@media(prefers-reduced-motion:no-preference){
+  html[data-client=apk] .drawer-enter-from>.queue-drawer,html[data-client=apk] .drawer-leave-to>.queue-drawer{transform:translateY(100%)}
+  /* Only clip offscreen pixels while the sheet enters or leaves the viewport. */
+  html[data-client=apk] .drawer-backdrop:is(.drawer-enter-active,.drawer-leave-active){overflow:clip}
+}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}

@@ -4,6 +4,15 @@ import type { Plugin } from 'vite';
 export function apkEntryPlugin(): Plugin {
  return {
   name:'tone-independent-apk-entry',
+  configureServer(server) {
+   // The Android WebView loads the dev proxy's root, not the explicit preview URL.
+   server.middlewares.use((req, _res, next) => {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+     req.url = req.url?.replace(/^\/(?:index\.html)?(?=\?|$)/, '/apk.html');
+    }
+    next();
+   });
+  },
   enforce:'post',
   generateBundle:{order:'post',handler(_options,bundle){
    const forbidden=[...this.getModuleIds()].filter(id=>/\/src\/(?:App\.vue|views\/|components\/(?:AuthPage|GlobalPlayer)\.vue|(?:style|responsive|tone|brilliant|adaptive-layout)\.css)/.test(id.replace(/\\/g,'/')));

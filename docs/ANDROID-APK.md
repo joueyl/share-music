@@ -21,7 +21,8 @@ APK 现在有独立 HTML、Vue 根组件、路由页面和响应式样式，使�
 ## 试用范围与限制
 
 - APK 登录、发现、播放及音乐页采用独立模板；真实业务与桌面共享。手机纵向、低矮横屏、展开大屏按可用宽高响应，760×600 以上播放与聊天双栏，不假装识别实体铰链。
-- 暂不启用桌面托盘、窗口按钮、Rust 音频缓存和桌面更新器；仅新增独立 `saved-login` 原生插件用于记住密码，Android Keystore 密钥配合 AES-GCM 加密、原子写入应用不备份目录，详情见[安全记住密码](SAVED-LOGIN.md)。浏览器 `dev:apk` 不提供原生安全存储。音频走现有服务端鉴权代理；跨域请求需要后端允许实际 Android WebView Origin，不得用放开任意来源/凭据或关闭鉴权替代配置。
+- 暂不启用桌面托盘、窗口按钮、Rust 音频缓存和桌面更新器。`saved-login` 用于记住密码，Android Keystore 密钥配合 AES-GCM 加密、原子写入应用不备份目录，详情见[安全记住密码](SAVED-LOGIN.md)。WebView 的登录、房间和 WebSocket 仍需要后端允许实际来源，不放开任意来源或关闭鉴权。
+- 原生 APK 的音乐由 `android-playback` 插件交给系统 `MediaPlayer`，不使用 WebView 解码。应用先用当前房间成员身份向既有取链接口取得 HTTPS 链接和大小，再由 Android 向允许的音源域名读取字节范围，不向音源发送同频凭据。拒绝越界或大小不符的响应；音源忽略 Range 时，改由原生下载至临时文件，完整校验大小后播放。音源失败时最多强制续链一次，不回退到 WebView 播放。不提取音频内嵌封面，继续显示歌曲已有封面。浏览器 `dev:apk` 预览仍沿用网页播放，不具备原生播放和安全存储。
 - 不实现安卓原生通知、媒体会话、前台服务或后台/锁屏保活；切后台后可能暂停或被系统回收，不能承诺连续播放。APK 布局独立，3D 场景与材质复用共享实现，移动 GPU 的性能与后台播放仍待实机测试。
 - Android 配置保留现有 identifier 和统一版本源；不复制桌面固定最小窗口尺寸，不单独维护版本。
 
@@ -37,6 +38,30 @@ Android 环境初始化显式指定 `setup-android` 的 `packages: platform-tool
 4. 前置 verify job 对两端运行类型、客户端测试、入口/SDK/测试签名配置及两个构建；生成 Gradle 工程后追加 Release 专用测试签名配置，通过后执行 `tauri android build --ci --apk --target aarch64 --config src-tauri/tauri.android.conf.json`。打包后再次检查 `dist-apk` 标记。Release 的 Rust 配置只在 Android job 中启用 `opt-level=s`、`debug=0`、`strip=symbols`、thin LTO 和单 codegen unit，不改变桌面构建。本地原生开发需先安装 SDK/NDK/Java 与 Rust Android target。
 
 ## 本地命令
+
+### 原生调试
+
+在仓库根目录执行。首次先安装 JDK 17、Android SDK（含 Platform-Tools、API 36、Build-Tools 36.0.0）和 NDK 27.2.12479018，配置 `JAVA_HOME`、`ANDROID_HOME`、`NDK_HOME`，并安装设备架构对应的 Rust target。只需在首次生成或重新生成 Android 工程时运行（PowerShell）：
+
+```powershell
+npm run tauri -w @music-share/client -- android init --ci --skip-targets-install
+$env:ANDROID_API_LEVEL = '36'
+$env:BUILD_TOOLS_VERSION = '36.0.0'
+node scripts/configure-android-sdk.mjs
+```
+
+启动模拟器或连接已授权 USB 调试的手机。单设备连接时执行：
+
+```powershell
+adb devices
+npm run android
+```
+
+`npm run android` 在启动前自动将前端端口（默认 `11421`）和 `VITE_SERVER_URL` 指向的回环后端端口（默认 `3000`）通过 `adb reverse` 转回电脑。不为远程 API 转发端口。多设备时，先设置 `$env:ANDROID_SERIAL = '<设备序列号>'`，再用 `npm run android -- <设备名>` 选择同一台设备。若设备重连导致映射丢失，重新执行启动命令即可重新配置。
+
+Tauri 移动端代理访问开发服务根路径，由 Vite 返回 APK 独立入口，不打开电脑浏览器或自动启动后端。要调试登录、房间等功能，仍需另开终端启动已配置开发数据库的 `npm run dev:server`，并在开发后端的 `ALLOWED_ORIGINS` 中保留 Android WebView 实际来源（默认 `http://tauri.localhost`；浏览器预览使用 `http://127.0.0.1:11421`）。HTTP 和 WebSocket 都需要允许该来源。如果 `11421` 已被浏览器预览占用，先停止预览。
+
+### 浏览器预览与前端检查
 
 - `npm run dev:apk`：仅监听 `127.0.0.1:11421`，打开 `/apk.html`，使用 `apk-development` 模式，默认连接本机 `127.0.0.1:3000`；需另开终端执行 `npm run dev:server`，不会自动启动后端或执行 Android 打包。本地后端需要已配置好开发数据库，不要指向生产数据库。
 - 自定义地址可在 PowerShell 启动前设置 `$env:VITE_SERVER_URL="http://127.0.0.1:3100"`；修改后重启 Vite。若后端已有自定义 `ALLOWED_ORIGINS`，手动补充 `http://127.0.0.1:11421`（localhost 访问时还需对应 localhost 来源），不使用通配来源替代。

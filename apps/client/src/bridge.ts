@@ -1,14 +1,15 @@
 import { favoriteSongSchema, type FavoriteSong } from '@music-share/shared';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri as isNativeShell } from '@tauri-apps/api/core';
 import { isDesktopRuntime as isTauri } from './native-runtime';
 import { configureRuntimeProfile, getRuntimeProfile } from './runtime-profile';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { apiResponse } from './api-response';
-import { CloudPlayer } from './cloud-player';
+import { CloudPlayer, type PlaybackDiagnostic } from './cloud-player';
+import { AndroidPlayback } from './apk/android-playback';
 import { AudioWaveform, releaseWaveformAudio } from './audio-waveform';
 import { loadPlaybackSource } from './playback-source';
 import { rememberTrackArtwork, trackArtwork } from './track-artwork';
-import { normalizeAlbumCover, parseMusicReference, type MusicReference, type MusicCollection, parsePlaylistLink, isPlaylistShortLink, playlistReference } from '@music-share/shared';
+import { musicAudioHost, normalizeAlbumCover, parseMusicReference, type MusicReference, type MusicCollection, parsePlaylistLink, isPlaylistShortLink, playlistReference } from '@music-share/shared';
 import type { SystemMediaState } from './system-media';
 import type { ArtworkFrame } from './system-artwork';
 import { listen } from '@tauri-apps/api/event';
@@ -103,7 +104,8 @@ function connectBrowser() {
   current.onclose = event => {
     if (!active()) return;
     cancelChats('CHAT_DISCONNECTED');
-    audio?.pause(); emit('connection', { connected: false });
+    if (androidPlayback) clearCloud(); else audio?.pause();
+    emit('connection', { connected: false });
     if (event.code === 4001 || event.code === 4009) { emit('server-message', { type: 'error', error: 'SESSION_EXPIRED' }); return; }
     reconnectTimer = setTimeout(() => { if (active()) connectBrowser(); }, 2000);
   };
@@ -117,7 +119,7 @@ export async function logout(): Promise<void> {
   token = ''; base = ''; joinedRoom = null;
   const previous = socket; socket = undefined;
   previous?.close(1000, 'Logout');
-  audio?.pause(); emit('connection', { connected: false });
+  (androidPlayback ?? audio)?.pause(); emit('connection', { connected: false });
 }
 
 export type RoomSettings = NonNullable<RoomSnapshot['settings']>;
@@ -196,23 +198,43 @@ export async function sendChat(roomId: string, text: string, requestId: string):
 export async function importFile(): Promise<TrackMetadata> {
  throw new Error('本地文件云上传已停用，请从音乐搜索或音乐库添加歌曲');
 }
-export async function setVolume(volume: number) { if (audio) audio.volume=volume; }
+export async function setVolume(volume: number) { if (androidPlayback) await androidPlayback.setVolume(volume); else if (audio) audio.volume=volume; }
 export async function capabilities(): Promise<{ native: boolean; reason: string; capture: boolean }> {
- const cap=desktop?await invoke<{native:boolean;reason:string;capture:boolean;platform?:string;arch?:string}>('media_capabilities'):{native:false,capture:false,reason:'音乐直链播放与 WebSocket 同步',platform:undefined,arch:undefined};
+ const cap=desktop?await invoke<{native:boolean;reason:string;capture:boolean;platform?:string;arch?:string}>('media_capabilities'):{native:!!androidPlayback,capture:false,reason:androidPlayback?'Android 原生播放与 WebSocket 同步':'音乐直链播放与 WebSocket 同步',platform:undefined,arch:undefined};
  configureRuntimeProfile(cap.platform,cap.arch);return cap;
 }
 
-let audio = typeof Audio === 'undefined' ? null : new Audio();
+const androidPlayback = import.meta.env.VITE_CLIENT_TARGET === 'apk' && isNativeShell() ? new AndroidPlayback() : null;
+let audio = androidPlayback || typeof Audio === 'undefined' ? null : new Audio();
 export function createPlaybackWaveform() { return audio&&getRuntimeProfile().audioAnalysis ? new AudioWaveform(() => audio) : null; }
 function replacePlaybackAudio(previous: HTMLAudioElement) {
   const next = new Audio(); next.volume = previous.volume; next.muted = previous.muted; next.playbackRate = previous.playbackRate;
   releaseWaveformAudio(previous); previous.removeAttribute('src'); previous.load();
   audio = next; return next;
 }
-const cloudPlayer = audio ? new CloudPlayer(audio,
-  async (roomId, trackId, track) => loadPlaybackSource(async (refresh=false) => await browserRequest(`/rooms/${roomId}/music/${trackId}`+(refresh?'?refresh=1':'')), desktop, track,
-    current=>browserAudio(roomId,trackId,current)),
-  send, emit, Date.now, replacePlaybackAudio) : null;
+function roomPlaybackLink(roomId: string, trackId: string, refresh = false) {
+  return browserRequest(`/rooms/${roomId}/music/${trackId}` + (refresh ? '?refresh=1' : ''));
+}
+const media = androidPlayback ?? audio;
+const cloudPlayer = media ? new CloudPlayer(media,
+  async (roomId, trackId, track, refresh) => {
+    if (androidPlayback) {
+      const { url, sizeBytes } = await roomPlaybackLink(roomId, trackId, refresh);
+      if (typeof url !== 'string' || !Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > 100 * 1024 * 1024) {
+        throw new Error('PLAYBACK_AUDIO_METADATA_INVALID');
+      }
+      const source = new URL(url);
+      if (source.protocol !== 'https:' || !musicAudioHost(source.hostname) || source.port || source.username || source.password || source.hash) {
+        throw new Error('MUSIC_SOURCE_INVALID');
+      }
+      return { url: source.href, sizeBytes, release: () => {} };
+    }
+    return loadPlaybackSource(next => roomPlaybackLink(roomId, trackId, next), desktop, track, current=>browserAudio(roomId,trackId,current));
+  },
+  send, emit, Date.now, audio ? () => replacePlaybackAudio(audio!) : undefined) : null;
+export function setApkPlaybackDiagnostic(observer?: (event: PlaybackDiagnostic) => void) {
+  if (import.meta.env.VITE_CLIENT_TARGET === 'apk') cloudPlayer?.setDiagnostic(observer);
+}
 export async function browserAudio(roomId:string,trackId:string,track:Pick<TrackMetadata,'sizeBytes'>):Promise<ArrayBuffer>{
  if(!Number.isSafeInteger(track.sizeBytes)||track.sizeBytes<1||track.sizeBytes>100*1024*1024)throw new Error('PLAYBACK_AUDIO_TOO_LARGE');
  let response:Response;
@@ -235,7 +257,12 @@ function clearCloud() { cloudPlayer?.clear(); }
 export async function syncCloud(room: RoomSnapshot, clockOffset: number) {
   if (room.playlist) await cloudPlayer?.sync(room, clockOffset);
 }
-setInterval(() => { if (socket?.readyState === WebSocket.OPEN) cloudPlayer?.tick(); }, 100);
+setInterval(() => {
+  if (socket?.readyState === WebSocket.OPEN) {
+    androidPlayback?.poll();
+    cloudPlayer?.tick();
+  }
+}, 100);
 
 export type MusicSearchItem = { id: string; name: string; artists: string; album: string; coverUrl: string; durationMs: number };
 export type UploadedMusicItem = Omit<MusicSearchItem,'durationMs'> & {durationMs:number|null;sizeBytes:number|null;canAdd?:boolean};

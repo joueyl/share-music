@@ -3,7 +3,7 @@ import { verifyAudio } from './audio-integrity';
 import type { TrackMetadata } from '@music-share/shared';
 import { extractEmbeddedCover } from './embedded-cover';
 import { releaseEmbeddedTrackArtwork, setEmbeddedTrackArtwork } from './track-artwork';
-export type PlaybackSource = { url: string; release: () => void };
+export type PlaybackSource = { url: string; release: () => void; sizeBytes?: number };
 type CacheMetadata = Pick<TrackMetadata, 'contentHash' | 'sizeBytes' | 'name' | 'ossKey' | 'sourceUrl'>;
 function audioBytes(bytes: ArrayBuffer | number[] | null): ArrayBuffer | Uint8Array<ArrayBuffer> | null {
   return bytes instanceof ArrayBuffer ? bytes : Array.isArray(bytes) ? new Uint8Array(bytes) : null;

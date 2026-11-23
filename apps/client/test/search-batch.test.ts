@@ -20,13 +20,36 @@ beforeEach(()=>{
  f.batch.mockReset().mockImplementation(async(_room:string,items:any[])=>items.map(item=>({...item,ok:true,track:{id:item.songId}})));f.single.mockReset();
 });
 afterEach(()=>{mounted?.unmount();vi.unstubAllGlobals();});
-async function mount(provider='netease'){
- const root=node('root');mounted=renderer.createApp(SearchDialog,{roomId:'room'});mounted.mount(root);
+async function mount(provider='netease',apkSourceMenu=false){
+ const root=node('root');mounted=renderer.createApp(SearchDialog,{roomId:'room',apkSourceMenu});mounted.mount(root);
  for(const item of all(root))item.focus=vi.fn();await settle();
  if(provider==='qq'){all(root).find(item=>item.type==='select').props['onUpdate:modelValue']('qq');await settle();}
  all(root).find(item=>item.props.id==='music-keywords').props.onInput({target:{value:'test'}});
  await all(root).find(item=>item.type==='form').props.onSubmit({preventDefault(){}});await settle();return root;
 }
+it('toggles the APK source menu with the same trigger and closes it before the search on Escape',async()=>{
+ const root=await mount('netease',true);
+ const trigger=()=>all(root).find(item=>item.props.class==='apk-search-source-trigger');
+ const menu=()=>all(root).find(item=>item.props.id==='apk-search-source-options');
+ trigger().props.onClick();await settle();
+ expect(trigger().props['aria-expanded']).toBe(true);
+ expect(menu()).toBeDefined();
+ trigger().props.onClick();await settle();
+ expect(trigger().props['aria-expanded']).toBe(false);
+ expect(menu()).toBeUndefined();
+ trigger().props.onClick();await settle();
+ const keydown=vi.mocked(document.addEventListener).mock.calls.find(([type])=>type==='keydown')?.[1];
+ (keydown as (event:unknown)=>void)({key:'Escape',preventDefault:vi.fn(),stopPropagation:vi.fn()});
+ await settle();
+ expect(menu()).toBeUndefined();
+ expect(all(root).some(item=>item.props.role==='dialog')).toBe(true);
+ trigger().props.onClick();await settle();
+ all(root).find(item=>item.type==='button'&&text(item)==='QQ 音乐').props.onClick();await settle();
+ expect(trigger().props['aria-label']).toContain('QQ 音乐');
+ expect(trigger().focus).toHaveBeenCalledWith({preventScroll:true});
+ await all(root).find(item=>item.type==='form').props.onSubmit({preventDefault(){}});await settle();
+ expect(f.search).toHaveBeenLastCalledWith('test',0,'qq');
+});
 it.each(['netease','qq'])('search add-all uses one %s project batch and retains failed request IDs for retry',async(provider)=>{
  const root=await mount(provider);
  f.batch.mockImplementationOnce(async(_room:string,items:any[])=>items.map(item=>item.songId==='2'?{...item,ok:false,error:'MUSIC_NOT_AVAILABLE'}:{...item,ok:true,track:{id:item.songId}}));

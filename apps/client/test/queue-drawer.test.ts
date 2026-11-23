@@ -28,10 +28,53 @@ beforeEach(()=>{
  f.app=reactive({host:true,connected:true,pendingActions:0,user:{id:'host'},permission:{skip:true,enqueue:true,playbackMode:true},room:{id:'room',playbackMode:'queue',stateVersion:1,pending:null,members:[],playback:{sourceId:'b'},playlist:['a','b','c','d'].map(id=>({id,name:id,available:true,providerId:'host',durationMs:100000}))},act:vi.fn().mockResolvedValue(undefined)});
 });
 afterEach(()=>{mounted?.unmount();vi.unstubAllGlobals();});
-async function mount(){const root=node('root');mounted=renderer.createApp(QueueDrawer);mounted.use(createPinia());mounted.mount(root);await settle();
+async function mount(props?:{swipeDismiss:boolean}){const root=node('root');mounted=renderer.createApp(QueueDrawer,props);mounted.use(createPinia());mounted.mount(root);await settle();
  const dialog=all(root).find(n=>n.props.role==='dialog'),list=all(root).find(n=>n.props['aria-label']==='播放队列');
- Object.assign(dialog,{setPointerCapture:vi.fn(),hasPointerCapture:()=>false});Object.assign(list,{contains:()=>true,getBoundingClientRect:()=>({top:0,bottom:400}),scrollTop:0});
+ Object.assign(dialog,{offsetHeight:654,setPointerCapture:vi.fn(),hasPointerCapture:()=>true,releasePointerCapture:vi.fn()});Object.assign(list,{contains:()=>true,getBoundingClientRect:()=>({top:0,bottom:400}),scrollTop:0});
  return {root,dialog,list};}
+function sheetPointer(dialog:any,clientY:number,timeStamp:number,area:'handle'|'list'|'button'='handle',clientX=60){
+ return {pointerId:7,pointerType:'touch',isPrimary:true,button:0,clientY,clientX,timeStamp,currentTarget:dialog,
+  target:{closest:(query:string)=>query==='.queue-sheet-grip,.drawer-heading'?area!=='list'&&{}:area==='button'&&{}},
+  preventDefault:vi.fn()};
+}
+it('follows an APK handle drag and dismisses it without a playback or reorder command',async()=>{
+ const {root,dialog}=await mount({swipeDismiss:true});
+ const start=sheetPointer(dialog,160,0);
+ dialog.props.onPointerdown(start);expect(start.preventDefault).toHaveBeenCalledOnce();
+ dialog.props.onPointermove(sheetPointer(dialog,296,240));await settle();
+ expect(dialog.props.style).toMatchObject({'--queue-sheet-offset':'136px'});
+ dialog.props.onPointerup(sheetPointer(dialog,296,280));await settle();
+ expect(dialog.releasePointerCapture).toHaveBeenCalledWith(7);
+ expect(all(root).find(n=>n.props.role==='dialog')).toBeUndefined();
+ expect(f.app.act).not.toHaveBeenCalled();
+});
+it('returns after an insufficient or cancelled touch and leaves the list and close button untouched',async()=>{
+ const {root,dialog}=await mount({swipeDismiss:true});
+ for(const area of ['list','button'] as const){
+  const e=sheetPointer(dialog,160,0,area);dialog.props.onPointerdown(e);
+  expect(e.preventDefault).not.toHaveBeenCalled();
+ }
+ expect(dialog.setPointerCapture).not.toHaveBeenCalled();
+ dialog.props.onPointerdown(sheetPointer(dialog,160,0));
+ dialog.props.onPointermove(sheetPointer(dialog,191,240));await settle();
+ expect(dialog.props.style).toMatchObject({'--queue-sheet-offset':'31px'});
+ dialog.props.onPointerup(sheetPointer(dialog,191,300));await settle();
+ expect(dialog.props.style).toBeUndefined();
+ dialog.props.onPointerdown(sheetPointer(dialog,160,350));
+ dialog.props.onPointermove(sheetPointer(dialog,340,600));await settle();
+ dialog.props.onLostpointercapture(sheetPointer(dialog,340,640));await settle();
+ expect(dialog.props.style).toBeUndefined();
+ expect(all(root).find(n=>n.props.role==='dialog')).toBe(dialog);
+ expect(f.app.act).not.toHaveBeenCalled();
+});
+it('recognizes a quick downward flick only when swipe dismissal is enabled',async()=>{
+ const {dialog}=await mount();const e=sheetPointer(dialog,160,0);
+ dialog.props.onPointerdown(e);expect(e.preventDefault).not.toHaveBeenCalled();mounted.unmount();
+ const swipe=await mount({swipeDismiss:true});
+ swipe.dialog.props.onPointerdown(sheetPointer(swipe.dialog,160,0));
+ swipe.dialog.props.onPointerup(sheetPointer(swipe.dialog,208,60));await settle();
+ expect(all(swipe.root).find(n=>n.props.role==='dialog')).toBeUndefined();
+});
 const grip=(root:any,id:string)=>all(root).find(n=>n.props['aria-label']===`拖动调整 ${id} 的顺序`);
 it('keeps a stable, themed queue scrollbar without disabling scrolling or drag sorting',()=>{
  const {descriptor}=parse(readFileSync(new URL('../src/components/QueueDrawer.vue',import.meta.url),'utf8'));
@@ -49,6 +92,34 @@ it('uses SortableJS fallback handles and internal edge auto-scroll without motio
  expect(instance.sort).toHaveBeenCalledWith(['a','b','c','d']);
  expect(f.app.act).toHaveBeenCalledWith({type:'reorder',payload:{trackIds:['b','c','a','d']}});
  expect(f.app.room.playlist.map((t:any)=>t.id)).toEqual(['a','b','c','d']);
+});
+it('keeps the APK drag alive across progress snapshots and submits a single reordered list',async()=>{
+ const {root}=await mount({swipeDismiss:true});
+ expect(text(root)).not.toMatch(/播放顺序|拖动手柄排序/);
+ expect(all(root).some(n=>n.props['aria-label']==='房间播放模式')).toBe(false);
+ expect(text(root)).not.toContain('正在播放');
+ const rows=all(root).filter(n=>n.props['data-track-id']);
+ expect(rows.filter(n=>n.props['aria-current']==='true').map(n=>n.props['data-track-id'])).toEqual(['b']);
+ expect(rows.find(n=>n.props['data-track-id']==='b')!.props.class).toContain('is-playing');
+ expect(grip(root,'a').props['aria-describedby']).toBeUndefined();
+ const instance=start();
+ for(const positionMs of [1000,2000]){
+  f.app.room={...f.app.room,playback:{...f.app.room.playback,positionMs},playlist:f.app.room.playlist.map((track:any)=>({...track}))};
+  await settle();
+  expect(instance.destroy).not.toHaveBeenCalled();
+  expect(instance.options.onMove()).toBe(true);
+ }
+ drop(instance);
+ expect(f.app.act).toHaveBeenCalledExactlyOnceWith({type:'reorder',payload:{trackIds:['b','c','a','d']}});
+});
+it('still cancels the APK drag when the room revision changes',async()=>{
+ await mount({swipeDismiss:true});
+ const instance=start();
+ f.app.room={...f.app.room,stateVersion:2};
+ await settle();
+ expect(instance.destroy).toHaveBeenCalledOnce();
+ drop(instance);
+ expect(f.app.act).not.toHaveBeenCalled();
 });
 it('cancels stale versions, pointer cancellation and ordinary clicks without committing',async()=>{
  await mount();let instance=choose();instance.options.onUnchoose();drop(instance);expect(f.app.act).not.toHaveBeenCalled();

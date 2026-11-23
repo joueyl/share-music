@@ -6,9 +6,11 @@ import DesktopLogin from '../src/components/AuthPage.vue';
 import ApkDiscover from '../src/apk/pages/DiscoverPage.vue';
 import DesktopDiscover from '../src/views/Lobby.vue';
 import ApkPlayer from '../src/apk/components/ApkPlayer.vue';
+import { apkRoomLayoutKey, createApkRoomLayout } from '../src/apk/room-layout';
 import DesktopPlayer from '../src/components/GlobalPlayer.vue';
 import ApkMusic from '../src/apk/pages/MusicPage.vue';
 import DesktopMusic from '../src/views/Playlists.vue';
+import { ui } from '../src/ui';
 const f=vi.hoisted(()=>({app:null as any,list:vi.fn(),join:vi.fn(),push:vi.fn(),volume:vi.fn(),add:vi.fn(),remember:vi.fn(),clear:vi.fn()}));
 vi.mock('../src/store',()=>({useApp:()=>f.app}));
 vi.mock('vue-router',()=>({useRouter:()=>({push:f.push,replace:f.push})}));
@@ -25,9 +27,10 @@ beforeEach(()=>{
  f.list.mockReset().mockResolvedValue([{id:'room',name:'真实接口房间',members:2,maxMembers:8}]);f.join.mockReset().mockResolvedValue(undefined);f.push.mockReset();f.volume.mockReset().mockResolvedValue(undefined);
  f.add.mockReset().mockImplementation(async(_room,requests)=>requests.map((r:any)=>({ok:true,songId:r.songId,track:{id:r.songId}})));
  f.app=reactive({user:null,room:null,busy:false,connected:true,permission:{skip:true,seek:true,enqueue:true,playbackMode:true},pendingActions:0,notice:'',progress:2000,initialize:vi.fn().mockResolvedValue(undefined),login:vi.fn().mockResolvedValue(undefined),error:vi.fn(),act:vi.fn().mockResolvedValue(undefined)});
+ ui.queue=false;
 });
 afterEach(()=>{mounted?.unmount();vi.useRealTimers();vi.unstubAllGlobals();});
-async function mount(component:any){const root=node('root');mounted=renderer.createApp(component);mounted.component('router-link',{render(){return null;}});mounted.mount(root);await settle();return root;}
+async function mount(component:any,props?:Record<string,unknown>,layout?:ReturnType<typeof createApkRoomLayout>){const root=node('root');mounted=renderer.createApp(component,props);if(layout)mounted.provide(apkRoomLayoutKey,layout);mounted.component('router-link',{render(){return this.$slots.default?.();}});mounted.mount(root);await settle();return root;}
 it.each([['desktop',DesktopLogin],['APK',ApkLogin]])('%s restores remembered login and honors opt-out before submit',async(_name,component)=>{
  f.remember.mockResolvedValue(true);f.app.restoreLogin=vi.fn().mockResolvedValue({name:'saved-user'});
  const root=await mount(component);const fields=all(root).filter(n=>n.type==='input');
@@ -50,10 +53,48 @@ it.each([['desktop',DesktopDiscover],['APK',ApkDiscover]])('%s waits for join co
 });
 it.each([['desktop',DesktopPlayer],['APK',ApkPlayer]])('%s shares playback permission/pending guards and seek clamping',async(_name,component)=>{
  f.app.room={id:'room',playbackMode:'queue',playlist:[{id:'song',name:'歌曲',durationMs:10000}],playback:{sourceId:'song',sourceEpoch:1,playState:'paused'},pending:null};
- const root=await mount(component),play=all(root).find(n=>n.props['aria-label']==='继续');play.props.onClick();expect(f.app.act).toHaveBeenLastCalledWith({type:'resume',payload:{}});
+ const root=await mount(component,_name==='APK'?{roomControls:true}:undefined),play=all(root).find(n=>n.props['aria-label']==='继续');play.props.onClick();expect(f.app.act).toHaveBeenLastCalledWith({type:'resume',payload:{}});
  f.app.act.mockClear();f.app.permission.skip=false;await settle();play.props.onClick();expect(f.app.act).not.toHaveBeenCalled();
- const expand=all(root).find(n=>n.props['aria-label']==='展开播放控制');expand.props.onClick();await settle();const range=all(root).find(n=>n.props['aria-label']==='歌曲进度');range.props.onInput({target:{value:'999999'}});await range.props.onChange({target:{value:'999999'}});expect(f.app.act).toHaveBeenLastCalledWith({type:'seek',payload:{positionMs:9999}});
+ if(_name==='desktop'){const expand=all(root).find(n=>n.props['aria-label']==='展开播放控制');expand.props.onClick();await settle();}
+ const range=all(root).find(n=>n.props['aria-label']==='歌曲进度');range.props.onInput({target:{value:'999999'}});await range.props.onChange({target:{value:'999999'}});expect(f.app.act).toHaveBeenLastCalledWith({type:'seek',payload:{positionMs:9999}});
  f.app.act.mockClear();f.app.pendingActions=1;await settle();range.props.onInput({target:{value:'5000'}});await range.props.onChange({target:{value:'5000'}});expect(f.app.act).not.toHaveBeenCalled();
+});
+it('keeps the track summary and only play/pause and queue actions in the APK mini player',async()=>{
+ const root=await mount(ApkPlayer);
+ const buttons=()=>all(root).filter(n=>n.type==='button');
+ expect(buttons().map(n=>n.props['aria-label'])).toEqual(['播放','打开共享播放列表']);
+ expect(buttons().every(n=>n.props.disabled)).toBe(true);
+ f.app.room={id:'room',playlist:[{id:'song',name:'歌曲'}],playback:{sourceId:'song',playState:'playing'},pending:null};
+ await settle();
+ expect(text(root)).not.toMatch(/正在播放|已暂停/);
+ expect(text(root)).toContain('歌曲');
+ expect(buttons().map(n=>n.props['aria-label'])).toEqual(['暂停','打开共享播放列表']);
+ await buttons()[0].props.onClick();
+ expect(f.app.act).toHaveBeenLastCalledWith({type:'pause',payload:{}});
+ f.app.room.playback.playState='paused';await settle();
+ await buttons()[0].props.onClick();
+ expect(f.app.act).toHaveBeenLastCalledWith({type:'resume',payload:{}});
+ buttons()[1].props.onClick();
+ expect(ui.queue).toBe(true);
+});
+it('immersive APK room reuses the only player and keeps room playback permission guards',async()=>{
+ f.app.room={id:'room',playbackMode:'queue',playlist:[{id:'song',name:'房间测试歌曲',durationMs:10000}],playback:{sourceId:'song',sourceEpoch:1,playState:'paused'},pending:null};
+ const layout=createApkRoomLayout(),root=await mount(ApkPlayer,{roomControls:true},layout);
+ expect(all(root).filter(n=>n.type==='footer')).toHaveLength(1);
+ expect(all(root).some(n=>n.props['aria-label']==='展开播放控制')).toBe(false);
+ expect(text(root)).toContain('房间测试歌曲');
+ const button=(label:string)=>all(root).find(n=>n.type==='button'&&n.props['aria-label']===label);
+ button('打开聊天').props.onClick();expect(layout.chat.value).toBe(true);
+ all(root).find(n=>n.type==='button'&&text(n)==='歌词').props.onClick();expect(layout.lyrics.value).toBe(true);
+ await button('继续').props.onClick();
+ expect(f.app.act).toHaveBeenLastCalledWith({type:'resume',payload:{}});
+ f.app.act.mockClear();f.app.permission.skip=false;f.app.permission.seek=false;await settle();
+ expect(button('下一首').props.disabled).toBe(true);
+ await button('下一首').props.onClick();
+ const slider=all(root).find(n=>n.props['aria-label']==='歌曲进度');
+ expect(slider.props.disabled).toBe(true);
+ await slider.props.onChange({target:{value:'5000'}});
+ expect(f.app.act).not.toHaveBeenCalled();
 });
 it.each([['desktop',DesktopMusic],['APK',ApkMusic]])('%s shares collection loading, selection and permission-checked idempotent enqueue',async(_name,component)=>{
  f.app.user={id:'user'};f.app.room={id:'room',playlist:[],pending:null};const root=await mount(component);

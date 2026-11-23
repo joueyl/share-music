@@ -43,7 +43,7 @@ it('keeps the queue mounted until its slide-out finishes and compensates fixed s
  const queue=read('../src/components/QueueDrawer.vue'),motion=read('../src/motion.css'),css=read('../src/brilliant.css');
  expect(queue).toContain('<Transition name="drawer" appear @after-leave="afterLeave">');
  expect(queue).toContain('v-if="visible" class="drawer-backdrop"');
- expect(queue).toContain('function close(){cancelDrag();visible.value=false;}');
+ expect(queue).toContain('function close(){releaseSheetPointer();cancelDrag();visible.value=false;}');
  expect(queue).toContain("function afterLeave(){emit('close');if(searchAfterClose)openSearch();}");
  expect(motion).toContain('transform:translateX(100%)');expect(motion).toContain('prefers-reduced-motion:reduce');
  expect(css).toContain('width:calc(100% - var(--modal-scrollbar-gap,0px))');

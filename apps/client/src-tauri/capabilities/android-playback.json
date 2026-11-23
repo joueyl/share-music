@@ -1,0 +1,7 @@
+{
+  "identifier": "android-playback",
+  "description": "Only the bundled Android main window can control the native music player.",
+  "platforms": ["android"],
+  "windows": ["main"],
+  "permissions": ["android-playback:allow-operate"]
+}

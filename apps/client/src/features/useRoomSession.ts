@@ -2,6 +2,15 @@ import { computed,onMounted,ref,watch } from 'vue';
 import { useRoute,useRouter } from 'vue-router';
 import { useApp } from '../store';
 import * as bridge from '../bridge';
+export async function copyRoomInvite(code: string | undefined, notify: (message: string) => void) {
+  if (!code) return;
+  try {
+    await navigator.clipboard.writeText(code);
+    notify('房间码已复制，请私下分享给朋友');
+  } catch {
+    notify(`房间码：${code}，请手动复制并私下分享`);
+  }
+}
 /** Shared domain controller: desktop and APK must use the same request/permission flow. */
 export function useRoomSession(){
 const app = useApp();
@@ -64,16 +73,7 @@ async function exit() {
   }
 }
 
-async function invite() {
-  const code = app.room?.inviteCode;
-  if (!code) return;
-  try {
-    await navigator.clipboard.writeText(code);
-    app.notice = '房间码已复制，请私下分享给朋友';
-  } catch {
-    app.notice = `房间码：${code}，请手动复制并私下分享`;
-  }
-}
+const invite = () => copyRoomInvite(app.room?.inviteCode, message => { app.notice = message; });
 
 return { app,route,router,leaving,track,coverUrl,online,hostMember,sortedOnline,floatingChat,exit,invite };
 }

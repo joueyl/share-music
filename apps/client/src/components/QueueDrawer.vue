@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
-import { X, Plus, Play, ArrowUp, ArrowDown, Trash2, GripVertical, AudioLines } from 'lucide-vue-next';
+import { X, Plus, Play, ArrowUp, ArrowDown, Trash2, GripVertical, AudioLines, Ellipsis } from 'lucide-vue-next';
 import { PLAYBACK_MODE_LABELS } from '@music-share/shared';
 import { usePlaybackMode } from '../usePlaybackMode';
 import Sortable from 'sortablejs';
@@ -12,12 +12,53 @@ import AlbumArt from './AlbumArt.vue';
 import FavoriteSongsList from './FavoriteSongsList.vue';
 import SongFavoriteButton from './SongFavoriteButton.vue';
 const playbackMode=usePlaybackMode();
-const props=defineProps<{open?:boolean}>();
+const props=defineProps<{open?:boolean;swipeDismiss?:boolean}>();
 const app=useApp(),emit=defineEmits<{close:[]}>(),dialog=ref<HTMLElement|null>(null),tab=ref<'queue'|'history'|'favorites'>('queue');
 const visible=ref(true);
+const sheetOffset=ref(0),sheetDragging=ref(false);
+let sheetPointer:{id:number;x:number;y:number;time:number;target:HTMLElement;axis?:'down'|'ignored'}|null=null;
 let ignoreBackdropUntil=0;
 let searchAfterClose=false;
-function close(){cancelDrag();visible.value=false;}
+function close(){releaseSheetPointer();cancelDrag();visible.value=false;}
+function startSheetSwipe(event:PointerEvent){
+ const target=event.target as Element|null, panel=event.currentTarget as HTMLElement;
+ if(!props.swipeDismiss||!visible.value||sheetPointer||gesture||!event.isPrimary||event.button!==0||
+    panel.parentElement?.classList.contains('drawer-enter-active')||
+    !target?.closest('.queue-sheet-grip,.drawer-heading')||
+    target.closest('button,a,input,select,textarea,summary'))return;
+ panel.setPointerCapture(event.pointerId);
+ sheetPointer={id:event.pointerId,x:event.clientX,y:event.clientY,time:event.timeStamp,target:panel};
+ sheetDragging.value=true;
+ event.preventDefault();
+}
+function sheetDistance(event:PointerEvent){
+ const pointer=sheetPointer;
+ if(!pointer||pointer.id!==event.pointerId)return 0;
+ const dy=event.clientY-pointer.y, dx=Math.abs(event.clientX-pointer.x);
+ if(!pointer.axis&&Math.max(Math.abs(dy),dx)>=6)pointer.axis=dy>dx?'down':'ignored';
+ return pointer.axis==='down'?Math.max(0,dy):0;
+}
+function moveSheetSwipe(event:PointerEvent){
+ if(sheetPointer?.id===event.pointerId)sheetOffset.value=sheetDistance(event);
+}
+function releaseSheetPointer(){
+ const pointer=sheetPointer;
+ sheetPointer=null;sheetDragging.value=false;
+ if(pointer?.target.hasPointerCapture(pointer.id))pointer.target.releasePointerCapture(pointer.id);
+}
+function endSheetSwipe(event:PointerEvent){
+ const pointer=sheetPointer;
+ if(!pointer||pointer.id!==event.pointerId)return;
+ const distance=sheetDistance(event);
+ const limit=Math.min(112,Math.max(64,pointer.target.offsetHeight*.2));
+ const quick=distance>=36&&distance/Math.max(1,event.timeStamp-pointer.time)>=.65;
+ if(distance>=limit||quick){sheetOffset.value=distance;close();return;}
+ cancelSheetSwipe(event);
+}
+function cancelSheetSwipe(event:PointerEvent){
+ if(sheetPointer?.id!==event.pointerId)return;
+ releaseSheetPointer();sheetOffset.value=0;
+}
 function backdropClose(){if(gesture||Date.now()<ignoreBackdropUntil)return;close();}
 function outsideClose(event:MouseEvent){
  const target=event.target as Element|null;
@@ -28,7 +69,7 @@ function outsideClose(event:MouseEvent){
 }
 function afterLeave(){emit('close');if(searchAfterClose)openSearch();}
 useDialogFocus(dialog,close,'.queue-trigger:not([inert])');
-watch(()=>props.open,value=>{if(value===false)close();else if(value)visible.value=true;});
+watch(()=>props.open,value=>{if(value===false)close();else if(value){sheetOffset.value=0;visible.value=true;}});
 function closeMenus(event:MouseEvent){
  const target=event.target as Element|null;
  for(const menu of dialog.value?.querySelectorAll<HTMLDetailsElement>('.queue-more[open]')??[]){
@@ -36,7 +77,7 @@ function closeMenus(event:MouseEvent){
  }
 }
 onMounted(()=>{document.addEventListener('click',closeMenus);document.addEventListener('click',outsideClose,true);});
-onUnmounted(()=>{document.removeEventListener('click',closeMenus);document.removeEventListener('click',outsideClose,true);});
+onUnmounted(()=>{releaseSheetPointer();document.removeEventListener('click',closeMenus);document.removeEventListener('click',outsideClose,true);});
 const current=computed(()=>app.room?.playlist.find(t=>t.id===app.room?.playback.sourceId));
 const scroll=ref<HTMLElement|null>(null),dragging=ref(''),sorting=ref(false),playing=ref(false);
 const queue=computed(()=>app.room?.playlist??[]);
@@ -87,8 +128,12 @@ function setupSortable(){
   },
  });
 }
-// Restore the old DOM before Vue patches a new snapshot or removes a tab/closed drawer.
-watch(()=>[app.room?.id,app.room?.stateVersion,canReorder.value,tab.value],()=>cancelDrag());
+// A playback-progress snapshot replaces the room object without changing its
+// stateVersion. On Android, keep the drag alive across these routine updates;
+// only cancel before a real queue revision or loss of the ability to reorder.
+const dragInputs=[()=>app.room?.id,()=>app.room?.stateVersion,canReorder,tab] as const;
+if(props.swipeDismiss)watch(dragInputs,()=>cancelDrag());
+else watch(()=>[app.room?.id,app.room?.stateVersion,canReorder.value,tab.value],()=>cancelDrag());
 watch([scroll,sortableEpoch],setupSortable,{flush:'post'});
 function cancelPointer(){if(gesture)cancelDrag();}
 onMounted(()=>document.addEventListener('pointercancel',cancelPointer,true));
@@ -117,19 +162,20 @@ async function clear(){if(!canReorder.value||!queue.value.some(t=>t.id!==current
 async function remove(id:string){if(!canReorder.value||id===current.value?.id)return;sorting.value=true;try{await app.act({type:'remove',payload:{trackId:id}});}finally{sorting.value=false;}}
 function add(){searchAfterClose=true;close();}
 </script>
-<template><Teleport to="#app"><Transition name="drawer" appear @after-leave="afterLeave"><div v-if="visible" class="drawer-backdrop" @click.self="backdropClose"><aside ref="dialog" class="queue-drawer" role="dialog" aria-modal="true" aria-label="共享播放列表">
+<template><Teleport to="#app"><Transition name="drawer" appear @after-leave="afterLeave"><div v-if="visible" class="drawer-backdrop" @click.self="backdropClose"><aside ref="dialog" class="queue-drawer" :class="{'is-sheet-dragging':sheetDragging,'has-sheet-offset':sheetOffset>0}" :data-swipe-dismiss="swipeDismiss||undefined" :style="sheetOffset>0?{'--queue-sheet-offset':sheetOffset+'px'}:undefined" role="dialog" aria-modal="true" aria-label="共享播放列表" @pointerdown="startSheetSwipe" @pointermove="moveSheetSwipe" @pointerup="endSheetSwipe" @pointercancel="cancelSheetSwipe" @lostpointercapture="cancelSheetSwipe">
+ <div v-if="swipeDismiss" class="queue-sheet-grip" aria-hidden="true"></div>
  <header class="drawer-heading"><div><h2>共享播放列表</h2><p>{{ app.room?.playlist.length??0 }} 首歌曲 · {{ app.room?.members.filter(m=>m.online).length??0 }} 人共同添加</p></div><button class="round-close" aria-label="关闭播放列表" @click="close"><X :size="20" /></button></header>
- <label class="queue-mode"><span>播放模式</span><select class="tone-select" aria-label="房间播放模式" :value="playbackMode.mode.value??''" :disabled="playbackMode.disabled.value" @change="playbackMode.change(($event.target as HTMLSelectElement).value)"><option v-if="!playbackMode.mode.value" value="">请更新服务端</option><option v-for="(label,mode) in PLAYBACK_MODE_LABELS" :key="mode" :value="mode">{{ label }}</option></select></label>
+ <label v-if="!swipeDismiss" class="queue-mode"><span>播放模式</span><select class="tone-select" aria-label="房间播放模式" :value="playbackMode.mode.value??''" :disabled="playbackMode.disabled.value" @change="playbackMode.change(($event.target as HTMLSelectElement).value)"><option v-if="!playbackMode.mode.value" value="">请更新服务端</option><option v-for="(label,mode) in PLAYBACK_MODE_LABELS" :key="mode" :value="mode">{{ label }}</option></select></label>
  <div class="queue-tabs" role="tablist" aria-label="播放列表分类"><button role="tab" :aria-selected="tab==='queue'" :class="{active:tab==='queue'}" @click="tab='queue'">当前队列</button><button role="tab" :aria-selected="tab==='history'" :class="{active:tab==='history'}" @click="tab='history'">已播放</button><button role="tab" :aria-selected="tab==='favorites'" :class="{active:tab==='favorites'}" @click="tab='favorites'">收藏单曲</button><button v-if="app.permission.enqueue&&tab==='queue'" class="queue-clear" :disabled="!canReorder||!queue.some(t=>t.id!==current?.id)" title="保留当前歌曲，清空其他歌曲" @click="clear">清空</button></div>
  <div v-if="tab==='history'" class="empty-state queue-history">当前 API 未提供播放历史，暂时无法查看。</div>
  <FavoriteSongsList v-else-if="tab==='favorites'" />
  <template v-else>
- <div class="queue-next-heading"><strong>播放顺序 <small>{{ queue.length }}</small></strong><span id="queue-sort-hint">{{ app.permission.enqueue?'拖动手柄排序 · Alt+↑↓ 微调':'需要播放列表控制权限' }}</span></div>
+ <div v-if="!swipeDismiss" class="queue-next-heading"><strong>播放顺序 <small>{{ queue.length }}</small></strong><span id="queue-sort-hint">{{ app.permission.enqueue?'拖动手柄排序 · Alt+↑↓ 微调':'需要播放列表控制权限' }}</span></div>
  <div ref="scroll" class="queue-scroll" tabindex="0" aria-label="播放队列" :aria-busy="sorting">
-  <div v-for="(item,i) in queue" :key="item.id" class="queue-row" :class="{'is-playing':item.id===current?.id}" :data-track-id="item.id" @dblclick="playFromRow($event,item.id)">
-   <button v-if="app.permission.enqueue" type="button" class="queue-drag-handle" @dblclick.stop :disabled="!canReorder" :aria-label="`拖动调整 ${item.name} 的顺序`" aria-describedby="queue-sort-hint" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" @keydown.alt.up.prevent="move(item.id,-1)" @keydown.alt.down.prevent="move(item.id,1)"><GripVertical :size="16" /></button>
-   <span class="queue-index">{{ (i+1).toString().padStart(2,'0') }}</span><AlbumArt :src="bridge.playingTrackCover(item)" :draggable="false" /><span class="queue-track"><strong>{{ item.name }}</strong><small>{{ item.artists||'未知歌手' }} · {{ item.id===current?.id?'正在播放':app.room?.members.find(m=>m.id===item.providerId)?.name??'成员' }}{{ item.id===current?.id?'':'添加' }}</small></span><time>{{ format(item.durationMs) }}</time>
-   <div class="track-actions" @dblclick.stop><SongFavoriteButton :source="bridge.favoriteTrackReference(item)?.source" :song-id="bridge.favoriteTrackReference(item)?.id" :name="item.name" /><AudioLines v-if="item.id===current?.id" class="queue-playing-icon" :size="16" /><button v-else class="icon-button" aria-label="播放此曲" :disabled="!canPlay||!item.available" @click="play(item.id)"><Play :size="15" /></button><details v-if="app.permission.enqueue" class="queue-more"><summary aria-label="歌曲操作">···</summary><div><button v-if="app.permission.enqueue" :disabled="!canReorder||i===0" aria-label="上移" @click="move(item.id,-1)"><ArrowUp :size="14" />上移</button><button v-if="app.permission.enqueue" :disabled="!canReorder||i===queue.length-1" aria-label="下移" @click="move(item.id,1)"><ArrowDown :size="14" />下移</button><button v-if="app.permission.enqueue" aria-label="移除音轨" :disabled="!canReorder||item.id===current?.id||!!dragging" @click="remove(item.id)"><Trash2 :size="14" />移除</button></div></details></div>
+  <div v-for="(item,i) in queue" :key="item.id" class="queue-row" :class="{'is-playing':item.id===current?.id}" :data-track-id="item.id" :aria-current="swipeDismiss&&item.id===current?.id?'true':undefined" @dblclick="playFromRow($event,item.id)">
+   <button v-if="app.permission.enqueue" type="button" class="queue-drag-handle" @dblclick.stop :disabled="!canReorder" :aria-label="`拖动调整 ${item.name} 的顺序`" :aria-describedby="swipeDismiss?undefined:'queue-sort-hint'" aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown" @keydown.alt.up.prevent="move(item.id,-1)" @keydown.alt.down.prevent="move(item.id,1)"><GripVertical :size="16" /></button>
+   <span class="queue-index">{{ (i+1).toString().padStart(2,'0') }}</span><AlbumArt :src="bridge.playingTrackCover(item)" :draggable="false" /><span class="queue-track"><strong>{{ item.name }}</strong><small>{{ item.artists||'未知歌手' }}<template v-if="item.id!==current?.id"> · {{ app.room?.members.find(m=>m.id===item.providerId)?.name??'成员' }}添加</template><template v-else-if="!swipeDismiss"> · 正在播放</template></small></span><time>{{ format(item.durationMs) }}</time>
+   <div class="track-actions" @dblclick.stop><SongFavoriteButton :source="bridge.favoriteTrackReference(item)?.source" :song-id="bridge.favoriteTrackReference(item)?.id" :name="item.name" /><AudioLines v-if="!swipeDismiss&&item.id===current?.id" class="queue-playing-icon" :size="16" /><button v-else-if="item.id!==current?.id" class="icon-button" aria-label="播放此曲" :disabled="!canPlay||!item.available" @click="play(item.id)"><Play :size="15" /></button><details v-if="app.permission.enqueue" class="queue-more"><summary aria-label="歌曲操作"><Ellipsis v-if="swipeDismiss" :size="16" aria-hidden="true" /><template v-else>···</template></summary><div><button v-if="app.permission.enqueue" :disabled="!canReorder||i===0" aria-label="上移" @click="move(item.id,-1)"><ArrowUp :size="14" />上移</button><button v-if="app.permission.enqueue" :disabled="!canReorder||i===queue.length-1" aria-label="下移" @click="move(item.id,1)"><ArrowDown :size="14" />下移</button><button v-if="app.permission.enqueue" aria-label="移除音轨" :disabled="!canReorder||item.id===current?.id||!!dragging" @click="remove(item.id)"><Trash2 :size="14" />移除</button></div></details></div>
   </div>
   <div v-if="!queue.length" class="empty-state compact">把喜欢的歌，加入共同的列表</div>
  </div></template>

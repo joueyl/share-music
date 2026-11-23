@@ -1,6 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "build": {
+    "beforeDevCommand": "npm run dev:android-webview",
+    "devUrl": "http://127.0.0.1:11421",
     "beforeBuildCommand": "npm run build:apk",
     "frontendDist": "../dist-apk"
   },

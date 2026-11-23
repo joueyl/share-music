@@ -1,6 +1,6 @@
 {
   "name": "@music-share/client",
-  "version": "1.4.11",
+  "version": "1.4.12",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,11 +8,12 @@
     "build": "node ../../scripts/version.mjs --check && vue-tsc --noEmit && vite build",
     "typecheck": "vue-tsc --noEmit",
     "tauri": "tauri",
+    "dev:android-webview": "node android-dev-forward.mjs && vite --mode apk-development --host 127.0.0.1 --port 11421",
     "build:apk": "node ../../scripts/version.mjs --check && vue-tsc --noEmit && vite build --mode android-preview",
     "dev:apk": "vite --mode apk-development --host 127.0.0.1 --port 11421 --open /apk.html"
   },
   "dependencies": {
-    "@music-share/shared": "1.4.11",
+    "@music-share/shared": "1.4.12",
     "@tauri-apps/api": "^2.9.0",
     "lucide-vue-next": "^0.468.0",
     "music-metadata": "12.3.2",

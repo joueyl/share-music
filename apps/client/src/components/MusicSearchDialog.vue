@@ -2,14 +2,29 @@
 import { lockModalBackground } from '../useDialogFocus';
 let unlockBackground = () => {};
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { Search, X, Plus, Check, LoaderCircle, Disc3, Clock3, Headphones, Play, Users } from 'lucide-vue-next';
+import { Search, X, Plus, Check, ChevronDown, LoaderCircle, Disc3, Clock3, Headphones, Play, Users } from 'lucide-vue-next';
 import { useMusicSuggestions } from '../useMusicSuggestions';
 import { createScrollTransitionLayer } from '../scroll-transition-layer';
 import { useApp } from '../store';
 import * as bridge from '../bridge';
 import AlbumArt from './AlbumArt.vue';
-const props=defineProps<{roomId?:string}>(), emit=defineEmits<{close:[];rooms:[term:string]}>(), app=useApp();
-const source=ref<'netease'|'qq'>('netease');
+const props=defineProps<{roomId?:string;apkSourceMenu?:boolean}>(), emit=defineEmits<{close:[];rooms:[term:string]}>(), app=useApp();
+const sourceLabels={netease:'网易云音乐',qq:'QQ 音乐'} as const;
+type MusicSource=keyof typeof sourceLabels;
+const source=ref<MusicSource>('netease');
+const sourcePicker=ref<HTMLElement|null>(null),sourceTrigger=ref<HTMLButtonElement|null>(null),sourceMenuOpen=ref(false);
+function closeSourceMenu(restoreFocus=false){
+ if(!sourceMenuOpen.value)return;
+ sourceMenuOpen.value=false;
+ if(restoreFocus)sourceTrigger.value?.focus({preventScroll:true});
+}
+function chooseSource(value:MusicSource){source.value=value;closeSourceMenu(true);}
+function sourcePointerdown(event:PointerEvent){
+ if(event.target instanceof Node&&!sourcePicker.value?.contains(event.target))closeSourceMenu();
+}
+function sourceFocusout(event:FocusEvent){
+ if(event.relatedTarget instanceof Node&&!sourcePicker.value?.contains(event.relatedTarget))closeSourceMenu();
+}
 const keywords=ref(''),songs=ref<bridge.MusicSearchItem[]>([]),total=ref(0),offset=ref(0),query=ref('');
 const searching=ref(false),searched=ref(false),adding=ref<string|null>(null),added=ref(new Set<string>()),message=ref('');
 const history=ref<string[]>([]),allBusy=ref(false);
@@ -82,7 +97,10 @@ const visible=ref(true);
 function close(){if(!adding.value&&!allBusy.value)visible.value=false;}
 function trap(event:KeyboardEvent){
  if(event.isComposing||composing.value)return;
- if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();}
+ if(event.key==='Escape'){
+  event.preventDefault();event.stopPropagation();
+  if(sourceMenuOpen.value)closeSourceMenu(true);else close();
+ }
  if(event.key!=='Tab')return;
  const all=dialog.value?.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled)');if(!all?.length)return;
  const first=all[0],last=all[all.length-1];
@@ -109,13 +127,23 @@ async function add(song:bridge.MusicSearchItem){
 const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toString().padStart(2,'0')}`;
 </script>
 <template>
- <Teleport to="#app"><Transition name="modal" appear @enter="startTransition" @leave="startTransition" @after-enter="finishTransition" @enter-cancelled="finishTransition" @after-leave="afterLeave" @leave-cancelled="finishTransition"><div v-if="visible" class="modal-backdrop search-backdrop">
+ <Teleport to="#app"><Transition name="modal" appear @enter="startTransition" @leave="startTransition" @after-enter="finishTransition" @enter-cancelled="finishTransition" @after-leave="afterLeave" @leave-cancelled="finishTransition"><div v-if="visible" class="modal-backdrop search-backdrop" @pointerdown="apkSourceMenu&&sourceMenuOpen&&sourcePointerdown($event)">
  <section ref="dialog" class="modal music-search-modal global-search-modal" role="dialog" aria-modal="true" aria-labelledby="music-search-title" :aria-busy="searching||!!adding||allBusy">
   <header class="global-search-header" @mousedown="onHeaderMouseDown" @dblclick.stop.prevent=""><span class="search-symbol"><Search :size="22" /></span><h2 id="music-search-title">搜索音乐</h2><p>发现好音乐，随时添加到共享房间</p><kbd>Esc</kbd><button class="round-close" aria-label="关闭搜索音乐" :disabled="!!adding||allBusy" @click="close"><X :size="22" /></button></header>
   <div class="global-search-body"><div class="search-main"><span class="eyebrow">SEARCH MUSIC / 找一首此刻想听的歌</span><h1>好音乐，值得一起发现</h1>
-  <label class="music-source-picker"><span class="music-source-label">音源平台</span><span class="music-source-control"><Disc3 class="music-source-icon" :size="17" aria-hidden="true" /><select v-model="source" class="tone-select music-source-select" aria-label="搜索音源" :disabled="!!adding||allBusy"><option value="netease">网易云音乐</option><option value="qq">QQ 音乐</option></select></span></label>
+  <div class="music-search-controls">
+  <div v-if="apkSourceMenu" ref="sourcePicker" class="music-source-picker" @focusout="sourceFocusout">
+   <button ref="sourceTrigger" type="button" class="apk-search-source-trigger" :disabled="!!adding||allBusy" :aria-label="'搜索音源：'+sourceLabels[source]" :aria-expanded="sourceMenuOpen" :aria-controls="sourceMenuOpen?'apk-search-source-options':undefined" @click="sourceMenuOpen=!sourceMenuOpen">
+    <span>{{ sourceLabels[source] }}</span><ChevronDown :size="13" aria-hidden="true" />
+   </button>
+   <div v-if="sourceMenuOpen" id="apk-search-source-options" class="apk-search-source-options" role="group" aria-label="选择搜索音源">
+    <button v-for="(label,value) in sourceLabels" :key="value" type="button" :aria-pressed="source===value" @click="chooseSource(value)">{{ label }}<Check v-if="source===value" :size="14" aria-hidden="true" /></button>
+   </div>
+  </div>
+  <label v-else class="music-source-picker"><span class="music-source-label">音源平台</span><span class="music-source-control"><Disc3 class="music-source-icon" :size="17" aria-hidden="true" /><select v-model="source" class="tone-select music-source-select" aria-label="搜索音源" :disabled="!!adding||allBusy"><option value="netease">网易云音乐</option><option value="qq">QQ 音乐</option></select></span></label>
   <form class="music-search-form global-search-form" @submit.prevent="search(0)"><Search :size="20" /><label class="sr-only" for="music-keywords">歌曲、歌手或专辑</label><div class="music-autocomplete"><input id="music-keywords" ref="input" v-model="keywords" @input="keywordInput" placeholder="搜索歌曲、歌手或专辑" :maxlength="source==='qq'?60:100" :disabled="!!adding||allBusy" role="combobox" aria-autocomplete="list" aria-controls="music-suggestions" :aria-expanded="suggestionOpen" :aria-activedescendant="suggestionOpen&&suggestionActive>=0?`music-suggestion-${suggestionActive}`:undefined" autocomplete="off" @focus="focused=true" @blur="focused=false" @compositionstart="composing=true" @compositionend="compositionEnd" @keydown="suggestionKeys" />
    <div v-if="suggestionOpen" class="music-suggestions"><div v-if="suggestionLoading&&!suggestionItems.length" class="music-suggestion-loading loading-state" role="status">正在联想…</div><div v-if="suggestionError" class="music-suggestion-loading" role="status">{{ suggestionError }}</div><div v-else-if="!suggestionLoading&&!suggestionItems.length" class="music-suggestion-loading">暂无联想，按回车搜索</div><ul id="music-suggestions" role="listbox" aria-label="搜索联想"><li v-for="(term,index) in suggestionItems" :id="`music-suggestion-${index}`" :key="term" role="option" :aria-selected="suggestionActive===index" :class="{active:suggestionActive===index}" @mouseenter="suggestionActive=index" @mousedown.prevent @click="chooseSuggestion(term)"><Search :size="14" /><span>{{ term }}</span></li></ul></div></div><button v-if="keywords" type="button" class="icon-button" aria-label="清空关键词" :disabled="!!adding||allBusy" @click="keywords='' "><X :size="16" /></button><button class="primary" :aria-busy="searching" :disabled="searching||!!adding||allBusy||!keywords.trim()"><LoaderCircle v-if="searching" class="spinning" :size="16" />搜索</button></form>
+  </div>
    <div class="search-history"><Clock3 :size="16" /><span>最近搜索</span><button v-for="term in history.slice(0,4)" :key="term" :disabled="!!adding||allBusy" @click="chooseSuggestion(term)">{{ term }}</button><small v-if="!history.length">还没有搜索记录</small><button v-else class="history-clear" :disabled="!!adding||allBusy" @click="saveHistory()">清空</button></div>
    <div class="search-kind-tabs"><button class="selected">歌曲</button><button v-for="kind in ['歌手','专辑','歌单']" :key="kind" title="当前仅接入歌曲搜索，可在关键词中输入歌手或专辑名" disabled>{{ kind }}</button><span>搜索结果 · {{ total }} 首歌曲</span></div>
    <section class="search-result-card"><header><button :disabled="!songs.length||!!adding||allBusy||!roomId||!app.permission.enqueue||!app.connected" @click="addAll"><Play :size="14" />{{ allBusy?'正在添加…':'添加全部' }}</button><span>{{ roomId?'发现喜欢的歌，添加到房间一起听':'加入房间后，可添加音乐一起听' }}</span></header><div class="result-columns"><span>歌曲</span><span>歌手</span><span>专辑</span><span>时长</span><span /></div>
@@ -132,6 +160,7 @@ const format=(ms:number)=>`${Math.floor(ms/60000)}:${Math.floor(ms/1000%60).toSt
 .search-backdrop{border-radius:var(--window-corner-radius,20px);scrollbar-gutter:stable;backdrop-filter:none;-webkit-backdrop-filter:none;transition:border-radius .18s ease}
 /* Stay above scrolling content, while retaining the header’s layout space. */
 .global-search-header{user-select:none;position:sticky;top:0;z-index:6;flex-shrink:0;background:#eef4faf2;backdrop-filter:blur(16px)}
+.music-search-controls{display:contents}
 .music-source-picker{display:flex;flex-direction:row;align-items:center;gap:12px;margin:0 0 16px;font-size:12px;flex-shrink:0}
 .music-source-label{color:#798394;white-space:nowrap}
 .music-source-control{position:relative;display:inline-flex;min-width:0;max-width:100%}

@@ -23,9 +23,11 @@ import LumiereWord from "./LumiereWord.vue";
 const props = withDefaults(
   defineProps<{
     variant?: "default" | "lumiere";
+    visible?: boolean;
   }>(),
   {
     variant: "default",
+    visible: true,
   },
 );
 
@@ -171,9 +173,9 @@ watch(
 // 只有默认变体是滚动列表，才需要跟随滚动
 const pageActive=useCachedActivity(()=>{void scrollCurrent();});
 async function scrollCurrent() {
-  if (!pageActive.value || props.variant === "lumiere") return;
+  if (!pageActive.value || !props.visible || props.variant === "lumiere") return;
   await nextTick();
-  if(!pageActive.value)return;
+  if(!pageActive.value||!props.visible)return;
   const row = list.value?.querySelector<HTMLElement>(".lyric-line.active");
   if (row && list.value)
     list.value.scrollTo({
@@ -184,7 +186,7 @@ async function scrollCurrent() {
         : "smooth",
     });
 }
-watch(current,()=>{void scrollCurrent();});
+watch([current,()=>props.visible],()=>{void scrollCurrent();});
 function progress(word: LyricWord) {
   return `${Math.max(0, Math.min(1, (app.progress - word.start) / Math.max(1, word.duration))) * 100}%`;
 }

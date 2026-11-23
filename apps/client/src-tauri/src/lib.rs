@@ -230,13 +230,13 @@ mod desktop {
 #[cfg(all(feature = "desktop", not(target_os = "android")))]
 pub use desktop::run;
 
-// Experimental Android shell: existing Vue UI and browser HTTP/WebSocket/Audio path.
-// Only the scoped secure-login plugin exposes mobile IPC, not desktop commands.
+// Android shell: existing Vue UI and HTTP/WebSocket control, native audio output.
 #[cfg(all(feature = "desktop", target_os = "android"))]
 #[tauri::mobile_entry_point]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_saved_login::init())
+        .plugin(tauri_plugin_android_playback::init())
         .run(tauri::generate_context!())
         .expect("Run experimental Android shell");
 }

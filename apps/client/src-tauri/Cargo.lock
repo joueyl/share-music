@@ -2341,7 +2341,7 @@ dependencies = [
 
 [[package]]
 name = "music-share-desktop"
-version = "1.4.11"
+version = "1.4.12"
 dependencies = [
  "futures-util",
  "libloading 0.8.9",
@@ -2354,6 +2354,7 @@ dependencies = [
  "souvlaki",
  "tauri",
  "tauri-build",
+ "tauri-plugin-android-playback",
  "tauri-plugin-notification",
  "tauri-plugin-saved-login",
  "tauri-plugin-updater",
@@ -4286,6 +4287,15 @@ dependencies = [
  "serde_json",
  "tauri-utils",
  "walkdir",
+]
+
+[[package]]
+name = "tauri-plugin-android-playback"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
 ]
 
 [[package]]

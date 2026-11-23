@@ -10,5 +10,7 @@ export default defineConfig(({ mode,command }) => {
   const apk = mode === 'android-preview' || mode === 'apk-development';
   if(apk)env.VITE_SERVER_URL=resolveApkServerUrl(env.VITE_SERVER_URL,command,()=>loadEnv('production',envDir,'VITE_').VITE_SERVER_URL);
   resolveServerUrl(env.VITE_SERVER_URL, mode);
-  return { plugins: [vue(),...(apk?[apkEntryPlugin()]:[])], define: {'import.meta.env.VITE_CLIENT_TARGET':JSON.stringify(apk?'apk':'desktop'),...(apk?{'import.meta.env.VITE_SERVER_URL':JSON.stringify(env.VITE_SERVER_URL)}:{})}, preview:{headers:{'Content-Security-Policy':tauriConfig.app.security.csp}}, envDir, server: { strictPort: true }, clearScreen: false, envPrefix: ['VITE_'], build: { target: 'es2022',outDir:apk?'dist-apk':'dist',...(apk?{rollupOptions:{input:fileURLToPath(new URL('./apk.html',import.meta.url))}}:{})} };
+  // Tauri owns native watching. Watching Cargo/Gradle build files here can hit Windows file locks.
+  const server = { strictPort: true, watch: { ignored: ['**/src-tauri/target/**', '**/src-tauri/gen/android/**'] } };
+  return { plugins: [vue(),...(apk?[apkEntryPlugin()]:[])], define: {'import.meta.env.VITE_CLIENT_TARGET':JSON.stringify(apk?'apk':'desktop'),...(apk?{'import.meta.env.VITE_SERVER_URL':JSON.stringify(env.VITE_SERVER_URL)}:{})}, preview:{headers:{'Content-Security-Policy':tauriConfig.app.security.csp}}, envDir, server, clearScreen: false, envPrefix: ['VITE_'], build: { target: 'es2022',outDir:apk?'dist-apk':'dist',...(apk?{rollupOptions:{input:fileURLToPath(new URL('./apk.html',import.meta.url))}}:{})} };
 });

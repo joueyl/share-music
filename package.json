@@ -1,6 +1,6 @@
 {
   "name": "music-share",
-  "version": "1.4.11",
+  "version": "1.4.12",
   "private": true,
   "workspaces": [
     "packages/*",
@@ -10,6 +10,7 @@
     "dev:server": "npm run dev -w @music-share/server",
     "dev:client": "npm run dev -w @music-share/client",
     "desktop": "node scripts/desktop.mjs",
+    "android": "npm run tauri -w @music-share/client -- android dev --host 127.0.0.1",
     "build": "npm run build -w @music-share/server && npm run build -w @music-share/client",
     "test": "npm run build -w @music-share/server && vitest run",
     "test:rust": "cargo test --manifest-path apps/client/src-tauri/Cargo.toml --no-default-features",
