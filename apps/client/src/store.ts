@@ -57,7 +57,13 @@ export const useApp = defineStore('app', () => {
   let clockTimer: ReturnType<typeof setInterval> | undefined, initialized = false;
   const permission = computed(() => !!room.value && !!user.value && room.value.hostId === user.value.id ? ALL_PERMISSIONS : room.value?.members.find(m => m.id === user.value?.id)?.permissions ?? NO_PERMISSIONS);
   const host = computed(() => !!room.value && room.value.hostId === user.value?.id);
-  const progress = computed(() => room.value ? positionAt(room.value.playback, now.value + offset.value) : 0);
+  const progress = computed(() => {
+    const at = now.value, current = room.value;
+    if (!current) return 0;
+    const local = import.meta.env.VITE_CLIENT_TARGET === 'apk' && connected.value && user.value?.id === current.playback.leaderId
+      ? bridge.androidLeaderPosition(current.id, current.playback.sourceEpoch) : undefined;
+    return local ?? positionAt(current.playback, at + offset.value);
+  });
   let systemMediaActive=false,lastSystemMedia='';
   function syncSystemMedia() {
     if(!bridge.desktop||(!room.value&&!systemMediaActive))return;
@@ -106,7 +112,7 @@ export const useApp = defineStore('app', () => {
       if (message.type === 'snapshot') {
         if (room.value?.id !== message.data.id) chatMessages.value = [];
         if (!clockSynced && Number.isFinite(message.data.serverNow)) offset.value = message.data.serverNow - Date.now();
-        room.value = message.data; void bridge.syncCloud(message.data, offset.value);
+        room.value = message.data; void bridge.syncCloud(message.data, offset.value, user.value?.id ?? null);
       }
       else if (message.type === 'chat-history' && message.roomId === room.value?.id) {chatMessages.value = message.messages.slice(-100);chatAlerts.seed(message.messages);}
       else if ((message.type === 'chat' || message.type === 'chat-result') && message.data.roomId === room.value?.id) {
@@ -118,7 +124,7 @@ export const useApp = defineStore('app', () => {
         if (roundTrip >= 0 && roundTrip < 1000) {
           clockSynced = true;
           offset.value = ((message.serverReceivedAt - message.clientSentAt) + (message.serverSentAt - received)) / 2;
-          if (room.value) void bridge.syncCloud(room.value, offset.value);
+          if (room.value) void bridge.syncCloud(room.value, offset.value, user.value?.id ?? null);
         }
       }
     });

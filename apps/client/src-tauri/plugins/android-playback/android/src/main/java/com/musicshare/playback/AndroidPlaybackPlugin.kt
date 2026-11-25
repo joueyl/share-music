@@ -11,13 +11,19 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.appcompat.app.AppCompatActivity
 import app.tauri.annotation.Command
+import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
 import app.tauri.plugin.Invoke
+import app.tauri.plugin.Channel
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 
+@InvokeArg
+class MediaSessionArgs { var controls: Channel? = null }
+
 @TauriPlugin
 class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
+    private val chatNotifications = RoomChatNotifications(activity)
     // MediaPlayer and its callbacks are confined to the same Looper.
     private val main = Handler(Looper.getMainLooper())
     private var player: MediaPlayer? = null
@@ -33,6 +39,43 @@ class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
     private var destroyed = false
     private var foregroundRequested = false
     private val stopForeground = Runnable { endBackgroundPlayback() }
+    @Volatile private var startupLogging = false
+    private var startupTrace: StartupTrace? = null
+    private var firstProgressFrom: Int? = null
+    private var startupPlaying = false
+
+    private data class StartupTrace(val id: Long, val startMs: Long)
+
+    private fun logStartup(trace: StartupTrace, stage: String, atMs: Long = System.currentTimeMillis(), detail: String = "") {
+        if (startupLogging) Log.i("ToneStartup", "trace=${trace.id}/${trace.startMs} stage=$stage elapsedMs=${atMs - trace.startMs}$detail")
+    }
+
+    private fun markStartup(stage: String, detail: String = "") {
+        startupTrace?.let { logStartup(it, stage, detail = detail) }
+    }
+
+    private var driverTraceId = 0L
+    private val roomDriver = RoomDriver(main, ::snapshot,
+        load = { url, size, key ->
+            TrackDataSource.checkedUrl(url)
+            val trace = if (startupLogging) StartupTrace(++driverTraceId, System.currentTimeMillis()) else null
+            trace?.let { logStartup(it, "native-room-link-ready") }
+            try { load(url, size, key, trace) }
+            catch (e: Exception) { fail(MediaPlayer.MEDIA_ERROR_UNKNOWN); throw e }
+        },
+        play = {
+            if (prepared && !playing && !seeking) {
+                if (startupTrace != null) firstProgressFrom = positionMs
+                player?.start(); playing = true
+                markStartup("native-start")
+                ensureBackgroundPlayback()
+            }
+        },
+        pause = { if (prepared && playing) { player?.pause(); playing = false } },
+        seek = { target -> player?.let { seek(it, target) } },
+        clearTrack = ::clear,
+        stop = { clear(); endBackgroundPlayback() },
+    )
 
     private fun ensureBackgroundPlayback() {
         main.removeCallbacks(stopForeground)
@@ -49,9 +92,9 @@ class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
         }
     }
 
-    private fun releaseBackgroundAfterTransition() {
+    private fun releaseBackgroundAfterTransition(graceMs: Long = 90_000L) {
         main.removeCallbacks(stopForeground)
-        if (foregroundRequested) main.postDelayed(stopForeground, 8000)
+        if (foregroundRequested) main.postDelayed(stopForeground, graceMs)
     }
 
     private fun endBackgroundPlayback() {
@@ -76,6 +119,9 @@ class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
         cancelTimeout()
         val active = player
         player = null
+        startupTrace = null
+        firstProgressFrom = null
+        startupPlaying = false
         source?.close()
         source = null
         active?.release()
@@ -86,14 +132,21 @@ class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
 
     private fun fail(error: Int) {
         val at = positionMs
+        markStartup("native-error", " code=$error")
         clear()
         positionMs = at
         code = if (error == 0) MediaPlayer.MEDIA_ERROR_UNKNOWN else error
     }
 
-    private fun load(url: String, sizeBytes: Long, volume: Float, initialMs: Long, initialAtMs: Long) {
+    private fun load(url: String, sizeBytes: Long, cacheKey: String, trace: StartupTrace?) {
         clear()
-        val track = TrackDataSource(url, sizeBytes, activity.cacheDir)
+        // Promote during preparation, before the user can lock the screen.
+        ensureBackgroundPlayback()
+        releaseBackgroundAfterTransition()
+        startupTrace = trace
+        markStartup("native-load")
+        val track = TrackDataSource(url, sizeBytes, activity.cacheDir, cacheKey,
+            trace?.let { session -> { stage -> logStartup(session, stage) } })
         source = track
         val active = MediaPlayer()
         player = active
@@ -106,16 +159,11 @@ class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
             if (it === player) {
                 cancelTimeout()
                 prepared = true
+                markStartup("native-prepared")
                 durationMs = it.duration.coerceAtLeast(0)
                 // No side-effecting commands until the Preparing state has ended.
                 it.setVolume(this.volume, this.volume)
-                if (initialMs >= 0 && initialAtMs > 0) {
-                    val elapsed = (System.currentTimeMillis() - initialAtMs).coerceIn(0L, 75000L)
-                    val target = initialMs.coerceAtMost(durationMs.toLong()) + elapsed
-                    if (target > 250) try { seek(it, target) } catch (_: RuntimeException) {
-                        fail(MediaPlayer.MEDIA_ERROR_UNKNOWN)
-                    }
-                }
+
             }
         }
         active.setOnSeekCompleteListener {
@@ -123,17 +171,23 @@ class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
                 cancelTimeout()
                 seeking = false
                 positionMs = it.currentPosition
+                if (!startupPlaying) markStartup("seek-complete")
+                if (firstProgressFrom != null) firstProgressFrom = positionMs
             }
         }
         active.setOnCompletionListener {
             if (it === player) {
                 playing = false; buffering = false
                 positionMs = durationMs
+                Log.d("TonePlayback", "Track completed; waiting for room transition")
                 releaseBackgroundAfterTransition()
             }
         }
         active.setOnErrorListener { owner, what, extra ->
-            if (owner === player) fail(if (extra != 0) extra else what)
+            if (owner === player) {
+                track.invalidateCache()
+                fail(if (extra != 0) extra else what)
+            }
             true
         }
         active.setOnInfoListener { owner, what, _ ->
@@ -144,7 +198,6 @@ class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
             }
             false
         }
-        this.volume = volume
         active.setDataSource(track)
         active.prepareAsync()
         // The rare full-file fallback retains the old path's bounded transfer window.
@@ -156,6 +209,7 @@ class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
     private fun seek(active: MediaPlayer, positionMs: Long) {
         val target = positionMs.coerceIn(0L, durationMs.toLong())
         seeking = true
+        if (!startupPlaying) markStartup("seek-start")
         if (Build.VERSION.SDK_INT >= 26) active.seekTo(target, MediaPlayer.SEEK_CLOSEST)
         else {
             @Suppress("DEPRECATION")
@@ -166,6 +220,12 @@ class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
 
     private fun snapshot(): JSObject {
         if (prepared && !seeking) player?.let { positionMs = it.currentPosition }
+        val initial = firstProgressFrom
+        if (playing && !seeking && initial != null && positionMs > initial + 20) {
+            markStartup("position-advancing")
+            firstProgressFrom = null
+            startupPlaying = true
+        }
         // Timestamp the decoder read here, not when the WebView receives the IPC response.
         val sampledAtMs = System.currentTimeMillis()
         return JSObject().apply {
@@ -179,42 +239,67 @@ class AndroidPlaybackPlugin(private val activity: Activity) : Plugin(activity) {
     fun operate(invoke: Invoke) {
         main.post {
             if (destroyed) { invoke.reject("ANDROID_PLAYBACK_UNAVAILABLE"); return@post }
+            val args = invoke.getArgs()
+            val action = args.optString("action")
             try {
-                val args = invoke.getArgs()
-                when (args.getString("action")) {
-                    "load" -> load(args.getString("url"), args.getLong("sizeBytes"),
-                        args.getDouble("volume").toFloat().coerceIn(0f, 1f), args.optLong("initialMs", -1), args.optLong("initialAtMs", -1))
-                    "clear" -> clear()
-                    "background-stop" -> endBackgroundPlayback()
+                when (action) {
+                    "chat-scope", "chat-notify" -> {
+                        if (action == "chat-scope") chatNotifications.updateScope(args)
+                        else chatNotifications.receive(args)
+                        invoke.resolve(JSObject()); return@post
+                    }
+                    "room-driver" -> {
+                        roomDriver.update(args, invoke.parseArgs(MediaSessionArgs::class.java).controls)
+                        invoke.resolve(JSObject()); return@post
+                    }
+                    "startup-logging" -> {
+                        startupLogging = args.optBoolean("enabled", false)
+                        if (!startupLogging) {
+                            startupTrace = null
+                            firstProgressFrom = null
+                        }
+                        invoke.resolve(JSObject()); return@post
+                    }
                     "state" -> Unit
-                    "play" -> if (prepared && !playing && !seeking) {
-                        player?.start(); playing = true
-                        ensureBackgroundPlayback()
-                    } else Unit
-                    "pause" -> if (prepared && playing) {
-                        player?.pause(); playing = false
-                        releaseBackgroundAfterTransition()
-                    } else Unit
-                    "seek" -> if (prepared && !seeking) {
-                        player?.let { seek(it, args.getLong("positionMs")) }
-                    } else Unit
                     "volume" -> {
                         volume = args.getDouble("volume").toFloat().coerceIn(0f, 1f)
                         if (prepared) player?.setVolume(volume, volume)
                     }
                     else -> { invoke.reject("ANDROID_PLAYBACK_INVALID_COMMAND"); return@post }
                 }
-                invoke.resolve(snapshot())
+                invoke.resolve(if (action == "state") roomDriver.annotate(snapshot()) else snapshot())
             } catch (_: Exception) {
+                if (action == "room-driver" || action.startsWith("chat-")) {
+                    invoke.reject("ANDROID_MEDIA_SESSION_UNAVAILABLE"); return@post
+                }
                 fail(MediaPlayer.MEDIA_ERROR_UNKNOWN)
                 invoke.resolve(snapshot())
             }
         }
     }
 
+    private fun logVisibility(stage: String) {
+        if (activity.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE != 0) {
+            Log.i("ToneRoomSocket", "stage=$stage")
+        }
+    }
+
+    override fun onPause(activity: AppCompatActivity) {
+        chatNotifications.paused()
+        logVisibility("activity-paused")
+    }
+
+    override fun onResume(activity: AppCompatActivity) {
+        chatNotifications.resumed()
+        logVisibility("activity-resumed")
+    }
+
+    override fun onStop(activity: AppCompatActivity) { chatNotifications.stopped() }
+
     override fun onDestroy(activity: AppCompatActivity) {
+        logVisibility("activity-destroyed")
         destroyed = true
-        clear()
-        endBackgroundPlayback()
+        chatNotifications.clear()
+        roomDriver.destroy()
     }
 }

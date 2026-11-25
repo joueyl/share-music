@@ -11,16 +11,26 @@ import java.net.URI
 import java.net.URL
 
 /** Seekable, fixed-size audio from the same HTTPS providers accepted by the room server. */
-internal class TrackDataSource(url: String, private val length: Long, private val cacheDir: File) : MediaDataSource() {
+internal class TrackDataSource(url: String, private val length: Long, private val cacheDir: File, cacheKey: String,
+                               private val trace: ((String) -> Unit)? = null) : MediaDataSource() {
     private val initial = checkedUrl(url)
     private var resolved = initial
     private val chunks = LinkedHashMap<Long, ByteArray>(8, 0.75f, true)
     private var strongETag: String? = null
+    private var firstRead = true
+
+    private fun firstBytes(origin: String) {
+        if (!firstRead) return
+        firstRead = false
+        trace?.invoke(origin)
+    }
     @Volatile private var closed = false
     @Volatile private var connection: HttpURLConnection? = null
     @Volatile private var fallback: File? = null
 
     init { require(length in 1L..(100L * 1024 * 1024)) }
+
+    private val disk = TrackFileCache(cacheDir, cacheKey, length, CHUNK)
 
     override fun getSize(): Long = length
 
@@ -33,6 +43,10 @@ internal class TrackDataSource(url: String, private val length: Long, private va
         var written = 0
         while (written < requested) {
             val at = position + written
+            if (disk.readComplete(at, buffer, offset + written, requested - written)) {
+                firstBytes("first-bytes-local")
+                return requested
+            }
             fallback?.let { file ->
                 RandomAccessFile(file, "r").use {
                     it.seek(at)
@@ -41,7 +55,8 @@ internal class TrackDataSource(url: String, private val length: Long, private va
                 return requested
             }
             val start = at / CHUNK * CHUNK
-            val bytes = chunks[start] ?: fetchChunk(start).also {
+            val chunkLength = minOf(length - start, CHUNK).toInt()
+            val bytes = chunks[start] ?: (disk.readChunk(start, chunkLength) ?: fetchChunk(start)).also {
                 chunks[start] = it
                 if (chunks.size > 4) chunks.remove(chunks.keys.first())
             }
@@ -85,13 +100,19 @@ internal class TrackDataSource(url: String, private val length: Long, private va
                             if (response.getHeaderField("Content-Range") != "bytes $start-$end/$length") throw IOException("SOURCE_RANGE")
                             readExact(input, bytes)
                             if (input.read() != -1) throw IOException("SOURCE_SIZE")
+                            firstBytes("first-bytes-range")
+                            disk.storeChunk(start, bytes)
                         } else {
                             if (chunks.isNotEmpty()) throw IOException("SOURCE_CHANGED")
                             if (response.contentLengthLong >= 0 && response.contentLengthLong != length) throw IOException("SOURCE_SIZE")
+                            trace?.invoke("full-download-start")
                             storeFallback(input)
-                            RandomAccessFile(fallback ?: throw IOException("SOURCE_CLOSED"), "r").use {
-                                it.seek(start)
-                                it.readFully(bytes)
+                            firstBytes("first-bytes-full")
+                            if (!disk.readComplete(start, bytes, 0, bytes.size)) {
+                                RandomAccessFile(fallback ?: throw IOException("SOURCE_CLOSED"), "r").use {
+                                    it.seek(start)
+                                    it.readFully(bytes)
+                                }
                             }
                         }
                     }
@@ -134,23 +155,27 @@ internal class TrackDataSource(url: String, private val length: Long, private va
                 }
                 if (input.read() != -1) throw IOException("SOURCE_SIZE")
             }
-            fallback = file
+            if (closed) throw IOException("SOURCE_CLOSED")
+            if (!disk.retainComplete(file)) fallback = file
             if (closed) throw IOException("SOURCE_CLOSED")
         } finally {
             if (closed || fallback !== file) file.delete()
         }
     }
 
+    fun invalidateCache() = disk.invalidate()
+
     override fun close() {
         closed = true
         connection?.disconnect()
+        disk.close()
         fallback?.delete()
     }
 
-    private companion object {
-        const val CHUNK = 128L * 1024
-        val REDIRECTS = setOf(301, 302, 303, 307, 308)
-        val HOST = Regex("[a-z0-9-]+(?:\\.music\\.126\\.net|\\.stream\\.qqmusic\\.qq\\.com)", RegexOption.IGNORE_CASE)
+    companion object {
+        private const val CHUNK = 128L * 1024
+        private val REDIRECTS = setOf(301, 302, 303, 307, 308)
+        private val HOST = Regex("[a-z0-9-]+(?:\\.music\\.126\\.net|\\.stream\\.qqmusic\\.qq\\.com)", RegexOption.IGNORE_CASE)
         fun checkedUrl(value: String): URL {
             require(value.length <= 8192)
             val uri = URI(value)

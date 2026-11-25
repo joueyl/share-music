@@ -21,6 +21,10 @@ const playing=computed(()=>app.room?.playback.playState==='playing');
 const showArt=computed(()=>stageTheme.mode!=='lumiere'&&!lyrics.value);
 const showLyrics=computed(()=>stageTheme.mode==='lumiere'||lyrics.value||paired.value);
 const vinylToggle=ref<HTMLButtonElement|null>(null),lyricPanel=ref<HTMLElement|null>(null);
+function closeChat(){
+ chatOpen.value=false;
+ if(active.value&&!wide.value&&!ui.members)document.querySelector<HTMLButtonElement>('.apk-room-chat-trigger')?.focus({preventScroll:true});
+}
 async function switchVinylLyrics(show:boolean){
  lyrics.value=show;
  await nextTick();
@@ -70,7 +74,13 @@ onUnmounted(()=>detach());
    <button class="apk-room-presence" aria-label="查看房间成员与权限" @click="ui.members=true"><span aria-hidden="true" :class="{online:app.connected}"></span>{{ sortedOnline.length }} 人正在同频</button>
   </div>
   <!-- A single RoomChat instance survives chat open/close; no duplicated drafts. -->
-  <aside class="apk-chat-area" v-show="active"><RoomChat v-show="wide||chatOpen" :active="active&&(wide||chatOpen)"><template #actions><button v-if="!wide" class="icon-button" aria-label="收起聊天" @click="chatOpen=false"><X :size="20" /></button></template></RoomChat></aside>
+  <aside class="apk-chat-area" v-show="active">
+   <Transition name="apk-chat-panel" :css="!wide">
+    <RoomChat v-show="wide||chatOpen" :inert="!active||(!wide&&!chatOpen)" :active="active&&(wide||chatOpen)" keep-keyboard @keydown.esc="!wide&&!ui.members&&closeChat()">
+     <template #actions><button v-if="!wide" class="icon-button" aria-label="收起聊天" @click="closeChat"><X :size="20" /></button></template>
+    </RoomChat>
+   </Transition>
+  </aside>
  </section>
  <section v-else class="apk-card apk-state" role="status">正在加入房间…</section>
 </template>

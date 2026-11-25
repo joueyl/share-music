@@ -7,7 +7,7 @@ import { sendChat } from '../bridge';
 import { modalDepth } from '../useDialogFocus';
 
 const app = useApp();
-const props=withDefaults(defineProps<{active?:boolean}>(),{active:true});
+const props=withDefaults(defineProps<{active?:boolean; keepKeyboard?:boolean}>(),{active:true,keepKeyboard:false});
 const draft = ref(''), sending = ref(false), error = ref(''), unread = ref(0);
 const list = ref<HTMLElement | null>(null), atBottom = ref(true);
 const input = ref<HTMLTextAreaElement | null>(null);
@@ -35,6 +35,12 @@ watch(() => app.room?.id, () => { draft.value = ''; error.value = ''; pending = 
 function keydown(event: KeyboardEvent) {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
     event.preventDefault(); void submit();
+  }
+}
+function preserveComposerFocus(event: PointerEvent) {
+  if (props.keepKeyboard && event.button === 0 && input.value?.ownerDocument?.activeElement === input.value) {
+    // Keep the textarea focused during a tap, without suppressing the button's click.
+    event.preventDefault();
   }
 }
 async function submit() {
@@ -65,7 +71,7 @@ async function submit() {
   } finally {
     if (alive) sending.value = false;
     // Wait for Vue to remove disabled before returning focus to the composer.
-    if (sent) {
+    if (sent && !props.keepKeyboard) {
       await nextTick();
       if (alive && props.active && app.connected && app.room?.id === roomId && modalDepth.value === 0) {
         input.value?.focus({ preventScroll: true });
@@ -104,8 +110,8 @@ async function submit() {
     <div class="chat-quick-replies"><button type="button" :disabled="!app.connected||sending" @click="draft='这首歌好听！'"><Heart :size="13" />好喜欢</button><button type="button" :disabled="!app.connected||sending" @click="draft='晚安'">晚安</button><button type="button" :disabled="!app.connected||sending" @click="draft='好听！'">好听！</button></div>
     <form class="room-chat-form" @submit.prevent="submit">
       <label class="sr-only" for="room-chat-draft">聊天消息</label>
-      <textarea id="room-chat-draft" ref="input" v-model="draft" maxlength="500" rows="1" :disabled="!app.connected || sending" placeholder="说点什么，让此刻更近…" @keydown="keydown" />
-      <div class="room-chat-actions"><button class="primary" aria-label="发送聊天消息" :aria-busy="sending" :disabled="!canSend"><LoaderCircle v-if="sending" :size="14" class="spinning" /><Send v-else :size="14" /><span class="sr-only">{{ sending ? '发送中' : '发送' }}</span></button></div>
+      <textarea id="room-chat-draft" ref="input" v-model="draft" maxlength="500" rows="1" :disabled="!app.connected || (sending && !keepKeyboard)" placeholder="说点什么，让此刻更近…" @keydown="keydown" />
+      <div class="room-chat-actions"><button class="primary" aria-label="发送聊天消息" :aria-busy="sending" :disabled="!canSend" @pointerdown="preserveComposerFocus"><LoaderCircle v-if="sending" :size="14" class="spinning" /><Send v-else :size="14" /><span class="sr-only">{{ sending ? '发送中' : '发送' }}</span></button></div>
       <p v-if="error" class="chat-error" role="alert">{{ error }}</p>
     </form>
     

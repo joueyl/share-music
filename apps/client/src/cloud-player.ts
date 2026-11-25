@@ -1,18 +1,26 @@
 import { positionAt, hasRemoteAudio, type Playback, type RoomSnapshot, type TrackMetadata } from '@music-share/shared';
 import type { PlaybackSource } from './playback-source';
 
+export type AndroidStartupStage = 'snapshot' | 'link-ready' | 'link-failed' | 'retry-link' | 'local-ready' | 'room-committed' | 'room-active' | 'play-request';
+export type AndroidStartupTrace = { id: number; startMs: number };
+export type AndroidStartupEvent = AndroidStartupTrace & { stage: AndroidStartupStage; atMs: number; leadMs?: number };
+
 export type PlaybackDiagnostic = { positionMs: number } & (
   | { kind: 'correction'; driftMs: number }
   | { kind: 'waiting' | 'playing' | 'reload' | 'stalled' }
   | { kind: 'media-error'; code: number }
   | { kind: 'play-rejected' }
+  | ({ kind: 'startup' } & AndroidStartupEvent)
 );
 
 export type PlaybackMedia = Pick<HTMLAudioElement,
   'src' | 'currentTime' | 'readyState' | 'paused' | 'seeking' | 'buffered' | 'crossOrigin' |
   'load' | 'play' | 'pause' | 'removeAttribute' | 'onloadedmetadata' | 'oncanplay' | 'onseeked' |
   'onerror' | 'onwaiting' | 'onplaying'> & {
-  loadNativeSource?(url: string, sizeBytes: number, initialSeek?: { positionMs: number; sampledAtMs: number }): void;
+  loadNativeSource?(url: string, sizeBytes: number, initialSeek?: { positionMs: number; sampledAtMs: number }, cacheKey?: string, trace?: AndroidStartupTrace): void;
+  logStartup?(event: AndroidStartupEvent): void;
+  setStartupLogging?(enabled: boolean): void;
+  stopBackground?(): void;
   readonly nativeDurationMs?: number;
   readonly nativeSampledAtMs?: number;
   readonly error: { code: number } | null;
@@ -22,6 +30,7 @@ export type PlaybackMedia = Pick<HTMLAudioElement,
 export class CloudPlayer {
   private room: RoomSnapshot | null = null;
   private offset = 0;
+  private localUserId: string | null = null;
   private epoch = -1;
   private identity = '';
   private source = '';
@@ -46,8 +55,32 @@ export class CloudPlayer {
   private nativeCorrectionStartedAt?: number;
   private nativeSeekDurationMs = 0;
 
+  private startupSequence = 0;
+  private startup?: AndroidStartupTrace & { epoch: number; seen: Set<AndroidStartupStage> };
+
+  private markStartup(stage: AndroidStartupStage, leadMs?: number) {
+    const startup = this.startup;
+    if (!startup || !this.diagnostic || startup.seen.has(stage)) return;
+    startup.seen.add(stage);
+    const event: AndroidStartupEvent = { id: startup.id, startMs: startup.startMs, stage, atMs: this.now(), leadMs };
+    this.audio.logStartup?.(event);
+    this.diagnostic({ kind: 'startup', positionMs: this.diagnosticPosition(), ...event });
+  }
+
+  private markRoomStart(room: RoomSnapshot, playback: Playback) {
+    if (this.startup?.epoch !== playback.sourceEpoch || playback.playState !== 'playing') return;
+    if (room.pending?.committed) {
+      if (!this.startup.seen.has('room-active'))
+        this.markStartup('room-committed', Math.round(playback.effectiveAtServerMs - this.now() - this.offset));
+    } else if (!room.pending && !this.startup.seen.has('room-committed')) {
+      this.markStartup('room-active');
+    }
+  }
+
   setDiagnostic(observer?: (event: PlaybackDiagnostic) => void) {
     this.diagnostic = observer;
+    if (!observer) this.startup = undefined;
+    this.audio.setStartupLogging?.(!!observer);
     this.reportedWaiting = false;
   }
 
@@ -72,8 +105,21 @@ export class CloudPlayer {
     return true;
   }
 
-  private shouldCorrectNative(drift: number, position: number, at: number, fresh: boolean) {
-    if (this.now() < this.correctAfter || !fresh || this.audio.paused || this.audio.readyState < 3 || Math.abs(drift) <= 600) {
+  private isNativeLeader(playback: Playback) {
+    return !!this.audio.loadNativeSource && this.localUserId !== null && playback.leaderId === this.localUserId;
+  }
+
+  nativeLeaderPosition(roomId: string, sourceEpoch: number): number | undefined {
+    const room = this.room;
+    if (!room || room.id !== roomId || room.pending || this.epoch !== sourceEpoch ||
+        room.playback.sourceEpoch !== sourceEpoch || room.playback.playState !== 'playing' ||
+        !this.isNativeLeader(room.playback) || !this.ready || this.audio.seeking || this.audio.error ||
+        !this.audio.nativeSampledAtMs) return undefined;
+    return Math.round(this.audio.currentTime * 1000);
+  }
+
+  private shouldCorrectNative(playback: Playback, drift: number, position: number, at: number, fresh: boolean) {
+    if (this.isNativeLeader(playback) || this.now() < this.correctAfter || !fresh || this.audio.paused || this.audio.readyState < 3 || Math.abs(drift) <= 600) {
       this.nativeDrift = undefined;
       return false;
     }
@@ -134,6 +180,8 @@ export class CloudPlayer {
         this.seekTarget = undefined;
         audio.removeAttribute('src'); audio.load();
         this.releaseSource?.(); this.releaseSource = undefined;
+        this.markStartup('retry-link');
+        this.startup?.seen.delete('link-ready');
         void this.attachSource(renew, ++this.generation);
         return;
       }
@@ -158,7 +206,8 @@ export class CloudPlayer {
   }
 
   clear() {
-    this.room = null; this.epoch = -1; this.identity = ''; this.source = ''; ++this.generation;
+    this.startup = undefined;
+    this.room = null; this.localUserId = null; this.epoch = -1; this.identity = ''; this.source = ''; ++this.generation;
     this.ready = false; this.loading = false;
     this.resetRecovery();
     this.listenedMs=0;this.listeningSample=undefined;
@@ -167,13 +216,13 @@ export class CloudPlayer {
     this.renewNativeSource = undefined;
   }
 
-  async sync(room: RoomSnapshot, offset: number) {
-    this.room = room; this.offset = offset;
+  async sync(room: RoomSnapshot, offset: number, localUserId: string | null = null) {
+    this.room = room; this.offset = offset; this.localUserId = localUserId;
     const p = room.pending?.playback ?? room.playback;
     const track = room.playlist.find(t => t.id === p.sourceId);
-    if (!track || !hasRemoteAudio(track)) { this.clear(); return; }
+    if (!track || !hasRemoteAudio(track)) { this.clear(); this.audio.stopBackground?.(); return; }
     const identity = `${room.id}/${track.id}`;
-    if (this.epoch === p.sourceEpoch && this.identity === identity) return;
+    if (this.epoch === p.sourceEpoch && this.identity === identity) { this.markRoomStart(room, p); return; }
     this.identity = identity; this.epoch = p.sourceEpoch; this.ready = false; this.reported = this.now();
     this.resetRecovery();
     this.listenedMs=0;this.listeningSample=undefined;
@@ -181,12 +230,31 @@ export class CloudPlayer {
     // Seeking/pausing the same file must not discard its metadata and buffered data.
     const source = `${room.id}/${track.id}/${track.ossKey??track.contentHash}`;
     if (this.source === source) { this.prepare(); return; }
+    this.startup = this.diagnostic && this.audio.logStartup
+      ? { id: ++this.startupSequence, startMs: this.now(), epoch: p.sourceEpoch, seen: new Set() } : undefined;
+    this.markStartup('snapshot');
+    this.markRoomStart(room, p);
     this.source = source; this.loading = true;
     if (this.audio.src) { this.audio.removeAttribute('src'); this.audio.load(); }
     this.releaseSource?.(); this.releaseSource = undefined;
     this.renewNativeSource = this.audio.loadNativeSource ? () => this.url(room.id, track.id, track, true) : undefined;
     const generation = ++this.generation;
     await this.attachSource(() => this.url(room.id, track.id, track), generation);
+  }
+
+  resumeAndroidRoom() {
+    if (!this.audio.loadNativeSource || !this.room) return;
+    this.listeningSample = undefined;
+    const pending = this.room.pending;
+    if (!this.loading && !this.source && this.identity) {
+      // A link request may have failed during the network handoff. Retry from
+      // the fresh room snapshot, not the stale URL or offline playback state.
+      this.identity = '';
+      void this.sync(this.room, this.offset, this.localUserId);
+      return;
+    }
+    if (this.ready && pending && !pending.committed)
+      void this.send({ type: 'ready', roomId: this.room.id, transitionId: pending.id, sourceEpoch: this.epoch }).catch(() => {});
   }
 
   private async attachSource(resolve: () => Promise<string | PlaybackSource>, generation: number) {
@@ -205,7 +273,8 @@ export class CloudPlayer {
           ? { positionMs: Math.max(0, Math.round(positionAt(room.playback, at + this.offset))), sampledAtMs: at }
           : undefined;
         this.nativePreparedEpoch = initial ? this.epoch : undefined;
-        this.audio.loadNativeSource(url, result.sizeBytes, initial);
+        this.markStartup('link-ready');
+        this.audio.loadNativeSource(url, result.sizeBytes, initial, result.nativeCacheKey, this.startup);
       } else {
         this.audio.crossOrigin = 'anonymous';
         this.audio.src = url; this.audio.load();
@@ -214,6 +283,7 @@ export class CloudPlayer {
       this.prepare();
     } catch (error) {
       if (generation === this.generation) {
+        this.markStartup('link-failed');
         this.loading = false; this.source = ''; this.renewNativeSource = undefined;
         this.emit('media-status', { status: 'error', detail: '音乐加载失败，请重新选择歌曲', bufferedMs: 0, driftMs: 0, receiveBps: 0 });
         this.emit('server-message', { type: 'error', error: error instanceof Error ? error.message : String(error) });
@@ -237,6 +307,7 @@ export class CloudPlayer {
     }
     if (this.audio.readyState < 3) return;
     this.ready = true;
+    this.markStartup('local-ready');
     this.nativePreparedEpoch = undefined;
     this.seekTarget = undefined;
     if (pending && !pending.committed) void this.send({ type: 'ready', roomId: this.room.id, transitionId: pending.id, sourceEpoch: this.epoch }).catch(() => {});
@@ -313,7 +384,7 @@ export class CloudPlayer {
     const sampledAtServerMs = sampledAt + this.offset;
     const target = this.playablePosition(positionAt(p, nativePlaying && fresh ? sampledAtServerMs : now));
     const position = this.audio.currentTime * 1000, drift = position - target;
-    if (nativePlaying ? this.shouldCorrectNative(drift, position, sampledAt, fresh) :
+    if (nativePlaying ? this.shouldCorrectNative(p, drift, position, sampledAt, fresh) :
         Math.abs(drift) > (p.playState === 'playing' ? 600 : 250) && (p.playState !== 'playing' || at >= this.correctAfter)) {
       this.listeningSample=undefined;
       if (p.playState === 'playing' && !this.audio.paused) {
@@ -332,6 +403,7 @@ export class CloudPlayer {
     if (this.audio.paused) {
       this.listeningSample=undefined;
       const audio = this.audio, generation = this.generation;
+      this.markStartup('play-request');
       void audio.play().catch(error => {
         if (error?.name !== 'AbortError' && this.audio === audio && this.generation === generation) {
           this.diagnostic?.({ kind: 'play-rejected', positionMs: this.diagnosticPosition() });

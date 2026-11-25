@@ -2,6 +2,13 @@ import { readFileSync } from 'node:fs';
 import { expect,it } from 'vitest';
 import { parse } from '@vue/compiler-sfc';
 const read=(p:string)=>readFileSync(new URL('../src/'+p,import.meta.url),'utf8');
+it('keeps APK playlist actions above the songs and reachable while scrolling',()=>{
+ const {descriptor}=parse(read('apk/pages/MusicPage.vue'));
+ const markup=descriptor.template!.content;
+ expect(markup.indexOf('class="apk-library-toolbar"')).toBeLessThan(markup.indexOf('class="apk-song-list"'));
+ expect(markup.match(/class="apk-library-actions"/g)).toHaveLength(1);
+ expect(descriptor.styles[0]!.content).toMatch(/\.apk-library-toolbar\{position:sticky;top:0/);
+});
 it('keeps APK templates independent, responsive and free of desktop chrome',()=>{
  for(const file of ['apk/ApkApp.vue','apk/pages/LoginPage.vue','apk/pages/DiscoverPage.vue','apk/pages/MusicPage.vue','apk/pages/ListenPage.vue','apk/components/ApkPlayer.vue','apk/components/ApkRoomPreferences.vue','apk/components/ApkVinylArtwork.vue','apk/components/ApkNavigation.vue']){
   const source=read(file);expect(parse(source).errors).toEqual([]);expect(source).not.toMatch(/import.*(?:App\.vue|\/views\/|GlobalPlayer\.vue|AuthPage\.vue)/);
@@ -17,6 +24,9 @@ it('keeps immersive Android controls on the existing footer with shared layout c
  expect(room).toContain('<ApkVinylArtwork');
  expect(room).toContain('<TrackLyrics class="apk-lyrics" :visible="showLyrics"');
  expect(room.match(/<RoomChat\b/g)).toHaveLength(1);
+ expect(room).toContain('<Transition name="apk-chat-panel" :css="!wide">');
+ expect(room).toContain('keep-keyboard');
+ expect(css).toContain('grid-template-areas:"avatar meta" "avatar bubble"');
  expect(css).toMatch(/:has\(\.apk-room-player\)\{--apk-room-nav-gap:8px;--apk-player:min\(calc\(var\(--apk-room-control-limit,236px\) \+ var\(--apk-room-nav-gap\)\)/);
  expect(css).toMatch(/\.apk-room-controls\{[^}]*calc\(4px \+ var\(--apk-room-nav-gap,0px\)\)/);
  expect(css).toContain('bottom:calc(var(--workspace-player) + 8px)');
@@ -34,12 +44,13 @@ it('uses the Brilliant APK discovery order with independently scrolling room car
  expect(css).toContain('.apk-room-list{flex:1 1 0;min-height:var(--room-card-min);overflow:auto');
  expect(css).toContain('grid-template:"actions heading" auto "search rooms"');
 });
-it('keeps the APK room artwork at the top without a recommendations panel',()=>{
+it('centers the APK vinyl vertically without adding a recommendations panel',()=>{
  const room=read('apk/pages/ListenPage.vue'),css=read('apk/apk.css');
  expect(room).not.toContain('SimilarRecommendations');
  expect(css).not.toContain('.next-track-grid');
  expect(room.indexOf('<ApkVinylArtwork')).toBeLessThan(room.indexOf('class="apk-room-presence"'));
  expect(css).toMatch(/\.apk-room-artwork\{[^}]*container-type:size;display:grid;place-items:start center/);
+ expect(css).toMatch(/\.apk-room-artwork \.apk-vinyl\{[^}]*align-self:center/);
  expect(css).toContain('width:min(100%,var(--apk-vinyl-max,342px),88.6cqh)');
  expect(css).toMatch(/\.apk-room-lyrics\{[^}]*overflow:auto/);
 });

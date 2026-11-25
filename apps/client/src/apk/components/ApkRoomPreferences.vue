@@ -51,7 +51,7 @@ useDialogFocus(dialog, dismiss);
           {{ playbackDiagnosticEnabled ? '关闭音频诊断' : '开启音频诊断' }}
         </button>
         <section v-if="playbackDiagnosticEnabled" class="apk-playback-diagnostic" aria-label="音频诊断记录" data-selectable>
-          <p>只记录本机最近 8 条播放事件。关闭诊断或离开房间会清空。</p>
+          <p>只显示本机最近 8 条播放事件。切歌原生阶段可用 ADB 查看；关闭诊断或离开房间会清空页面记录。</p>
           <p v-if="!playbackDiagnosticEntries.length">暂无事件。可关闭设置继续播放，复现后再打开查看。</p>
           <ul v-else>
             <li v-for="entry in playbackDiagnosticEntries" :key="entry.id">{{ entry.at }} · {{ describePlaybackDiagnostic(entry.event) }}</li>

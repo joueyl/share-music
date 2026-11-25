@@ -4,7 +4,7 @@ export type RoomSocketPort = Pick<WebSocket, 'readyState' | 'onopen' | 'onmessag
   send(data: string): void | Promise<void>;
 };
 
-type RoomEvent = { type: 'open' } | { type: 'message'; data: string } | { type: 'close'; code: number };
+type RoomEvent = { type: 'open' | 'reconnecting' | 'reconnected' } | { type: 'message'; data: string } | { type: 'close'; code: number };
 let lifecycle = Promise.resolve();
 
 function nativeLifecycle(operation: () => Promise<void>) {
@@ -19,7 +19,10 @@ export class AndroidRoomSocket implements RoomSocketPort {
   onopen: WebSocket['onopen'] = null;
   onmessage: WebSocket['onmessage'] = null;
   onclose: WebSocket['onclose'] = null;
+  onreconnecting?: () => void;
+  onreconnected?: () => void;
   private socketId = crypto.randomUUID();
+  get nativeSocketId() { return this.socketId; }
 
   constructor(url: string) {
     void nativeLifecycle(async () => {
@@ -56,7 +59,11 @@ export class AndroidRoomSocket implements RoomSocketPort {
         if (this.onopen) Reflect.apply(this.onopen, this, [new Event('open')]);
       } else if (event.type === 'message') {
         if (this.onmessage) Reflect.apply(this.onmessage, this, [new MessageEvent('message', { data: event.data })]);
-      } else {
+      } else if (event.type === 'reconnecting') {
+        this.onreconnecting?.();
+      } else if (event.type === 'reconnected') {
+        this.onreconnected?.();
+      } else if (event.type === 'close') {
         this.finish(event.code);
         return;
       }

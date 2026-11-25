@@ -18,12 +18,14 @@ const {app,link,tab,opened,favoriteTab,songs,selected,busy,loading,message,showI
   <template v-if="detailTarget">
    <button class="text-button" :disabled="busy" @click="back"><ArrowLeft :size="18" />返回歌单列表</button>
    <header v-if="opened" class="apk-card apk-collection-summary"><AlbumArt :src="opened.coverUrl" /><div><h2>{{ opened.name }}</h2><p>网易云{{ opened.kind==='album'?'专辑':'歌单' }} · {{ opened.trackCount }} 首</p><button class="text-button" :disabled="!!favoriteBusy||!favoritesReady" :aria-pressed="isSaved(opened)" @click="favorite(opened)"><Heart :size="18" />{{ isSaved(opened)?'已收藏':'收藏' }}</button></div></header>
-   <div class="apk-selection"><label><input type="checkbox" :checked="allSelected" :indeterminate="selected.size>0&&!allSelected" :disabled="busy||loading||!songs.length" @change="toggleAll" />全选歌曲</label><small>已选 {{ selected.size }} 首</small></div>
+   <div class="apk-library-toolbar">
+    <div class="apk-selection"><label><input type="checkbox" :checked="allSelected" :indeterminate="selected.size>0&&!allSelected" :disabled="busy||loading||!songs.length" @change="toggleAll" />全选歌曲</label><small>已选 {{ selected.size }} 首</small></div>
+    <div class="apk-library-actions"><button class="primary" :disabled="!available||!selected.size" :aria-busy="busy" @click="add(false)"><Plus :size="18" />{{ busy?'处理中…':`加入房间 · ${selected.size} 首` }}</button><button class="secondary" :disabled="!available||!selected.size||!app.permission.skip" @click="add(true)"><Play :size="17" />立即播放</button></div>
+   </div>
    <p class="apk-hint">{{ addHint }}</p>
    <div v-if="loading" class="apk-card apk-state" role="status"><LoaderCircle :size="32" class="spinning" />正在读取完整歌单…</div>
    <div v-else-if="detailFailed" class="apk-card apk-state"><h2>歌单暂时无法读取</h2><button class="primary" @click="openCollection(detailTarget!)">重新读取</button></div>
    <div v-else class="apk-song-list" tabindex="0" aria-label="APK 歌单歌曲列表"><label v-for="song in songs" :key="song.id" class="apk-card apk-song-row" :data-selected="selected.has(song.id)"><input type="checkbox" :checked="selected.has(song.id)" :disabled="busy" @change="toggle(song.id)" /><span><strong>{{ song.name }}</strong><small>{{ song.artists }} · {{ song.album }}</small></span><SongFavoriteButton source="netease" :song-id="song.id" :name="song.name" /></label><p v-if="!songs.length" class="apk-card apk-state">暂无可访问歌曲</p></div>
-   <div class="apk-library-actions"><button class="primary" :disabled="!available||!selected.size" :aria-busy="busy" @click="add(false)"><Plus :size="18" />{{ busy?'处理中…':`加入房间 · ${selected.size} 首` }}</button><button class="secondary" :disabled="!available||!selected.size||!app.permission.skip" @click="add(true)"><Play :size="17" />立即播放</button></div>
    <small class="apk-hint">已读取 {{ songs.length }} / {{ opened?.trackCount??0 }} 首 · 加入不会打断播放</small>
   </template>
   <template v-else>
@@ -35,3 +37,14 @@ const {app,link,tab,opened,favoriteTab,songs,selected,busy,loading,message,showI
   </template>
  </section>
 </template>
+
+<style scoped>
+.apk-library-toolbar{
+ display:flex;flex-direction:column;gap:6px;padding:8px 12px;
+ background:#f4f7fc;border:1px solid white;border-radius:16px;
+}
+@media(min-height:480px){
+ .apk-library-toolbar{position:sticky;top:0;z-index:2}
+ .apk-song-list,.apk-song-list :is(input,button){scroll-margin-top:112px}
+}
+</style>

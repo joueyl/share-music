@@ -10,7 +10,7 @@ import { AndroidRoomSocket, type RoomSocketPort } from './apk/android-room-socke
 import { AudioWaveform, releaseWaveformAudio } from './audio-waveform';
 import { loadPlaybackSource } from './playback-source';
 import { rememberTrackArtwork, trackArtwork } from './track-artwork';
-import { musicAudioHost, normalizeAlbumCover, parseMusicReference, type MusicReference, type MusicCollection, parsePlaylistLink, isPlaylistShortLink, playlistReference } from '@music-share/shared';
+import { normalizeAlbumCover, parseMusicReference, type MusicReference, type MusicCollection, parsePlaylistLink, isPlaylistShortLink, playlistReference } from '@music-share/shared';
 import type { SystemMediaState } from './system-media';
 import type { ArtworkFrame } from './system-artwork';
 import { listen } from '@tauri-apps/api/event';
@@ -19,6 +19,13 @@ type Listener = (event: any) => void;
 let socket: RoomSocketPort | undefined, token = '', base = '', joinedRoom: string | null = null;
 let browserGeneration = 0, reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 let roomLeft = false;
+let androidRejoinRoom: string | null = null;
+let androidDisconnectTimer: ReturnType<typeof setTimeout> | undefined;
+function resetAndroidRejoin() {
+  clearTimeout(androidDisconnectTimer);
+  androidDisconnectTimer = undefined;
+  androidRejoinRoom = null;
+}
 const pendingChats = new Set<(error: Error) => void>();
 function cancelChats(code: string) { for (const reject of pendingChats) reject(new Error(code)); }
 const listeners = new Map<string, Set<Listener>>();
@@ -86,6 +93,7 @@ export async function login(serverUrl: string, name: string, password: string, r
   const generation = ++browserGeneration; clearTimeout(reconnectTimer);
   base = url.origin; const data = await browserRequest('/login', { name, password, register });
   if (generation !== browserGeneration) throw new Error('LOGIN_CANCELLED');
+  if (androidPlayback) { resetAndroidRejoin(); clearCloud(); }
   token = data.token; socket?.close(); joinedRoom = null;
   connectBrowser(); return { user: data.user };
 }
@@ -101,6 +109,25 @@ function connectBrowser() {
     const sent = current.send(JSON.stringify(message));
     if (sent) void sent.catch(() => {});
   };
+  const suspendAndroidRoom = () => {
+    if (!joinedRoom || androidRejoinRoom === joinedRoom) return;
+    androidRejoinRoom = joinedRoom;
+    androidDisconnectTimer = setTimeout(() => {
+      androidDisconnectTimer = undefined;
+      androidPlayback?.reset();
+    }, 25_000);
+  };
+  if (current instanceof AndroidRoomSocket) {
+    current.onreconnecting = () => {
+      if (!active()) return;
+      cancelChats('CHAT_DISCONNECTED');
+      suspendAndroidRoom();
+      emit('connection', { connected: false });
+    };
+    current.onreconnected = () => {
+      if (active()) emit('connection', { connected: true });
+    };
+  }
   current.onopen = () => { if (active()) sendDuringHandshake({ type: 'auth', token }); };
   current.onmessage = event => {
     if (!active()) return;
@@ -110,24 +137,35 @@ function connectBrowser() {
       emit('connection', { connected: true });
       if (joinedRoom) sendDuringHandshake({ type: 'join', roomId: joinedRoom });
     }
-    else emit('server-message', message);
+    else {
+      const rejoined = message.type === 'snapshot' && message.data.id === androidRejoinRoom;
+      if (rejoined) resetAndroidRejoin();
+      if (androidRejoinRoom && message.type === 'error' && ['ROOM_FULL', 'ROOM_NOT_FOUND', 'NOT_IN_ROOM'].includes(message.error)) {
+        resetAndroidRejoin(); joinedRoom = null; clearCloud();
+      }
+      emit('server-message', message);
+    }
   };
   current.onclose = event => {
     if (!active()) return;
     cancelChats('CHAT_DISCONNECTED');
-    if (androidPlayback) clearCloud(); else audio?.pause();
+    if (!androidPlayback) audio?.pause();
     emit('connection', { connected: false });
-    if (androidPlayback && event.code === 4003) { emit('server-message', { type: 'error', error: '服务器不允许当前 Android 连接，请检查 HTTPS 地址和允许的来源' }); return; }
+    if (androidPlayback && event.code === 4003) { resetAndroidRejoin(); clearCloud(); emit('server-message', { type: 'error', error: '服务器不允许当前 Android 连接，请检查 HTTPS 地址和允许的来源' }); return; }
     // 4001 also means a missed heartbeat after authentication. Retry once with
     // the existing token; a 4001 before auth still means the session is invalid.
-    if (event.code === 4009 || event.code === 4001 && (!androidPlayback || !authenticated)) {
+    if (event.code === 4401 || event.code === 4009 || event.code === 4001 && (!androidPlayback || !authenticated)) {
+      if (androidPlayback) { resetAndroidRejoin(); clearCloud(); }
       emit('server-message', { type: 'error', error: 'SESSION_EXPIRED' }); return;
     }
+    if (androidPlayback && joinedRoom) suspendAndroidRoom();
+    else if (androidPlayback) clearCloud();
     reconnectTimer = setTimeout(() => { reconnectTimer = undefined; if (active()) connectBrowser(); }, 2000);
   };
 }
 export async function logout(): Promise<void> {
   cancelChats('SESSION_EXPIRED');
+  resetAndroidRejoin();
   clearCloud();
   if (desktop) await invoke('logout');
   ++browserGeneration;
@@ -135,7 +173,7 @@ export async function logout(): Promise<void> {
   token = ''; base = ''; joinedRoom = null;
   const previous = socket; socket = undefined;
   previous?.close(1000, 'Logout');
-  (androidPlayback ?? audio)?.pause(); emit('connection', { connected: false });
+  audio?.pause(); emit('connection', { connected: false });
 }
 
 export type RoomSettings = NonNullable<RoomSnapshot['settings']>;
@@ -170,14 +208,16 @@ export async function join(roomId: string): Promise<void> {
           else if (message.type === 'error') reject(new Error(message.error));
         });
         timer = setTimeout(() => reject(new Error('加入房间超时，请检查连接')), 8000);
-        await send({ type: 'join', roomId }); joinedRoom = roomId;
+        await send({ type: 'join', roomId });
+        if (androidRejoinRoom && androidRejoinRoom !== roomId) { resetAndroidRejoin(); clearCloud(); }
+        joinedRoom = roomId;
       } catch (e) { reject(e); }
     });
   } finally { clearTimeout(timer); unsubscribe?.(); }
 }
 export async function leave() {
   cancelChats('NOT_IN_ROOM');
-  roomLeft = true; joinedRoom = null;
+  roomLeft = true; joinedRoom = null; resetAndroidRejoin();
   clearCloud();
   if (socket?.readyState === WebSocket.OPEN) await send({ type: 'leave' });
 }
@@ -220,7 +260,7 @@ export async function capabilities(): Promise<{ native: boolean; reason: string;
  configureRuntimeProfile(cap.platform,cap.arch);return cap;
 }
 
-const androidPlayback = import.meta.env.VITE_CLIENT_TARGET === 'apk' && isNativeShell() ? new AndroidPlayback() : null;
+const androidPlayback = import.meta.env.VITE_CLIENT_TARGET === 'apk' && isNativeShell() ? new AndroidPlayback(status => emit('media-status', status)) : null;
 if (androidPlayback) document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || !token || !reconnectTimer || socket?.readyState !== WebSocket.CLOSED) return;
   clearTimeout(reconnectTimer);
@@ -237,25 +277,14 @@ function replacePlaybackAudio(previous: HTMLAudioElement) {
 function roomPlaybackLink(roomId: string, trackId: string, refresh = false) {
   return browserRequest(`/rooms/${roomId}/music/${trackId}` + (refresh ? '?refresh=1' : ''));
 }
-const media = androidPlayback ?? audio;
-const cloudPlayer = media ? new CloudPlayer(media,
-  async (roomId, trackId, track, refresh) => {
-    if (androidPlayback) {
-      const { url, sizeBytes } = await roomPlaybackLink(roomId, trackId, refresh);
-      if (typeof url !== 'string' || !Number.isSafeInteger(sizeBytes) || sizeBytes < 1 || sizeBytes > 100 * 1024 * 1024) {
-        throw new Error('PLAYBACK_AUDIO_METADATA_INVALID');
-      }
-      const source = new URL(url);
-      if (source.protocol !== 'https:' || !musicAudioHost(source.hostname) || source.port || source.username || source.password || source.hash) {
-        throw new Error('MUSIC_SOURCE_INVALID');
-      }
-      return { url: source.href, sizeBytes, release: () => {} };
-    }
-    return loadPlaybackSource(next => roomPlaybackLink(roomId, trackId, next), desktop, track, current=>browserAudio(roomId,trackId,current));
-  },
-  send, emit, Date.now, audio ? () => replacePlaybackAudio(audio!) : undefined) : null;
+const cloudPlayer = audio ? new CloudPlayer(audio,
+  (roomId, trackId, track) => loadPlaybackSource(next => roomPlaybackLink(roomId, trackId, next), desktop, track, current=>browserAudio(roomId,trackId,current)),
+  send, emit, Date.now, () => replacePlaybackAudio(audio!)) : null;
 export function setApkPlaybackDiagnostic(observer?: (event: PlaybackDiagnostic) => void) {
-  if (import.meta.env.VITE_CLIENT_TARGET === 'apk') cloudPlayer?.setDiagnostic(observer);
+  if (import.meta.env.VITE_CLIENT_TARGET === 'apk') {
+    androidPlayback?.setDiagnostic(observer);
+    cloudPlayer?.setDiagnostic(observer);
+  }
 }
 export async function browserAudio(roomId:string,trackId:string,track:Pick<TrackMetadata,'sizeBytes'>):Promise<ArrayBuffer>{
  if(!Number.isSafeInteger(track.sizeBytes)||track.sizeBytes<1||track.sizeBytes>100*1024*1024)throw new Error('PLAYBACK_AUDIO_TOO_LARGE');
@@ -275,12 +304,15 @@ export async function browserAudio(roomId:string,trackId:string,track:Pick<Track
  const data=await new Blob(parts).arrayBuffer();
  return data;
 }
-function clearCloud() { cloudPlayer?.clear(); androidPlayback?.stopBackground(); }
-export async function syncCloud(room: RoomSnapshot, clockOffset: number) {
-  if (room.playlist) await cloudPlayer?.sync(room, clockOffset);
+function clearCloud() { cloudPlayer?.clear(); androidPlayback?.reset(); }
+export async function syncCloud(room: RoomSnapshot, clockOffset: number, localUserId: string | null) {
+  if (room.playlist) await cloudPlayer?.sync(room, clockOffset, localUserId);
+}
+export function androidLeaderPosition(roomId: string, sourceEpoch: number) {
+  return androidPlayback?.position(roomId, sourceEpoch);
 }
 setInterval(() => {
-  if (socket?.readyState === WebSocket.OPEN) {
+  if (socket?.readyState === WebSocket.OPEN && !androidRejoinRoom) {
     androidPlayback?.poll();
     cloudPlayer?.tick();
   }

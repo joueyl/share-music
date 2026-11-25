@@ -1,6 +1,6 @@
 import { expect, it, vi } from 'vitest';
 import type { Playback, RoomSnapshot } from '@music-share/shared';
-import { CloudPlayer, type PlaybackMedia } from '../src/cloud-player';
+import { CloudPlayer, type AndroidStartupEvent, type PlaybackMedia } from '../src/cloud-player';
 import { loadPlaybackSource } from '../src/playback-source';
 
 class FakeAudio {
@@ -22,8 +22,10 @@ class FakeAudio {
 class FakeAndroidAudio extends FakeAudio {
   nativeSampledAtMs = 0;
   initialSeek?: { positionMs: number; sampledAtMs: number };
-  loadNativeSource(url: string, _size: number, initialSeek?: { positionMs: number; sampledAtMs: number }) {
-    this.src = url; this.initialSeek = initialSeek; this.load();
+  nativeCacheKey?: string;
+  logStartup = vi.fn<(event: AndroidStartupEvent) => void>();
+  loadNativeSource(url: string, _size: number, initialSeek?: { positionMs: number; sampledAtMs: number }, cacheKey?: string) {
+    this.src = url; this.initialSeek = initialSeek; this.nativeCacheKey = cacheKey; this.load();
   }
 }
 
@@ -78,7 +80,7 @@ function setupAndroid() {
   const audio = new FakeAndroidAudio();
   const send = vi.fn(async (_message: unknown) => {});
   const player = new CloudPlayer(audio as unknown as PlaybackMedia,
-    async () => ({ url: 'https://m801.music.126.net/song.mp3', sizeBytes: 4, release: () => {} }),
+    async () => ({ url: 'https://m801.music.126.net/song.mp3', sizeBytes: 4, nativeCacheKey: 'a'.repeat(32), release: () => {} }),
     send, vi.fn(), () => time);
   function tick(at: number, positionMs: number, sampledAt = at) {
     time = at;
@@ -89,6 +91,41 @@ function setupAndroid() {
   return { audio, send, player, tick };
 }
 
+it('records Android source, local readiness and room commit once, only when diagnostic logging is enabled', async () => {
+  const { player, audio, tick } = setupAndroid();
+  await player.sync(room(), 0);
+  expect(audio.logStartup).not.toHaveBeenCalled();
+  player.clear();
+  const observer = vi.fn(); player.setDiagnostic(observer);
+  const active = room(); active.playback.effectiveAtServerMs = 100300;
+  await player.sync(active, 0);
+  audio.buffered();
+  tick(100200, 0);
+  active.pending!.committed = true;
+  await player.sync(active, 0);
+  await player.sync(active, 0);
+  tick(100300, 0);
+  expect(audio.logStartup.mock.calls.map(([event]) => event.stage)).toEqual([
+    'snapshot', 'link-ready', 'local-ready', 'room-committed', 'play-request',
+  ]);
+  expect(observer).toHaveBeenCalledWith(expect.objectContaining({ kind: 'startup', stage: 'room-committed', leadMs: 100 }));
+});
+
+it('resends Android readiness after rejoining without replacing a prepared source', async () => {
+  const { player, audio, send } = setupAndroid();
+  await player.sync(room(), 0);
+  audio.buffered();
+  const ready = { type: 'ready', roomId: 'room', transitionId: 'transition-1', sourceEpoch: 1 };
+  expect(send).toHaveBeenCalledWith(ready);
+  send.mockClear();
+
+  await player.sync(room(), 0);
+  player.resumeAndroidRoom();
+
+  expect(send).toHaveBeenCalledExactlyOnceWith(ready);
+  expect(audio.load).toHaveBeenCalledOnce();
+});
+
 it('passes the active room position to native preparation without a second startup seek', async () => {
   const { player, audio, send, tick } = setupAndroid();
   const active = room(1, 40000);
@@ -96,6 +133,7 @@ it('passes the active room position to native preparation without a second start
   active.playback.effectiveAtServerMs = 98000;
   await player.sync(active, 0);
   expect(audio.initialSeek).toEqual({ positionMs: 42000, sampledAtMs: 100000 });
+  expect(audio.nativeCacheKey).toBe('a'.repeat(32));
   audio.advance(42.4); // Already positioned by onPrepared in the native player.
   audio.buffered();
   tick(100700, 42400);
@@ -137,6 +175,41 @@ it('reports Android playback using the decoder timestamp and skips stale samples
   tick(101600, 1300, 101300);
   expect(send).toHaveBeenLastCalledWith(expect.objectContaining({ positionMs: 1300, sampledAtServerMs: 101500 }));
   expect(audio.seeks).toEqual([]);
+});
+
+it('uses the local Android leader position and still reports progress without seeking back', async () => {
+  const { player, audio, send, tick } = setupAndroid();
+  const active = room(); active.pending = null;
+  active.playback = { ...active.playback, leaderId: 'local', effectiveAtServerMs: 100000 };
+  await player.sync(active, 0, 'local');
+  audio.buffered();
+  tick(100000, 0); tick(101100, 2000); tick(101700, 2600);
+  expect(audio.seeks).toEqual([]);
+  expect(player.nativeLeaderPosition('room', 1)).toBe(2600);
+  expect(player.nativeLeaderPosition('other-room', 1)).toBeUndefined();
+  expect(send).toHaveBeenCalledWith(expect.objectContaining({ type: 'progress', positionMs: 2000, sampledAtServerMs: 101100 }));
+
+  // A seek command still positions at its requested target even when this user leads.
+  const seek = room(2, 90000);
+  seek.pending!.playback = { ...seek.pending!.playback, leaderId: 'local' };
+  await player.sync(seek, 0, 'local');
+  expect(audio.seeks).toEqual([90]);
+  expect(player.nativeLeaderPosition('room', 1)).toBeUndefined();
+});
+
+it('follows the room clock again when leadership goes to another member', async () => {
+  const { player, audio, tick } = setupAndroid();
+  const active = room(); active.pending = null;
+  active.playback = { ...active.playback, leaderId: 'local', effectiveAtServerMs: 100000 };
+  await player.sync(active, 0, 'local');
+  audio.buffered();
+  tick(100000, 0); tick(101000, 2000); tick(101600, 2600);
+  expect(audio.seeks).toEqual([]);
+  active.playback = { ...active.playback, leaderId: 'peer' };
+  await player.sync(active, 0, 'local');
+  expect(player.nativeLeaderPosition('room', 1)).toBeUndefined();
+  tick(101700, 2700); tick(102200, 3200);
+  expect(audio.seeks).toEqual([2.2]);
 });
 
 it('ignores transient Android drift, then seeks only if a large offset persists while audio advances', async () => {

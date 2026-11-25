@@ -58,7 +58,9 @@ adb devices
 npm run android
 ```
 
-`npm run android` 在启动前自动将前端端口（默认 `11421`）和 `VITE_SERVER_URL` 指向的回环后端端口（默认 `3000`）通过 `adb reverse` 转回电脑。不为远程 API 转发端口。多设备时，先设置 `$env:ANDROID_SERIAL = '<设备序列号>'`，再用 `npm run android -- <设备名>` 选择同一台设备。若设备重连导致映射丢失，重新执行启动命令即可重新配置。
+`npm run android` 会在多台在线设备中让你选一次；也可用 `npm run android -- emulator-5554` 或 `npm run android -- OnePlus_12` 直接选择已启动的模拟器，或用 `ANDROID_SERIAL` 指定默认设备。Tauri 和 `adb reverse` 使用同一个选择，只把前端端口（默认 `11421`）及配置中的回环后端端口（默认 `3000`）转发到目标设备。远程 API 不做后端端口转发；重连后若映射丢失，重新运行启动命令。
+
+Windows 下，Rust 构建脚本需要 MSVC 链接器和 Windows SDK。安装 Visual Studio 的 C++ Build Tools 和 Windows SDK 后，`npm run android` 会为本次启动加载工具链，不修改系统 PATH。如果自动发现失败，可在 Visual Studio 的 x64 Native Tools Command Prompt 中运行同一命令。
 
 Tauri 移动端代理访问开发服务根路径，由 Vite 返回 APK 独立入口，不打开电脑浏览器或自动启动后端。要调试登录、房间等功能，仍需另开终端启动已配置开发数据库的 `npm run dev:server`，并在开发后端的 `ALLOWED_ORIGINS` 中保留 Android WebView 实际来源（默认 `http://tauri.localhost`；浏览器预览使用 `http://127.0.0.1:11421`）。HTTP 和 WebSocket 都需要允许该来源。如果 `11421` 已被浏览器预览占用，先停止预览。
 

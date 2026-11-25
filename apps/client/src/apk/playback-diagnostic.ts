@@ -23,6 +23,15 @@ export function enablePlaybackDiagnostic(enabled: boolean) {
 export function describePlaybackDiagnostic(event: PlaybackDiagnostic): string {
   const position = (event.positionMs / 1000).toFixed(1);
   switch (event.kind) {
+    case 'startup': {
+      const stage = {
+        snapshot: '收到新音源状态', 'link-ready': '拿到音源链接', 'link-failed': '未能获取可用音源',
+        'retry-link': '重新请求音源', 'local-ready': '本机准备完成', 'room-committed': '收到房间开播安排',
+        'room-active': '房间已进入播放状态', 'play-request': '请求原生播放',
+      }[event.stage];
+      const lead = event.leadMs === undefined ? '' : `（距计划开播 ${event.leadMs} 毫秒，负数表示已过）`;
+      return `#${event.id} +${event.atMs - event.startMs} 毫秒 · ${stage}${lead}`;
+    }
     case 'correction': return `${position} 秒 · 同步跳转（偏差 ${event.driftMs} 毫秒）`;
     case 'waiting': return `${position} 秒 · 播放等待数据`;
     case 'playing': return `${position} 秒 · 恢复播放`;

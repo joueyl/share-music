@@ -6,6 +6,7 @@ import { resolve,dirname,basename } from 'node:path';
 import { checkApkBuild } from './check-apk-build.mjs';
 import { apkEntryPlugin } from '../apps/client/apk-entry.ts';
 import { androidDevPorts } from '../apps/client/android-dev-forward.mjs';
+import { matchAndroidDevice } from './android.mjs';
 const read=p=>readFileSync(new URL('../'+p,import.meta.url),'utf8');
 test('desktop and APK use distinct documents, page trees and output directories',()=>{
  assert.match(read('apps/client/index.html'),/src\/main.ts/);
@@ -34,7 +35,7 @@ test('native Android dev uses the independent APK entry over loopback without op
  const client=JSON.parse(read('apps/client/package.json'));
  const android=JSON.parse(read('apps/client/src-tauri/tauri.android.conf.json'));
  const desktop=JSON.parse(read('apps/client/src-tauri/tauri.conf.json'));
- assert.equal(root.scripts.android,'npm run tauri -w @music-share/client -- android dev --host 127.0.0.1');
+ assert.equal(root.scripts.android,'node scripts/android.mjs');
  assert.equal(android.build.devUrl,'http://127.0.0.1:11421');
  assert.equal(android.build.beforeDevCommand,'npm run dev:android-webview');
  assert.equal(client.scripts['dev:android-webview'],'node android-dev-forward.mjs && vite --mode apk-development --host 127.0.0.1 --port 11421');
@@ -48,6 +49,14 @@ test('Android debug forwards the frontend and configured local API port only',()
  assert.deepEqual(androidDevPorts(frontend,'http://[::1]:3100'),['11421','3100']);
  assert.deepEqual(androidDevPorts(frontend,'https://api.example.test'),['11421']);
  assert.deepEqual(androidDevPorts(frontend,'http://127.0.0.1:11421'),['11421']);
+});
+test('Android debug resolves the simulator by serial or name without selecting a connected phone',()=>{
+ const phone={serial:'phone-wifi',model:'PJD110'};
+ const emulator={serial:'emulator-5554',name:'OnePlus_12',model:'sdk_gphone64_x86_64'};
+ const devices=[phone,emulator];
+ assert.equal(matchAndroidDevice(devices,'emulator-5554'),emulator);
+ assert.equal(matchAndroidDevice(devices,'OnePlus_12'),emulator);
+ assert.throws(()=>matchAndroidDevice([...devices,{...emulator,serial:'emulator-5556'}], 'OnePlus_12'));
 });
 test('APK dev proxy serves APK HTML for the root without rewriting module requests',()=>{
  let middleware;

@@ -12,15 +12,16 @@ vi.mock('../src/store', () => ({ useApp: () => fixture.app }));
 vi.mock('../src/bridge', () => ({ sendChat: vi.fn() }));
 let mounted: ReturnType<typeof renderer.createApp>;
 const chatActive = ref(true);
+const keepKeyboard = ref(false);
 const settle = async () => { await nextTick(); await nextTick(); };
 beforeEach(() => {
   vi.stubGlobal('Document', class {}); vi.stubGlobal('ShadowRoot', class {});
-  vi.mocked(sendChat).mockReset(); fixture.modalOpen = false; chatActive.value = true;
+  vi.mocked(sendChat).mockReset(); fixture.modalOpen = false; chatActive.value = true; keepKeyboard.value = false;
   fixture.app = reactive({ user: { id: 'me' }, room: { id: 'room', members: [] }, connected: true, chatMessages: [] });
 });
 afterEach(() => { mounted?.unmount(); vi.unstubAllGlobals(); });
 async function mount() {
-  const root = node('root'); mounted = renderer.createApp({ render: () => h(RoomChat, { active: chatActive.value }) }); mounted.mount(root); await settle(); return root;
+  const root = node('root'); mounted = renderer.createApp({ render: () => h(RoomChat, { active: chatActive.value, keepKeyboard: keepKeyboard.value }) }); mounted.mount(root); await settle(); return root;
 }
 const message = (id: string, kind?: 'activity') => ({ id, requestId: id, roomId: 'room', userId: 'me', userName: '<小明>', sentAt: 100000, text: '点播了《晚风》', kind });
 
@@ -77,6 +78,28 @@ it.each(['button', 'enter'])('focuses the enabled input after confirmed %s sends
   expect(sendChat).toHaveBeenCalledWith('room', '你好', expect.any(String));
   confirm(); await settle(); await settle();
   expect(input.value).toBe(''); expect(input.focus).toHaveBeenCalledExactlyOnceWith({ preventScroll: true });
+});
+
+it('keeps the focused APK composer editable and prevents a send tap from stealing focus', async () => {
+  keepKeyboard.value = true;
+  let confirm!: () => void;
+  vi.mocked(sendChat).mockImplementation(() => new Promise<void>(resolve => { confirm = resolve; }));
+  const root = await mount(), input = all(root).find(n => n.type === 'textarea');
+  const button = all(root).find(n => n.props['aria-label'] === '发送聊天消息');
+  input.ownerDocument = { activeElement: input };
+  input.focus = vi.fn();
+  const preventDefault = vi.fn();
+  button.props.onPointerdown({button: 0, preventDefault});
+  expect(preventDefault).toHaveBeenCalledOnce();
+  input.props['onUpdate:modelValue']('第一条'); await settle();
+  const pending = all(root).find(n => n.type === 'form').props.onSubmit({preventDefault: vi.fn()});
+  await settle();
+  expect(input.props.disabled).toBe(false);
+  expect(button.props.disabled).toBe(true);
+  input.props['onUpdate:modelValue']('下一条');
+  confirm(); await pending; await settle();
+  expect(input.value).toBe('下一条');
+  expect(input.focus).not.toHaveBeenCalled();
 });
 
 it.each(['failed', 'room', 'left', 'unmounted', 'hidden', 'disconnected', 'modal'])('does not steal focus when a send becomes %s', async mode => {
