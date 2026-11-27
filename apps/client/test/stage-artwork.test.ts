@@ -34,3 +34,21 @@ it('atomically upgrades same-song artwork, but clears immediately on a real trac
  await f.loader.set('https://y.gtimg.cn/failed-upgrade.jpg','different-room/one');expect(f.publish).toHaveBeenLastCalledWith(null);
  f.loader.dispose();f.publish.mockClear();await f.loader.set('blob:after-disposal','room/two');expect(f.publish).not.toHaveBeenCalled();
 });
+
+it('notifies a transition consumer only when the active cover fails to load or decode', async () => {
+ const failed=vi.fn(), images:any[]=[];
+ const loader=createStageArtworkLoader(async()=>{throw new Error('network');},vi.fn(),()=>{
+  const image={naturalWidth:300,naturalHeight:300};
+  images.push(image);
+  return image as HTMLImageElement;
+ },failed);
+ await loader.set('blob:old','old');
+ await loader.set('blob:current','current');
+ images[0].onerror();
+ expect(failed).not.toHaveBeenCalled();
+ images[1].onerror();
+ expect(failed).toHaveBeenCalledTimes(1);
+ await loader.set('https://y.gtimg.cn/failed.jpg','remote');
+ expect(failed).toHaveBeenCalledTimes(2);
+ loader.dispose();
+});

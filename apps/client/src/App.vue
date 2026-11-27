@@ -14,6 +14,7 @@ import { createPlaybackCacheHost } from './playback-cache-host';
 import { createRoomRouteTransition } from './room-route-transition';
 import SplashScreen from './components/SplashScreen.vue';
 import GlobalPlayer from './components/GlobalPlayer.vue';
+import RoomFlowBackground from './components/RoomFlowBackground.vue';
 import MobileNavigation from './components/MobileNavigation.vue';
 import QueueDrawer from './components/QueueDrawer.vue';
 import MusicSearchDialog from './components/MusicSearchDialog.vue';
@@ -44,6 +45,10 @@ const isMaximized = ref(false);
 const app = useApp(), router = useRouter(), route = useRoute();
 
 const inRoom = computed(() => !!route.path.startsWith('/room/'));
+const roomFlowTrack = computed(() => {
+  const room = app.room;
+  return room && room.id === route.params.id ? room.playlist.find(track => track.id === room.playback.sourceId) : undefined;
+});
 const playbackCacheKey=computed(()=>JSON.stringify([app.user?.id,app.room?.id??(inRoom.value?route.params.id:null)]));
 const playbackPageHost=computed(()=>createPlaybackCacheHost(playbackCacheKey.value));
 const cachedPageNames=computed(()=>['CachedMusicPage',playbackPageHost.value.name!]);
@@ -156,6 +161,13 @@ function onHeaderMouseDown(e: MouseEvent) {
   <RoomMembersDialog v-if="ui.members && app.room" @close="ui.members = false" />
 
   <div class="shell" :class="{ 'auth-shell': !app.user, 'in-room-shell': inRoom, 'is-maximized': isMaximized }">
+    <RoomFlowBackground
+      v-if="bridge.desktop && app.user && inRoom && app.room && app.room.id === route.params.id"
+      :key="app.room.id"
+      :room-id="app.room.id"
+      :track-id="roomFlowTrack?.id ?? ''"
+      :cover-url="bridge.playingTrackCover(roomFlowTrack)"
+    />
     <!-- 1. 发现/大厅 主导航栏 (浏览模式) -->
     <header
       v-if="app.user && !inRoom"
@@ -316,7 +328,7 @@ function onHeaderMouseDown(e: MouseEvent) {
     <MobileNavigation v-if="app.user" />
   </div>
   <!-- 播放器独立于 shell 的 inert 锁，仅列表开关在队列展开时可操作。 -->
-  <GlobalPlayer v-if="app.user" />
+  <GlobalPlayer v-if="app.user" :class="{ 'desktop-room-player': bridge.desktop && inRoom }" />
 </template>
 
 <style scoped>

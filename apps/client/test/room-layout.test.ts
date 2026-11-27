@@ -23,6 +23,20 @@ it('keeps narrow and short rooms scrollable with space for the fixed transport a
  expect(room).not.toContain('height: clamp(500px, calc(100dvh - 184px), 640px)');
  expect(room).toContain('height: 400px; min-height: 320px');
 });
+it('keeps the desktop room panels translucent and removes their outer borders',()=>{
+ const room=read('views/Room.vue'),css=styles('views/Room.vue');
+ expect(room).toContain("'desktop-room-panels': bridge.desktop");
+ expect(css).toMatch(/\.desktop-room-panels \.listening-layout > :deep\(\.room-chat\)\s*\{\s*border: 0;/);
+ expect(css).toMatch(/\.desktop-room-panels \.listening-stage\s*\{\s*background-color: rgb\(255 255 255 \/ 28%\);\s*border: 0;/);
+ expect(css).toMatch(/\.desktop-room-panels \.listening-layout > :deep\(\.room-chat:not\(\.floating-room-chat\)\)\s*\{\s*background-color: rgb\(255 255 255 \/ 40%\);/);
+});
+it('keeps unhighlighted lyric text and unreached word fill white without adding shadows',()=>{
+ const css=styles('views/Room.vue');
+ expect(css).toMatch(/\.desktop-room-panels \.stage-lyrics :deep\(\.lyric-line:not\(\.active\)\)\s*\{\s*color: #fff;\s*\}/);
+ expect(css).toMatch(/\.desktop-room-panels \.lumiere-stage-lyrics :deep\(\.gw-word:not\(\.is-active\) \.gw-body\)\s*\{\s*color: #fff;\s*\}/);
+ expect(css).toMatch(/\.desktop-room-panels \.stage-lyrics :deep\(\.lyric-line\.active \.lyric-word\)\s*\{\s*background-image: linear-gradient\(to right, var\(--accent\) var\(--fill\), #fff var\(--fill\)\);\s*\}/);
+ expect(css).not.toMatch(/\.desktop-room-panels[^{}]*:deep\(\.(?:lyric-line\.active\)|gw-word\.is-active)/);
+});
 it('wraps long untimed lyrics, bounds word spacing, and scrolls long lines without scaling the page',()=>{
  const css=styles('components/TrackLyrics.vue'),template=read('components/TrackLyrics.vue');
  expect(css).toMatch(/\.lumiere-stage\s*\{[^}]*overflow: hidden/s);
@@ -65,7 +79,8 @@ it('rounds the independent player bottom corners and shares the window maximized
  expect(styles('components/GlobalPlayer.vue')).toContain('border-radius:0 0 var(--window-corner-radius,20px) var(--window-corner-radius,20px)');
  expect(styles('components/GlobalPlayer.vue')).not.toMatch(/overflow\s*:\s*hidden|clip-path|scale\(/);
  expect(player).toContain('prefers-reduced-motion:reduce');
- expect(app).toContain('播放器独立于 shell 的 inert 锁');expect(app).toContain('<GlobalPlayer v-if="app.user" />');
+ expect(app).toContain('播放器独立于 shell 的 inert 锁');expect(app).toContain(`<GlobalPlayer v-if="app.user" :class="{ 'desktop-room-player': bridge.desktop && inRoom }" />`);
+ expect(styles('components/GlobalPlayer.vue')).toContain('.global-player.desktop-room-player{background-color:rgb(255 255 255 / 42%);border-top:0}');
 });
 
 it('preserves the original room slide/scale timings and isolates only the animated layer',()=>{

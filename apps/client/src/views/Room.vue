@@ -17,7 +17,7 @@ const { app,route,router,leaving,track,coverUrl,online,hostMember,sortedOnline,f
 </script>
 
 <template>
-  <section v-if="app.room" class="tone-room page in-room-stage-page">
+  <section v-if="app.room" class="tone-room page in-room-stage-page" :class="{ 'desktop-room-panels': bridge.desktop }">
     <div class="listening-layout" :class="{'is-chat-floating':floatingChat}">
       <div class="listening-main">
         <section
@@ -597,6 +597,32 @@ const { app,route,router,leaving,track,coverUrl,online,hostMember,sortedOnline,f
  .stage-top-presence{grid-column:1/-1}
  .stage-ipod-wrap,.stage-turntable-wrap{grid-column:1;grid-row:2}
  .listening-stage.ipod-active .stage-song,.listening-stage.turntable-active .stage-song{grid-column:2;grid-row:2}
+}
+
+.desktop-room-panels .listening-stage {
+  background-color: rgb(255 255 255 / 28%);
+  border: 0;
+}
+
+.desktop-room-panels .listening-layout > :deep(.room-chat) {
+  border: 0;
+}
+
+.desktop-room-panels .listening-layout > :deep(.room-chat:not(.floating-room-chat)) {
+  background-color: rgb(255 255 255 / 40%);
+}
+
+/* Keep lyrics white until the original highlight reaches them. */
+.desktop-room-panels .stage-lyrics :deep(.lyric-line:not(.active)) {
+  color: #fff;
+}
+
+.desktop-room-panels .stage-lyrics :deep(.lyric-line.active .lyric-word) {
+  background-image: linear-gradient(to right, var(--accent) var(--fill), #fff var(--fill));
+}
+
+.desktop-room-panels .lumiere-stage-lyrics :deep(.gw-word:not(.is-active) .gw-body) {
+  color: #fff;
 }
 
 </style>

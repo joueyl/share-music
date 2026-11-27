@@ -25,6 +25,7 @@ const { playbackMode,app,volume,seek,expanded,track,favoriteReference,blocked,ma
 <style scoped>
 /* The player lives outside the inert shell, so it must round its own surface. */
 .global-player{border-radius:0 0 var(--window-corner-radius,20px) var(--window-corner-radius,20px);transition:border-radius .18s ease}
+.global-player.desktop-room-player{background-color:rgb(255 255 255 / 42%);border-top:0}
 .global-player .favorite-control{display:inline-flex;align-items:center;justify-content:center;width:44px;height:44px;min-width:44px;min-height:44px;flex-shrink:0}
 @media(min-width:601px) and (max-width:900px){
  .global-player .playing-summary{width:clamp(125px,calc(100vw - 476px),190px)}

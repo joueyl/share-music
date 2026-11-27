@@ -1,5 +1,5 @@
 /** Blob-backed images are origin-clean even when the provider CDN has no CORS. */
-export function createStageArtworkLoader(load:(url:string)=>Promise<Blob>,publish:(image:HTMLImageElement|null)=>void,createImage=()=>new Image()){
+export function createStageArtworkLoader(load:(url:string)=>Promise<Blob>,publish:(image:HTMLImageElement|null)=>void,createImage=()=>new Image(),onFailure?:()=>void){
  let generation=0,ownedUrl='',disposed=false,initialized=false,failed=false,source='',trackIdentity='';
  const release=()=>{if(ownedUrl)URL.revokeObjectURL(ownedUrl);ownedUrl='';};
  async function set(url?:string,identity=url??''){
@@ -14,13 +14,14 @@ export function createStageArtworkLoader(load:(url:string)=>Promise<Blob>,publis
   // same song. Only an actual song/room change or removal clears it immediately.
   if(!sameTrack||!url)publish(null);
   if(!url)return;
+  const fail=()=>{failed=true;release();onFailure?.();};
   let local='';
   try{
    if(!url.startsWith('blob:')){const blob=await load(url);if(disposed||version!==generation)return;local=URL.createObjectURL(blob);ownedUrl=local;}
    const image=createImage();image.crossOrigin='anonymous';
-   const finish=(valid:boolean)=>{if(disposed||version!==generation)return;if(valid&&image.naturalWidth>0&&image.naturalWidth<=8192&&image.naturalHeight>0&&image.naturalHeight<=8192)publish(image);else failed=true;release();};
+   const finish=(valid:boolean)=>{if(disposed||version!==generation)return;if(valid&&image.naturalWidth>0&&image.naturalWidth<=8192&&image.naturalHeight>0&&image.naturalHeight<=8192){release();publish(image);}else fail();};
    image.onload=()=>finish(true);image.onerror=()=>finish(false);image.src=local||url;
-  }catch{if(version===generation){failed=true;release();}}
+  }catch{if(version===generation)fail();}
  }
  return {set,dispose(){disposed=true;generation++;release();publish(null);}};
 }
