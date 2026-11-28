@@ -15,33 +15,6 @@ it.each(['',',','[{}]','[null]','[true]','["bad"]','[42','42,,43'])('rejects mal
  const invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(){return {status:200,body:{code:200},cookie:[]};}`),18000,()=>{});
  await expect(invoke('song_detail',{ids})).rejects.toThrow('NETEASE_UNAVAILABLE');
 });
-it('delegates scrobble to the public SDK without custom Windows headers or a copied event implementation',async()=>{
- const invoke=createHanaInvoker(moduleUrl(`export async function createRequest(){throw Error('custom scrobble request must not run');}
- export async function invokeModule(name,query,config){
-  return {status:200,body:{code:200,name,query,customIdentity:['ua','os','osver','mobilename','domain','crypto'].some(key=>key in config)},cookie:[]};
- }`));
- expect((await invoke('scrobble',{id:'42',sourceid:'7',time:185})).body).toEqual({code:200,name:'scrobble',query:{id:'42',sourceid:'7',time:185},customIdentity:false});
-});
-
-it('the installed scrobble SDK sends both original events with its default identity offline',async()=>{
- const entry=pathToFileURL(require.resolve('hana-music-api')).href;
- const invoke=createHanaInvoker(moduleUrl(`import {invokeModule as call} from ${JSON.stringify(entry)};
- export async function invokeModule(name,query,config){
-  const calls=[];
-  const result=await call(name,query,{...config,fetcher:async(url,init)=>{
-   const headers=new Headers(init.headers);const cookie=Object.fromEntries(headers.get('cookie').split('; ').map(part=>part.split('=').map(decodeURIComponent)));
-   calls.push({url:String(url),os:cookie.os,mobilename:cookie.mobilename,ua:headers.get('user-agent'),authenticated:cookie.MUSIC_U==='fixture'});
-   return new Response(JSON.stringify({code:200}),{status:200,headers:{'content-type':'application/json'}});
-  }});
-  return {...result,body:{...result.body,calls}};
- }`));
- const result=await invoke('scrobble',{id:'42',sourceid:'7',time:185,cookie:'MUSIC_U=fixture'});
- expect(result.body.calls).toHaveLength(2);
- for(const call of result.body.calls){
-  expect(call).toMatchObject({url:'https://clientlog.music.163.com/eapi/feedback/weblog',os:'osx',authenticated:true});
-  expect(call.mobilename).not.toBe('Windows 10');expect(call.ua).not.toContain('Windows NT 10.0');
- }
-});
 it('bounds mixed rapid-switch calls before SDK startup and releases all worker slots',async()=>{
  const state=new Int32Array(new SharedArrayBuffer(8)),log=vi.fn();
  const invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(name,query){
@@ -118,19 +91,10 @@ it('keeps only business login codes, never raw rejection credentials',async()=>{
  await expect(invoke('search',{})).rejects.toThrow(/^NETEASE_UNAVAILABLE$/);
 });
 
-it('preserves rejected scrobble bodies for the existing sanitized response logger',async()=>{
- const invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(){throw {status:403,body:{code:403,message:'rejected'}}}`));
- expect(await invoke('scrobble',{id:'42',sourceid:'7',time:185})).toEqual({body:{code:403,message:'rejected'},cookie:[]});
-});
 it('preserves the already-signed-in code without retrying or exposing extra response fields',async()=>{
  const invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(){throw {status:400,body:{code:-2,cookie:'private'}}}`));
  expect(await invoke('daily_signin',{})).toEqual({body:{code:-2}});
 });
-it.each([499,502,504])('does not present SDK transport/cancellation status %s as a real scrobble response',async status=>{
- const invoke=createHanaInvoker(moduleUrl(`export async function invokeModule(){throw {status:${status},body:{code:${status},msg:'private transport failure'}}}`));
- await expect(invoke('scrobble',{id:'42',sourceid:'7',time:185})).rejects.toThrow(/^NETEASE_UNAVAILABLE$/);
-});
-
 it.each([
  `return {status:500,body:{code:200},cookie:[]}`,
  `return {status:200,body:null,cookie:[]}`,
@@ -182,10 +146,10 @@ it('the installed SDK recognizes all existing read-only, login and maintenance m
   login_qr_key:{},login_qr_check:{key:'fixture'},daily_signin:{type:0},yunbei_sign:{},vip_tasks:{},vip_growthpoint_get:{ids:['123_7']},
   simi_song:{id:'42',limit:12,offset:0},song_detail:{ids:['42']},song_url:{ids:['42'],br:128000},
   lyric:{id:'42'},lyric_new:{id:'42'},playlist_detail:{id:'42'},playlist_track_all:{id:'42',limit:50,offset:0},
+  comment_music:{id:'42',limit:20,offset:20},
   user_playlist:{uid:'42'},user_detail:{uid:'42'},user_account:{},user_cloud:{},login_status:{},album:{id:'42'},
-  scrobble:{id:'42',sourceid:'7',time:10},
  };
- const names=[...musicMethods,'login','login_cellphone','login_qr_key','login_qr_check','daily_signin','yunbei_sign','vip_tasks','vip_growthpoint_get','scrobble'];
+ const names=[...musicMethods,'comment_music','login','login_cellphone','login_qr_key','login_qr_check','daily_signin','yunbei_sign','vip_tasks','vip_growthpoint_get'];
  // Import the real SDK once, so slower CI runners test every identifier without
  // paying the ESM startup cost in a separate worker for each mocked rejection.
  const result=await invoke('compatibility_probe',{cookie:'MUSIC_U=fixture',cases:names.map(name=>({name,params:queries[name]}))});

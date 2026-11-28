@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, toRef, watch, computed, onMounted, onUnmounted, nextTick } from 'vue';
+import { ref, toRef, watch, computed, onMounted, onUnmounted, nextTick, provide } from 'vue';
 import { appUpdates } from './app-updates';
 import { useAutoDismissNotice } from './useAutoDismissNotice';
 import { Headphones, Search, X, LogOut, History, Settings2, Minus, Square, ChevronDown, Link, Palette, Disc3 } from 'lucide-vue-next';
@@ -12,6 +12,7 @@ import AuthPage from './components/AuthPage.vue';
 import CachedMusicPage from './components/CachedMusicPage.vue';
 import { createPlaybackCacheHost } from './playback-cache-host';
 import { createRoomRouteTransition } from './room-route-transition';
+import { roomCommentsKey, useTrackComments } from './features/useTrackComments';
 import SplashScreen from './components/SplashScreen.vue';
 import GlobalPlayer from './components/GlobalPlayer.vue';
 import RoomFlowBackground from './components/RoomFlowBackground.vue';
@@ -49,6 +50,18 @@ const roomFlowTrack = computed(() => {
   const room = app.room;
   return room && room.id === route.params.id ? room.playlist.find(track => track.id === room.playback.sourceId) : undefined;
 });
+const showRoomComments=computed(()=>bridge.desktop&&!!app.user&&!!app.room&&app.room.id===route.params.id&&inRoom.value);
+const canOpenRoomComments=computed(()=>showRoomComments.value&&!!roomFlowTrack.value?.neteaseId&&!roomFlowTrack.value.qqId);
+const commentRoom=()=>showRoomComments.value?app.room?.id??'':'';
+const commentState=useTrackComments(commentRoom,()=>canOpenRoomComments.value?roomFlowTrack.value?.id:undefined,
+  ()=>showRoomComments.value&&app.connected,bridge.songComments);
+const openCommentRoom=ref<{id:string}|null>(null);
+provide(roomCommentsKey,{state:commentState,openRoom:openCommentRoom});
+watch(commentRoom,()=>{openCommentRoom.value=null;},{flush:'sync'});
+function openPlayerComments() {
+  if(canOpenRoomComments.value)openCommentRoom.value={id:commentRoom()};
+}
+const commentTotal=commentState.total;
 const playbackCacheKey=computed(()=>JSON.stringify([app.user?.id,app.room?.id??(inRoom.value?route.params.id:null)]));
 const playbackPageHost=computed(()=>createPlaybackCacheHost(playbackCacheKey.value));
 const cachedPageNames=computed(()=>['CachedMusicPage',playbackPageHost.value.name!]);
@@ -328,7 +341,8 @@ function onHeaderMouseDown(e: MouseEvent) {
     <MobileNavigation v-if="app.user" />
   </div>
   <!-- 播放器独立于 shell 的 inert 锁，仅列表开关在队列展开时可操作。 -->
-  <GlobalPlayer v-if="app.user" :class="{ 'desktop-room-player': bridge.desktop && inRoom }" />
+  <GlobalPlayer v-if="app.user" :class="{ 'desktop-room-player': bridge.desktop && inRoom }"
+    :show-comments="showRoomComments" :can-open-comments="canOpenRoomComments" :comment-total="commentTotal" @open-comments="openPlayerComments" />
 </template>
 
 <style scoped>
@@ -511,6 +525,7 @@ function onHeaderMouseDown(e: MouseEvent) {
 @media (min-width: 901px) and (max-height: 639px) {
   .shell.in-room-shell .in-room-page { height: auto; min-height: 100%; }
 }
+.shell.in-room-shell .in-room-page:has(.desktop-comments-scroll) { height: 100%; min-height: 0; }
 
 @media (max-width: 600px) {
   .tone-room-nav { padding-inline: 12px; }

@@ -24,6 +24,21 @@ use url::Url;
 const SOCKET_ERROR: &str = "ROOM_CONTROL_UNAVAILABLE";
 const WRITE_LIMIT: Duration = Duration::from_secs(5);
 const NATIVE_CLOCK_ID: &str = "746f6e65-0000-4000-8000-000000000001";
+// Protocol codes mirror packages/shared; legacy 4001 alone is ambiguous.
+const UNAUTHORIZED_CLOSE: u16 = 4401;
+fn retryable_disconnect(code: u16) -> bool {
+    matches!(code, 1001 | 1006 | 4001 | 4010)
+}
+
+#[test]
+fn retries_timeouts_but_not_credential_rejection_or_replacement() {
+    for code in [1001, 1006, 4001, 4010] {
+        assert!(retryable_disconnect(code));
+    }
+    for code in [1000, 4003, 4009, UNAUTHORIZED_CLOSE] {
+        assert!(!retryable_disconnect(code));
+    }
+}
 
 // Debug APK only. Log fixed stage names and numeric close codes, never frames,
 // room IDs, connection URLs, credentials or remote close reasons.
@@ -617,7 +632,7 @@ async fn supervise(
         driver,
     )
     .await;
-    while matches!(code, 1001 | 1006 | 4001) && session.room.is_some() && session.auth.is_some() {
+    while retryable_disconnect(code) && session.room.is_some() && session.auth.is_some() {
         socket_log(format_args!("stage=reconnecting code={code}"));
         driver.publish("disconnected", &session, None);
         events.push(json!({"type":"reconnecting"}), 32, false);
@@ -656,7 +671,7 @@ async fn supervise(
             )
             .await;
             code = attempt;
-            if session.recoveries != before || attempt != 1006 || session.room.is_none() {
+            if session.recoveries != before || !retryable_disconnect(attempt) || session.room.is_none() {
                 restored = true;
                 break;
             }
@@ -703,7 +718,7 @@ async fn run_socket(
     socket_log(format_args!("stage=upgraded retry={reconnect}"));
     if reconnect {
         let Some(auth) = session.auth.as_ref() else {
-            return 4001;
+            return 1000;
         };
         if !matches!(
             timeout(WRITE_LIMIT, socket.send(Message::Text(auth.clone()))).await,
@@ -772,7 +787,7 @@ async fn run_socket(
                                 }
                                 if rejoining && m["type"] == "error" {
                                     session.room = None;
-                                    if m["error"] == "UNAUTHORIZED" { return 4401; }
+                                    if m["error"] == "UNAUTHORIZED" { return UNAUTHORIZED_CLOSE; }
                                     events.push(json!({"type":"message","data":data}), 128, false);
                                     return 1000;
                                 }
@@ -800,7 +815,6 @@ async fn run_socket(
                     Message::Close(frame) => {
                         let code = frame.map_or(1000, |f| f.code.into());
                         socket_log(format_args!("stage=remote-close code={code}"));
-                        if reauthenticating && code == 4001 { return 4401; }
                         return code;
                     }
                     // tungstenite already queues the pong. Flush it without any WebView event.

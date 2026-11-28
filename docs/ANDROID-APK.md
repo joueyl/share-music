@@ -38,6 +38,8 @@ Android 环境初始化显式指定 `setup-android` 的 `packages: platform-tool
 3. `tauri.android.conf.json` 指定 `npm run build:apk`、`frontendDist: ../dist-apk`；Vite 在 `android-preview` 下构建 `apk.html` 并输出为 `index.html`。`.env.android-preview` 仅含公开的运行时开关。CI 使用校验过的服务地址；显式 `VITE_SERVER_URL` 始终优先；未配置时，仅 APK 打包回退到公开的生产服务地址，`dev:apk` 使用独立的 `apk-development` 模式及公开本地地址配置，默认使用 `http://127.0.0.1:3000`，不会读取生产后端作为开发默认值。
 4. 前置 verify job 对两端运行类型、客户端测试、入口/SDK/测试签名配置及两个构建；生成 Gradle 工程后追加 Release 专用测试签名配置，通过后执行 `tauri android build --ci --apk --target aarch64 --config src-tauri/tauri.android.conf.json`。打包后再次检查 `dist-apk` 标记。Release 的 Rust 配置只在 Android job 中启用 `opt-level=s`、`debug=0`、`strip=symbols`、thin LTO 和单 codegen unit，不改变桌面构建。本地原生开发需先安装 SDK/NDK/Java 与 Rust Android target。
 
+Git 忽略从模板生成的 `gen/android/`、Android/移动端 schema、插件本地构建输出和自动生成的权限文件。手写原生插件、Manifest、Gradle 配置及权限源文件仍由 Git 跟踪；不要把需要共享的改动只留在生成工程中。
+
 ## 本地命令
 
 ### 原生调试

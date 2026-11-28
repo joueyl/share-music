@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Crown, Link, X, Settings2, Music } from 'lucide-vue-next';
+import { inject, nextTick, onActivated, onDeactivated, onUnmounted, ref, watch } from 'vue';
 import { ui, openSearch } from '../ui';
 import { stageTheme, lumiereCssVars } from '../stage-theme';
 import * as bridge from '../bridge';
@@ -10,15 +11,73 @@ import TrackLyrics from '../components/TrackLyrics.vue';
 import AlbumArt from '../components/AlbumArt.vue';
 import IpodStage from '../components/IpodStage.vue';
 import TurntableStage from '../components/TurntableStage.vue';
+import RoomSongComments from '../components/RoomSongComments.vue';
+import { roomCommentSnap } from '../room-comment-snap';
+import { roomCommentsKey } from '../features/useTrackComments';
 import turntable from '../assets/room-turntable.png';
 
 import { useRoomSession } from '../features/useRoomSession';
 const { app,route,router,leaving,track,coverUrl,online,hostMember,sortedOnline,floatingChat,exit,invite } = useRoomSession();
+const roomScroll=ref<HTMLElement>();
+const stageScrollSection=ref<HTMLElement>();
+const commentsDocked=ref(false);
+const roomComments=inject(roomCommentsKey);
+let scrollRegion:'stage'|'comments'='stage';
+let scrollIdle:ReturnType<typeof setTimeout>|undefined;
+function commentDock(root:HTMLElement,comments:HTMLElement) {
+  return Math.min(root.scrollHeight-root.clientHeight,root.scrollTop+comments.getBoundingClientRect().top-root.getBoundingClientRect().top-8);
+}
+function settleRoomScroll() {
+  clearTimeout(scrollIdle);
+  const root=roomScroll.value, stage=stageScrollSection.value;
+  const comments=root?.querySelector<HTMLElement>(':scope > .song-comments');
+  if(!bridge.desktop || !root?.isConnected || !stage || !comments)return;
+  const top=root.scrollTop, viewport=root.clientHeight, bounds=root.getBoundingClientRect();
+  if(viewport<=0)return;
+  const dock=commentDock(root,comments);
+  const stageEnd=Math.max(0,Math.min(dock,top+stage.getBoundingClientRect().bottom-bounds.bottom));
+  const result=roomCommentSnap(scrollRegion,{top,viewport,stageEnd,dock});
+  scrollRegion=result.region;
+  const needsScroll=result.target!==undefined&&Math.abs(top-result.target)>1;
+  commentsDocked.value=result.region==='comments'&&(commentsDocked.value||!needsScroll);
+  if(needsScroll)root.scrollTo({top:result.target});
+}
+function scheduleRoomSnap() {
+  if(!bridge.desktop)return;
+  clearTimeout(scrollIdle);
+  scrollIdle=setTimeout(settleRoomScroll,150);
+}
+function returnToStage() {
+  clearTimeout(scrollIdle);
+  scrollRegion='stage';
+  commentsDocked.value=false;
+  roomScroll.value?.focus({preventScroll:true});
+  roomScroll.value?.scrollTo({top:0});
+}
+watch([()=>roomComments?.openRoom.value,roomScroll],([request,root])=>{
+  if(!request||request.id!==route.params.id||request.id!==app.room?.id)return;
+  const comments=root?.querySelector<HTMLElement>(':scope > .song-comments');
+  if(!root?.isConnected||!comments)return;
+  if(roomComments)roomComments.openRoom.value=null;
+  clearTimeout(scrollIdle);
+  scrollRegion='comments';
+  comments.focus({preventScroll:true});
+  // Explicit navigation should not be measured as a partially completed scroll gesture.
+  root.scrollTo({top:commentDock(root,comments),behavior:'instant'});
+  settleRoomScroll();
+},{flush:'post',immediate:true});
+watch(commentsDocked,docked=>{if(!docked&&route.params.id===app.room?.id)roomComments?.state.cancelPagination();});
+onActivated(()=>{if(bridge.desktop)void nextTick(settleRoomScroll);});
+onDeactivated(()=>{clearTimeout(scrollIdle);commentsDocked.value=false;});
+onUnmounted(()=>clearTimeout(scrollIdle));
 </script>
 
 <template>
-  <section v-if="app.room" class="tone-room page in-room-stage-page" :class="{ 'desktop-room-panels': bridge.desktop }">
-    <div class="listening-layout" :class="{'is-chat-floating':floatingChat}">
+  <section v-if="app.room" ref="roomScroll" class="tone-room page in-room-stage-page"
+    :class="{ 'desktop-room-panels': bridge.desktop, 'desktop-comments-scroll': bridge.desktop }"
+    :tabindex="bridge.desktop ? 0 : undefined" :aria-label="bridge.desktop ? '一起听舞台和歌曲评论' : undefined"
+    @scroll.passive="scheduleRoomSnap">
+    <div ref="stageScrollSection" class="listening-layout" :class="{'is-chat-floating':floatingChat}">
       <div class="listening-main">
         <section
           class="listening-stage"
@@ -78,7 +137,7 @@ const { app,route,router,leaving,track,coverUrl,online,hostMember,sortedOnline,f
             <div class="stage-song">
               <div class="stage-song-title">
                 <h2 :title="track?.name">{{ track?.name ?? '等待第一首音乐' }}</h2>
-                <span v-if="track" class="source-badge">{{ track.lossless ? 'HQ' : '原音' }}</span>
+                <span v-if="track && (!bridge.desktop || track.lossless)" class="source-badge">{{ track.lossless ? 'HQ' : '原音' }}</span>
               </div>
               <p :title="[track?.artists, track?.album].filter(Boolean).join(' / ')">
                 {{ track?.artists ?? '添加一首收藏，开始共享' }}
@@ -114,7 +173,7 @@ const { app,route,router,leaving,track,coverUrl,online,hostMember,sortedOnline,f
                 <div class="lumiere-song-meta">
                   <div class="lumiere-title-row">
                     <h2 class="lumiere-title" :title="track?.name">{{ track?.name ?? '等待第一首音乐' }}</h2>
-                    <span v-if="track" class="source-badge">{{ track.lossless ? 'HQ' : '原音' }}</span>
+                    <span v-if="track && (!bridge.desktop || track.lossless)" class="source-badge">{{ track.lossless ? 'HQ' : '原音' }}</span>
                   </div>
                   <p class="lumiere-artist">
                     {{ track?.artists ?? '添加一首收藏，开始共享' }}
@@ -141,6 +200,8 @@ const { app,route,router,leaving,track,coverUrl,online,hostMember,sortedOnline,f
       </div>
       <ResponsiveRoomChat :key="app.room.id" @floating="floatingChat=$event" />
     </div>
+    <RoomSongComments v-if="bridge.desktop" :track-id="track?.id" :song-name="track?.name"
+      :netease="!!track?.neteaseId && !track.qqId" :connected="app.connected" :docked="commentsDocked" @back="returnToStage" />
   </section>
   <div v-else class="empty-state">
     <h3 class="loading-state" role="status">正在加入房间…</h3>
@@ -603,6 +664,31 @@ const { app,route,router,leaving,track,coverUrl,online,hostMember,sortedOnline,f
   background-color: rgb(255 255 255 / 28%);
   border: 0;
 }
+
+.desktop-comments-scroll {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(48px, 8vh, 80px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
+}
+.desktop-comments-scroll::-webkit-scrollbar { display: none; }
+.desktop-comments-scroll > .listening-layout {
+  flex: 0 0 auto;
+  height: 100%;
+  min-height: 340px;
+}
+.desktop-comments-scroll > .song-comments { flex: none; min-height: 100%; }
+.desktop-comments-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+@media(min-width:901px) and (max-height:639px){.desktop-comments-scroll > .listening-layout{min-height:460px}}
+@media(max-width:720px),(max-width:900px) and (pointer:coarse){.desktop-comments-scroll > .listening-layout{min-height:520px}}
+@media(max-width:720px) and (max-height:500px),(max-width:900px) and (pointer:coarse) and (max-height:500px){
+  .desktop-comments-scroll > .listening-layout{min-height:400px}
+}
+@media(prefers-reduced-motion:reduce){.desktop-comments-scroll{scroll-behavior:auto}}
 
 .desktop-room-panels .listening-layout > :deep(.room-chat) {
   border: 0;

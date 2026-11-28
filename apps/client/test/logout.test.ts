@@ -5,7 +5,7 @@ vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => native.desktop, invoke: 
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ setShadow: vi.fn().mockResolvedValue(undefined) }) }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 class Socket {
- static OPEN = 1; static instances: Socket[] = [];
+ static CONNECTING = 0; static OPEN = 1; static CLOSED = 3; static instances: Socket[] = [];
  readyState = 0; sent: any[] = []; onopen?: () => void; onclose?: (event: any) => void; onmessage?: (event: any) => void;
  constructor(public url: string) { Socket.instances.push(this); }
  send(value: string) { this.sent.push(JSON.parse(value)); }
@@ -33,6 +33,63 @@ it('cancels a reconnect timer that was already scheduled', async () => {
  const bridge = await import('../src/bridge'); await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
  Socket.instances[0].open(); Socket.instances[0].close(); await bridge.logout(); await vi.advanceTimersByTimeAsync(3000);
  expect(Socket.instances).toHaveLength(1);
+});
+it.each([false,true])('retries transport and legacy timeouts without losing the login (desktop=%s)',async desktop=>{
+ native.desktop=desktop;
+ if(desktop)native.invoke.mockResolvedValue({native:false,reason:''});
+ const bridge=await import('../src/bridge'); const {useApp}=await import('../src/store'); const app=useApp();
+ await app.initialize(); await app.login('tester','test-password',false);
+ const first=Socket.instances[0];first.open();first.message({type:'authenticated'});
+ const roomId='room';const snapshot={id:roomId,hostId:'test-user',members:[],playback:{},pending:null};
+ const joined=bridge.join(roomId);
+ await vi.waitFor(()=>expect(first.sent).toContainEqual({type:'join',roomId}));
+ first.message({type:'snapshot',data:snapshot});await joined;
+ first.close(4010);await vi.advanceTimersByTimeAsync(2000);
+ Socket.instances[1].open();Socket.instances[1].close(4001);await vi.advanceTimersByTimeAsync(2000);
+ expect(app.user?.name).toBe('tester');expect(app.notice).not.toContain('会话已失效');
+ const recovered=Socket.instances[2];recovered.open();recovered.message({type:'authenticated'});
+ expect(recovered.sent).toContainEqual({type:'auth',token:'test-token'});
+ expect(recovered.sent).toContainEqual({type:'join',roomId});
+ expect(app.connected).toBe(true);
+});
+it.each([
+ [4401,false,'SESSION_EXPIRED'],[4001,true,'SESSION_EXPIRED'],[4009,false,'SESSION_REPLACED'],
+] as const)('does not retry terminal close %i (legacy rejection=%s)',async (code,rejected,error)=>{
+ const bridge=await import('../src/bridge');const messages:unknown[]=[];
+ await bridge.subscribe('server-message',message=>messages.push(message));
+ await bridge.login('http://127.0.0.1:3000','tester','test-password',false);
+ const socket=Socket.instances[0];socket.open();
+ if(rejected)socket.message({type:'error',error:'UNAUTHORIZED'});
+ socket.close(code);await vi.advanceTimersByTimeAsync(10000);
+ expect(messages).toEqual([{type:'error',error}]);expect(Socket.instances).toHaveLength(1);
+});
+it('APK transport retries timeouts but stops on explicit credential expiry',async()=>{
+ vi.stubEnv('VITE_CLIENT_TARGET','apk');native.desktop=true;
+ vi.stubGlobal('document',{addEventListener:vi.fn()});
+ vi.stubGlobal('window',{location:{origin:'https://tauri.localhost'}});
+ vi.stubGlobal('CloseEvent',class extends Event {
+  constructor(type:string,{code}:{code:number}){super(type);this.code=code;}
+  code:number;
+ });
+ const pending:Array<(event:unknown)=>void>=[];
+ native.invoke.mockImplementation((command:string)=>command==='plugin:android-playback|room_receive'
+  ?new Promise(resolve=>pending.push(resolve)):Promise.resolve());
+ const bridge=await import('../src/bridge');const messages:unknown[]=[];
+ await bridge.subscribe('server-message',message=>messages.push(message));
+ await bridge.login('https://example.test','tester','test-password',false);
+ const next=async(event:unknown)=>{
+  await vi.waitFor(()=>expect(pending).toHaveLength(1));pending.shift()!(event);
+  await vi.advanceTimersByTimeAsync(0);
+ };
+ await next({type:'close',code:4010});
+ await vi.advanceTimersByTimeAsync(2000);
+ await next({type:'open'});
+ expect(native.invoke).toHaveBeenCalledWith('plugin:android-playback|room_send',expect.objectContaining({data:JSON.stringify({type:'auth',token:'test-token'})}));
+ expect(messages).toEqual([]);
+ await next({type:'close',code:4401});
+ await vi.advanceTimersByTimeAsync(10000);
+ expect(messages).toEqual([{type:'error',error:'SESSION_EXPIRED'}]);
+ expect(native.invoke.mock.calls.filter(([command])=>command==='plugin:android-playback|room_connect')).toHaveLength(2);
 });
 it('an in-flight login cannot restore credentials after logout', async () => {
  let complete!: (value: any) => void; vi.stubGlobal('fetch',vi.fn(()=>new Promise(resolve=>{complete=resolve;})));

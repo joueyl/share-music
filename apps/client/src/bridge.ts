@@ -1,4 +1,4 @@
-import { favoriteSongSchema, type FavoriteSong } from '@music-share/shared';
+import { favoriteSongSchema, ROOM_SOCKET_CLOSE, type FavoriteSong } from '@music-share/shared';
 import { invoke, isTauri as isNativeShell } from '@tauri-apps/api/core';
 import { isDesktopRuntime as isTauri } from './native-runtime';
 import { configureRuntimeProfile, getRuntimeProfile } from './runtime-profile';
@@ -14,7 +14,7 @@ import { normalizeAlbumCover, parseMusicReference, type MusicReference, type Mus
 import type { SystemMediaState } from './system-media';
 import type { ArtworkFrame } from './system-artwork';
 import { listen } from '@tauri-apps/api/event';
-import type { ChatMessage, Command, RoomSnapshot, TrackMetadata } from '@music-share/shared';
+import type { ChatMessage, Command, RoomSnapshot, SongCommentsPage, TrackMetadata } from '@music-share/shared';
 type Listener = (event: any) => void;
 let socket: RoomSocketPort | undefined, token = '', base = '', joinedRoom: string | null = null;
 let browserGeneration = 0, reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -104,6 +104,7 @@ function connectBrowser() {
   const current: RoomSocketPort = androidPlayback ? new AndroidRoomSocket(url) : new WebSocket(url);
   socket = current;
   let authenticated = false;
+  let authRejected = false;
   const active = () => generation === browserGeneration && current === socket && !!token;
   const sendDuringHandshake = (message: unknown) => {
     const sent = current.send(JSON.stringify(message));
@@ -132,8 +133,12 @@ function connectBrowser() {
   current.onmessage = event => {
     if (!active()) return;
     const message = JSON.parse(event.data);
-    if (message.type === 'authenticated') {
+    if (!authenticated && message.type === 'error' && message.error === 'UNAUTHORIZED') {
+      // Old servers send this frame before closing with the ambiguous 4001.
+      authRejected = true;
+    } else if (message.type === 'authenticated') {
       authenticated = true;
+      authRejected = false;
       emit('connection', { connected: true });
       if (joinedRoom) sendDuringHandshake({ type: 'join', roomId: joinedRoom });
     }
@@ -152,11 +157,10 @@ function connectBrowser() {
     if (!androidPlayback) audio?.pause();
     emit('connection', { connected: false });
     if (androidPlayback && event.code === 4003) { resetAndroidRejoin(); clearCloud(); emit('server-message', { type: 'error', error: '服务器不允许当前 Android 连接，请检查 HTTPS 地址和允许的来源' }); return; }
-    // 4001 also means a missed heartbeat after authentication. Retry once with
-    // the existing token; a 4001 before auth still means the session is invalid.
-    if (event.code === 4401 || event.code === 4009 || event.code === 4001 && (!androidPlayback || !authenticated)) {
+    // Both the new timeout code and ambiguous legacy 4001 are recoverable.
+    if (event.code === ROOM_SOCKET_CLOSE.replaced || event.code === ROOM_SOCKET_CLOSE.unauthorized || authRejected) {
       if (androidPlayback) { resetAndroidRejoin(); clearCloud(); }
-      emit('server-message', { type: 'error', error: 'SESSION_EXPIRED' }); return;
+      emit('server-message', { type: 'error', error: event.code === ROOM_SOCKET_CLOSE.replaced ? 'SESSION_REPLACED' : 'SESSION_EXPIRED' }); return;
     }
     if (androidPlayback && joinedRoom) suspendAndroidRoom();
     else if (androidPlayback) clearCloud();
@@ -448,6 +452,9 @@ export async function setMusicFavorite(kind:MusicCollection['kind'],id:string,sa
  const data=await browserRequest('/music/favorites',{kind,id,saved},undefined,'PUT');if(!Array.isArray(data?.collections))throw new Error('MUSIC_FAVORITES_INVALID');return data.collections;
 }
 export async function trackMetadata(roomId:string,trackId:string):Promise<TrackMetadata> { return browserRequest(`/rooms/${roomId}/music/${trackId}/metadata`); }
+export async function songComments(roomId:string,trackId:string,offset:number,signal:AbortSignal):Promise<SongCommentsPage> {
+  return browserRequest(`/rooms/${encodeURIComponent(roomId)}/music/${encodeURIComponent(trackId)}/comments?offset=${offset}`,undefined,signal);
+}
 export async function songLyrics(id:string,signal?:AbortSignal) {
   return checkMusicResult(await browserRequest('/netease/lyric_new?'+new URLSearchParams({id}),undefined,signal));
 }

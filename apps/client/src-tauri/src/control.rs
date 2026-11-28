@@ -63,6 +63,7 @@ pub fn start(
                         continue;
                     }
                     let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+                    let mut auth_rejected = false;
                     loop {
                         tokio::select! {
                          message=stream.next()=>match message {
@@ -70,7 +71,8 @@ pub fn start(
                            let Ok(message)=serde_json::from_str::<Value>(&text)else{continue;};
                            if !room_message_allowed(&desired_room.lock().unwrap(), &message) { continue; }
                            match message["type"].as_str(){
-                            Some("authenticated")=>{let ice: Vec<String>=message["iceServers"].as_array().map(|v|v.iter().filter_map(|s|s.as_str().map(str::to_owned)).collect()).unwrap_or_default();stun_probe = Some(crate::stun::start(ice.clone(),emit.clone()));let _=worker.send(Input::IceServers(ice));online.store(true,Ordering::Relaxed);backoff=1;emit("connection",json!({"connected":true}));let rejoin=desired_room.lock().unwrap().clone();if let Some(id)=rejoin{if sink.send(Message::Text(json!({"type":"join","roomId":id}).to_string())).await.is_err(){break;}}},
+                            Some("authenticated")=>{auth_rejected=false;let ice: Vec<String>=message["iceServers"].as_array().map(|v|v.iter().filter_map(|s|s.as_str().map(str::to_owned)).collect()).unwrap_or_default();stun_probe = Some(crate::stun::start(ice.clone(),emit.clone()));let _=worker.send(Input::IceServers(ice));online.store(true,Ordering::Relaxed);backoff=1;emit("connection",json!({"connected":true}));let rejoin=desired_room.lock().unwrap().clone();if let Some(id)=rejoin{if sink.send(Message::Text(json!({"type":"join","roomId":id}).to_string())).await.is_err(){break;}}},
+                            Some("error") if !online.load(Ordering::Relaxed) && message["error"] == "UNAUTHORIZED" => { auth_rejected = true; continue; },
                             Some("snapshot")=>{let membership=desired_room.lock().unwrap();if !room_message_allowed(&membership,&message){continue;}let _=worker.send(Input::Snapshot(message["data"].clone()));},
                             Some("signal")=>{let membership=desired_room.lock().unwrap();if !room_message_allowed(&membership,&message){continue;}let _=worker.send(Input::Signal{peer:message["fromId"].as_str().unwrap_or("").into(),epoch:message["sourceEpoch"].as_u64().unwrap_or(0),data:message["data"].clone()});},
                             Some("admission")=>{let membership=desired_room.lock().unwrap();if !room_message_allowed(&membership,&message){continue;}let _=worker.send(Input::Admission(message.clone()));},
@@ -80,7 +82,20 @@ pub fn start(
                            emit("server-message",message);
                           },
                           Some(Ok(Message::Ping(data)))=>{if sink.send(Message::Pong(data)).await.is_err(){break;}},
-                          Some(Ok(Message::Close(frame)))=>{if frame.is_some_and(|f|u16::from(f.code)==4001 || u16::from(f.code)==4009){online.store(false,Ordering::Relaxed);let _=worker.send(Input::Stop);emit("connection",json!({"connected":false}));emit("server-message",json!({"type":"error","error":"SESSION_EXPIRED"}));return;}break;},
+                          Some(Ok(Message::Close(frame)))=>{
+                            // A legacy 4001 does not identify the cause unless auth was explicitly rejected.
+                            let error = match frame.map(|f| u16::from(f.code)) {
+                              Some(4009) => Some("SESSION_REPLACED"),
+                              Some(4401) => Some("SESSION_EXPIRED"),
+                              _ if auth_rejected => Some("SESSION_EXPIRED"),
+                              _ => None,
+                            };
+                            if let Some(error) = error {
+                              online.store(false,Ordering::Relaxed);let _=worker.send(Input::Stop);
+                              emit("connection",json!({"connected":false}));emit("server-message",json!({"type":"error","error":error}));return;
+                            }
+                            break;
+                          },
                           Some(Err(_))|None=>break,_=>{},
                          },
                          message=outbound.recv()=>{

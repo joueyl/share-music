@@ -104,7 +104,7 @@ export class NeteaseAccountTasks {
      if(!/^\d{1,20}$/.test(String(album??''))||!Number.isFinite(total)||total<1000)throw new DomainError('NETEASE_INVALID_RESPONSE');
      const time=Math.floor(Math.min(job.listenedMs,total)/1000);
      if(time<1||this.stopped)continue;
-     const response=await this.netease.accountCall('scrobble',{id:job.id,sourceid:String(album),time},session);
+     const response=await this.netease.accountCall('scrobble_v1',{id:job.id,sourceid:String(album),time,total:Math.floor(total/1000)},session);
      this.log(scrobbleResponseLog(response));
      accepted(response);
     }catch{this.log('网易云听歌记录未确认成功，已跳过，不阻塞播放');}

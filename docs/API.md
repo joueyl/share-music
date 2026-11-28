@@ -4,7 +4,7 @@
 
 ## 通用约定
 
-网易云后端使用 hana-music-api 6.0.0 的编程式 SDK（Node.js 24+），不启动独立 hana HTTP 服务；本项目对外接口与权限不变，现有 Cookie 沿用数据库保存值，升级见 [网易云服务端说明](NETEASE.md)。
+网易云后端除内部听歌打卡使用 Enhanced NCBL V2 外，继续使用 hana-music-api 6.0.0 的编程式 SDK（Node.js 24+），不启动独立 SDK HTTP 服务；本项目对外接口与权限不变，现有 Cookie 沿用数据库保存值，升级见 [网易云服务端说明](NETEASE.md)。
 
 - 本机默认地址 `http://localhost:3000`；生产环境使用 HTTPS / WSS。
 - 除 `/api/health`、`/api/login` 外，业务 HTTP 请求需 `Authorization: Bearer <token>`。
@@ -246,12 +246,17 @@ Asia/Shanghai 每日 08:00，有已保存的网易云 MUSIC_U 时，并行调用
 
 网易云歌曲开播后只建立收听会话，实际 Audio 播放计数通过现有 WebSocket progress 的可选 listenedMs 字段传入；只有当前领队的合法采样增量可累计，排除暂停、缓冲、跳转、准备和缺失采样。自然播完、切歌提交、停止、音源失败或房间无人时按累计整秒入队一次，不再开播即报整首；不足一秒或无采样不报，最多单曲时长，不乘房间人数。暂停/继续/seek/音质切换不重复结算；账号凭据绑定会话开始时的身份。沿用单并发、100 项队列及超时隔离，日志和 200 均不代表入账。需先升级服务端再更新客户端；旧客户端仍可播放但不产生实测打卡。详见 [网易云任务说明](NETEASE.md#服务端每日任务与播放打卡)。
 
-副作用方法不加入 `/api/netease/:method` 白名单，普通用户不能通过代理自行签到、领取或注入听歌记录；无需新的请求参数或数据库结构迁移。
+听歌打卡内部调用 Enhanced 的 `scrobble_v1`，不对外提供其 `/scrobble/v1` 路由。副作用方法不加入 `/api/netease/:method` 白名单，普通用户不能通过代理自行签到、领取或注入听歌记录；无需新的请求参数或数据库结构迁移。
+
+### 房间歌曲评论
+
+`GET /api/rooms/:id/music/:trackId/comments?offset=0` 需要同频 Bearer token 及当前房间在线成员身份，返回 `{hotComments,comments,total,nextOffset}`。仅首请求（`offset=0`）返回上游精彩评论，最多 20 条；没有或后续页返回空数组。最新评论每页最多 20 条，`offset` 默认为 0，取值 0–10000；`nextOffset: null` 表示结束或达到分页上限，`total: null` 表示上游未提供总数。评论包含 `id,content,nickname,avatarUrl,time,likedCount`，除纯文本 `content` 和字符串 `id` 外，其余字段缺失时为 null；`time` 为 Unix 毫秒。仅网易云曲目支持，其他音源返回 `COMMENTS_SOURCE_UNSUPPORTED`。通过 Hana 的只读 `comment_music` 读取，不使用保存的网易云 Cookie，不透传用户 ID、IP 归属、凭据或其他上游字段。房间权限在上游请求前后检查，每用户每分钟 30 次、全局 120 次。
 
 ## 5. WebSocket /ws
 
 连接后 5 秒内：`{"type":"auth","token":"..."}`，成功收到 authenticated。
 加入：`{"type":"join","roomId":"UUID"}`；退出：`{"type":"leave"}`。
+关闭码 `4010` 表示网络或握手超时，可用原 token 重连；`4401` 表示凭据无效或已过期；`4009` 表示连接被替换。旧服务端 `4001` 的兼容处理见 [协议说明](PROTOCOL.md#控制)。
 每账号只保留一条控制连接。房间的队列/权限操作通过：
 
 ```json

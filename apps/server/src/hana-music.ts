@@ -14,6 +14,29 @@ const reply=message=>parentPort.postMessage({kind:'music-share:hana-result',...m
 (async()=>{
  let phase='import',upstreamStep;
  try {
+  if(workerData.name==='scrobble_v1'){
+   // Load only the pinned Enhanced module, not its HTTP server or other endpoints.
+   const {default:scrobble}=await import(workerData.module);
+   const {id,sourceid,time,total,cookie=''}=workerData.params;
+   phase='request';
+   // Override the model for this upload only, never the stored login cookie.
+   const fields=cookie.split(';').map(part=>part.trim())
+    .filter(part=>part&&!['mode','mobilename'].includes(part.split('=',1)[0].trim()));
+   const model='Windows 10';
+   fields.push('mode='+model,'mobilename='+model);
+   const result=await scrobble({id,sourceid,time,total,cookie:fields.join('; ')});
+   // The SDK catches transport exceptions and returns 502 with the raw message.
+   // Do not pass that message to the response logger.
+   if(result?.status===502)throw Error('Enhanced transport failure');
+   phase='invalid_response';
+   const {body}=result??{};
+   if(result?.status!==200||!Number.isInteger(body?.code))throw Error('Invalid Enhanced response');
+   // A failed upload can still carry upstream code 200 when its file was not accepted.
+   const confirmed=[body.details?.plv,body.details?.pld].every(file=>Number.isSafeInteger(file?.payloadSize)&&file.payloadSize>0);
+   if(body.code===200&&!confirmed)reply({ok:true,result:{body:{...body,code:-1,upstreamCode:200}}});
+   else reply({ok:true,result:{body}});
+   return;
+  }
   const {invokeModule,createRequest}=await import(workerData.module);
   const {cookie='',timestamp,noCookie,realIP,...query}=workerData.params;
   phase='request';
@@ -55,9 +78,6 @@ const reply=message=>parentPort.postMessage({kind:'music-share:hana-result',...m
    reply({ok:true,result:{body:{code:-2}}});
   else if(['login','login_cellphone'].includes(workerData.name)&&Number.isInteger(error?.body?.code)&&error.body.code!==200&&!error.body.upstreamShape)
    reply({ok:true,result:{body:{code:error.body.code}}});
-  else if(workerData.name==='scrobble'&&Number.isInteger(error?.body?.code)&&error.body.code!==200&&
-          ![499,502,504].includes(error.status)&&!error.body.upstreamShape)
-   reply({ok:true,result:{body:error.body,cookie:[]}});
   else reply({ok:false,diagnostic:{phase:error?.body?.upstreamShape?'response_shape':phase,
    upstreamStep,status:error?.status,bodyCode:error?.body?.code,shapePath:error?.body?.upstreamShape?.path}});
  }
@@ -72,7 +92,9 @@ export function createHanaInvoker(moduleUrl?: string, timeoutMs = 18000, log:(me
   if(active>=HANA_MAX_WORKERS){reject(new DomainError('NETEASE_UNAVAILABLE'));return;}
   let worker:Worker;
   try {worker=new Worker(hanaWorkerSource,{
-   eval:true,workerData:{module:moduleUrl??pathToFileURL(require.resolve('hana-music-api')).href,name,params},
+   eval:true,workerData:{module:moduleUrl??pathToFileURL(name==='scrobble_v1'
+    ?require.resolve('@neteasecloudmusicapienhanced/api/module/scrobble_v1.js')
+    :require.resolve('hana-music-api')).href,name,params},
    stdout:true,stderr:true,
   });} catch {
    log('网易云 SDK 调用失败 '+JSON.stringify({method:/^[a-z][a-z0-9_]{0,49}$/.test(name)?name:'unknown',phase:'worker_setup'}));

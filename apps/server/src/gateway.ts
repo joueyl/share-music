@@ -4,7 +4,7 @@ import { WebSocket, WebSocketServer as WSS } from 'ws';
 import type { IncomingMessage } from 'node:http';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
-import { envelopeSchema, chatRequestSchema, type ChatMessage, type RoomSnapshot } from '../../../packages/shared/src';
+import { envelopeSchema, chatRequestSchema, ROOM_SOCKET_CLOSE, type ChatMessage, type RoomSnapshot } from '../../../packages/shared/src';
 import { AppService } from './app.service';
 import { DomainError } from './engine';
 type Session = { user: { id: string; name: string; expiresAt: number }; roomId: string | null; lastPong: number };
@@ -37,17 +37,25 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
   constructor(@Inject(AppService) private app: AppService) {
     app.subscribers.add(this.publish);
     app.activitySubscribers.add(this.publishActivity);
-    this.heartbeat = setInterval(() => { const now = Date.now(); for (const [ws, s] of this.sessions) { if (now - s.lastPong > 20000 || now >= s.user.expiresAt) ws.close(4001, 'Session expired'); else ws.ping(); } }, 5000); this.heartbeat.unref();
+    this.heartbeat = setInterval(() => {
+      const now = Date.now();
+      for (const [ws, s] of this.sessions) {
+        if (now >= s.user.expiresAt) ws.close(ROOM_SOCKET_CLOSE.unauthorized, 'Session expired');
+        else if (now - s.lastPong > 20000) ws.close(ROOM_SOCKET_CLOSE.timeout, 'Heartbeat timeout');
+        else if (ws.readyState === WebSocket.OPEN) ws.ping();
+      }
+    }, 5000); this.heartbeat.unref();
   }
   private send(ws: WebSocket, message: unknown) { if (ws.readyState !== WebSocket.OPEN) return; if (ws.bufferedAmount > 256000) { ws.close(4008, 'Slow client'); return; } ws.send(JSON.stringify(message)); }
   handleConnection(ws: WebSocket, request: IncomingMessage) {
     const allowed = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:11420,http://127.0.0.1:11420,http://localhost:1420,http://127.0.0.1:1420,tauri://localhost,http://tauri.localhost,https://tauri.localhost').split(',');
     if (request.headers.origin && !allowed.includes(request.headers.origin)) { ws.close(4003, 'Origin forbidden'); return; }
-    this.authTimers.set(ws, setTimeout(() => ws.close(4001, 'Authentication timeout'), 5000));
+    this.authTimers.set(ws, setTimeout(() => ws.close(ROOM_SOCKET_CLOSE.timeout, 'Authentication timeout'), 5000));
     ws.on('pong', () => { const s = this.sessions.get(ws); if (s) s.lastPong = Date.now(); });
     ws.on('message', async raw => {
       let commandId: string | undefined;
       let chatRequestId: string | undefined;
+      let verifyingToken = false;
       try {
         await this.app.flush();
         const message = JSON.parse(raw.toString());
@@ -55,14 +63,17 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
         if (!s) {
           this.app.limit(`ws-auth:${request.socket.remoteAddress}`, 20, 60000);
           const auth = z.object({ type: z.literal('auth'), token: z.string().max(4096) }).strict().parse(message);
+          verifyingToken = true;
           const user = await this.app.auth.verify(auth.token);
+          // A slow verification must not replace a live connection after this socket timed out.
+          if (ws.readyState !== WebSocket.OPEN || this.sessions.has(ws)) return;
           // One control connection per identity: close the old connection before replacement.
-          for (const [old, previous] of this.sessions) if (previous.user.id === user.id) { this.handleDisconnect(old); old.close(4009, 'Replaced by another session'); }
+          for (const [old, previous] of this.sessions) if (previous.user.id === user.id) { this.handleDisconnect(old); old.close(ROOM_SOCKET_CLOSE.replaced, 'Replaced by another session'); }
           clearTimeout(this.authTimers.get(ws)); this.authTimers.delete(ws);
           s = { user, roomId: null, lastPong: Date.now() }; this.sessions.set(ws, s); this.send(ws, { type: 'authenticated', user: { id: user.id, name: user.name }, iceServers: this.app.turn.stun() }); return;
         }
         if (message.type === 'chat' && uuid.safeParse(message.requestId).success) chatRequestId = message.requestId;
-        if (Date.now() >= s.user.expiresAt) throw new DomainError('UNAUTHORIZED');
+        if (Date.now() >= s.user.expiresAt) { ws.close(ROOM_SOCKET_CLOSE.unauthorized, 'Session expired'); return; }
         this.app.limit(`ws:${s.user.id}`, 120, 10000);
         if (message.type === 'chat') {
           const v = chatRequestSchema.parse(message); this.requireRoom(s, v.roomId);
@@ -148,6 +159,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect, On
       } catch (e) {
         const error = e instanceof DomainError ? e.code : e instanceof z.ZodError || e instanceof SyntaxError ? 'INVALID_REQUEST' : 'INTERNAL_ERROR';
         this.send(ws, chatRequestId ? { type: 'chat-error', requestId: chatRequestId, error } : commandId ? { type: 'result', commandId, ok: false, error } : { type: 'error', error });
+        if (verifyingToken && error === 'UNAUTHORIZED' && !this.sessions.has(ws)) ws.close(ROOM_SOCKET_CLOSE.unauthorized, 'Invalid credentials');
         if (error === 'STATE_CONFLICT') { const s = this.sessions.get(ws); if (s?.roomId) this.send(ws, { type: 'snapshot', data: this.app.engine.snapshot(s.roomId) }); }
       }
     });

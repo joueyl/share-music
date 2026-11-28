@@ -90,7 +90,7 @@ it('accepts only genuine unclaimed VIP task IDs and does not invent rewards',()=
 it('submits measured listening time after playback finishes, in an independent queue',async()=>{
  const f=fixture();f.report(track);await new Promise<void>(resolve=>setImmediate(resolve));await settle();
  expect(f.api).toHaveBeenCalledWith('song_detail',expect.objectContaining({ids:'42'}));
- expect(f.api).toHaveBeenCalledWith('scrobble',expect.objectContaining({id:'42',sourceid:'7',time:12}));
+ expect(f.api).toHaveBeenCalledWith('scrobble_v1',expect.objectContaining({id:'42',sourceid:'7',time:12,total:185}));
  expect(f.log).toHaveBeenCalledExactlyOnceWith('网易云听歌打卡响应 {"code":200}');
 });
 it('does not report at start, ignores duplicate completion and skips sub-second listening',async()=>{
@@ -99,8 +99,8 @@ it('does not report at start, ignores duplicate completion and skips sub-second 
  f.tasks.observePlayback({type:'finish',id:event.id,track,listenedMs:12345});
  f.tasks.observePlayback({type:'finish',id:event.id,track,listenedMs:12345});f.report(track,999);
  await new Promise<void>(resolve=>setImmediate(resolve));await settle();
- expect(f.api.mock.calls.filter(([name])=>name==='scrobble')).toHaveLength(1);
- expect(f.api).toHaveBeenCalledWith('scrobble',expect.objectContaining({time:12}));
+ expect(f.api.mock.calls.filter(([name])=>name==='scrobble_v1')).toHaveLength(1);
+ expect(f.api).toHaveBeenCalledWith('scrobble_v1',expect.objectContaining({time:12}));
 });
 it('uses the credential captured at start and never credits a newly logged-in account at finish',async()=>{
  const f=fixture();f.tasks.observePlayback({type:'start',id:'old',track});await settle();
@@ -112,7 +112,7 @@ it('caps reported seconds to both metadata durations and never accepts a missing
  const f=fixture();f.tasks.observePlayback({type:'finish',id:'missing',track,listenedMs:10000});
  f.report({...track,durationMs:10000},20000);f.report(track,999999);
  await new Promise<void>(resolve=>setImmediate(resolve));await settle();
- expect(f.api.mock.calls.filter(([name])=>name==='scrobble').map(([,params])=>params.time)).toEqual([10,185]);
+ expect(f.api.mock.calls.filter(([name])=>name==='scrobble_v1').map(([,params])=>params.time)).toEqual([10,185]);
 });
 it('prints rejected scrobble responses with credential redaction before the failure notice',async()=>{
  const f=fixture();f.api.mockImplementation(async name=>name==='song_detail'
@@ -133,20 +133,21 @@ it('bounds large response logs and does not drop later listening jobs',async()=>
  await new Promise<void>(resolve=>setImmediate(resolve));await settle();
  expect(f.log).toHaveBeenCalledTimes(2);
  for(const [line] of f.log.mock.calls){expect(line.length).toBeLessThanOrEqual(2060);expect(line).toContain('[TRUNCATED]');}
- expect(f.api.mock.calls.filter(([name])=>name==='scrobble')).toHaveLength(2);
+ expect(f.api.mock.calls.filter(([name])=>name==='scrobble_v1')).toHaveLength(2);
 });
 it('a stalled scrobble neither serializes search nor blocks daily tasks and has a bounded timeout',async()=>{
  vi.useFakeTimers();const f=fixture();f.api.mockImplementation(async(name)=>{
-  if(name==='scrobble')return new Promise(()=>{});
+  if(name==='scrobble_v1')return new Promise(()=>{});
   if(name==='song_detail')return {body:{code:200,songs:[{id:42,dt:185400,al:{id:7}}]}};
   return {body:name==='vip_tasks'?{code:200,data:{unGetIds:[]}}:{code:200}};
  });
  f.report(track);await vi.advanceTimersByTimeAsync(0);
- expect(f.api.mock.calls.some(c=>c[0]==='scrobble')).toBe(true);
+ expect(f.api.mock.calls.some(c=>c[0]==='scrobble_v1')).toBe(true);
  await expect(f.service.call('search',{keywords:'still responsive'})).resolves.toEqual({code:200});
  await f.tasks.runDaily();expect(f.api.mock.calls.some(c=>c[0]==='yunbei_sign')).toBe(true);
  await vi.advanceTimersByTimeAsync(20001);expect(f.log).toHaveBeenCalledWith(expect.stringContaining('听歌记录未确认成功'));
  expect(f.log.mock.calls.some(([line])=>line.startsWith('网易云听歌打卡响应'))).toBe(false);
+ expect(f.api.mock.calls.filter(([name])=>name.startsWith('scrobble')).map(([name])=>name)).toEqual(['scrobble_v1']);
 });
 it('drops queued playback after credential replacement and never reports QQ/unknown-source tracks',async()=>{
  const f=fixture();f.report(track);f.db.setSetting('netease.cookie','MUSIC_U=new-account');
@@ -160,10 +161,12 @@ it('bounds the listening queue and discards waiting jobs on shutdown',async()=>{
 });
 it('keeps maintenance/scrobble private, validates parameters and strips credential/network overrides',async()=>{
  const f=fixture(),session=(await f.service.accountSessionKey())!;
- for(const method of ['daily_signin','yunbei_sign','vip_tasks','vip_growthpoint_get','scrobble'])await expect(f.service.call(method,{})).rejects.toThrow('NETEASE_METHOD_NOT_ALLOWED');
+ for(const method of ['daily_signin','yunbei_sign','vip_tasks','vip_growthpoint_get','scrobble','scrobble_v1','scrobble/v1'])await expect(f.service.call(method,{})).rejects.toThrow('NETEASE_METHOD_NOT_ALLOWED');
  await f.service.accountCall('daily_signin',{type:1,cookie:'wrong',proxy:'http://evil'},session);
  expect(f.api).toHaveBeenLastCalledWith('daily_signin',{type:1,cookie:'MUSIC_U=test-session',timestamp:morning});
- for(const params of [{id:'42',sourceid:'7',time:Infinity},{id:'bad',sourceid:'7',time:1},{id:'42',sourceid:'7',time:86401}])await expect(f.service.accountCall('scrobble',params,session)).rejects.toThrow('INVALID_REQUEST');
+ await f.service.accountCall('scrobble_v1',{id:'42',sourceid:'7',time:12,total:185,cookie:'wrong',proxy:'http://evil'},session);
+ expect(f.api).toHaveBeenLastCalledWith('scrobble_v1',{id:'42',sourceid:'7',time:12,total:185,cookie:'MUSIC_U=test-session',timestamp:morning});
+ for(const params of [{id:'42',sourceid:'7',time:Infinity},{id:'bad',sourceid:'7',time:1},{id:'42',sourceid:'7',time:86401,total:86401},{id:'9007199254740993',sourceid:'7',time:2,total:10},{id:'42',sourceid:'7',time:10,total:9}])await expect(f.service.accountCall('scrobble_v1',params,session)).rejects.toThrow('INVALID_REQUEST');
  for(const type of [-1,2,'1',null])await expect(f.service.accountCall('daily_signin',{type},session)).rejects.toThrow('INVALID_REQUEST');
  expect(session).not.toContain('test-session');
 });

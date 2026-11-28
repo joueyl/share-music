@@ -44,7 +44,7 @@ const messages: Record<string, string> = {
   PLAYBACK_TRANSITION_PENDING: '正在准备播放，请稍候', FILE_ONLY: '直播不能暂停或拖动进度', LIVE_ONLY: '当前音源不是系统推流', STALE_SOURCE: '音源已切换，请重新操作', PROVIDER_OFFLINE: '音源提供者已离线',
   INSUFFICIENT_BANDWIDTH: '带宽不足，请等待或主动选择有损模式', RELAY_BUDGET_EXHAUSTED: '服务器中继预算已用完',
   TURN_NOT_CONFIGURED: '服务器未配置 TURN 中继', TURN_PROVIDER_UNAVAILABLE: '公共 TURN 服务暂时不可用，请检查配置或稍后重试', TURN_INVALID_RESPONSE: 'TURN 服务返回了无效配置', INVALID_CREDENTIALS: '用户名或密码错误', NAME_TAKEN: '用户名已被使用',
-  SESSION_EXPIRED: '会话已失效，请重新登录', TRACK_IN_USE: '当前音轨正在使用', SOURCE_IS_LOSSY: '原文件为有损音源，不能切换为无损',
+  SESSION_EXPIRED: '会话已失效，请重新登录', SESSION_REPLACED: '此账号的控制连接已被另一条连接替换', TRACK_IN_USE: '当前音轨正在使用', SOURCE_IS_LOSSY: '原文件为有损音源，不能切换为无损',
   RATE_LIMITED: '操作过于频繁，请稍后再试', NO_SOURCE: '当前没有播放音源', UNSUPPORTED_AUDIO_SPEC: '首版支持双声道 16/24bit、44.1–96kHz 指定规格',
 };
 export const useApp = defineStore('app', () => {

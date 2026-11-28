@@ -6,6 +6,11 @@ export const MAX_MEMBERS = 8;
 export const DEFAULT_BUFFER_MS = 3000;
 export const MAX_BUFFER_MS = 5000;
 export const RELAY_BUDGET_BPS = 3_500_000;
+export const ROOM_SOCKET_CLOSE = { timeout: 4010, unauthorized: 4401, replaced: 4009 } as const;
+export const SONG_COMMENT_PAGE_SIZE = 20;
+export const SONG_COMMENT_MAX_OFFSET = 10000;
+export type SongComment = { id: string; content: string; nickname: string | null; avatarUrl: string | null; time: number | null; likedCount: number | null };
+export type SongCommentsPage = { hotComments: SongComment[]; comments: SongComment[]; total: number | null; nextOffset: number | null };
 // enqueue is the wire/storage key for unified playlist control (add/remove/reorder/clear).
 export const permissionsSchema = z.object({ skip: z.boolean(), stream: z.boolean(), seek: z.boolean(), enqueue: z.boolean(), playbackMode: z.boolean().optional() }).strict();
 export type Permissions = z.infer<typeof permissionsSchema>;

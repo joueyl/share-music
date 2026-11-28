@@ -2,7 +2,7 @@ import { Body, Controller, Get, Header, Headers, HttpException, Inject, Param, P
 import type { Request } from 'express';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { favoriteSongRequestSchema, permissionsSchema, roomSettingsSchema } from '../../../packages/shared/src';
+import { favoriteSongRequestSchema, permissionsSchema, roomSettingsSchema, SONG_COMMENT_MAX_OFFSET } from '../../../packages/shared/src';
 import { AppService } from './app.service';
 import { DomainError } from './engine';
 import { resolveMusicReference, resolvePlaylistShareLink } from './playlist-link';
@@ -153,6 +153,20 @@ export class ApiController {
   private async user(header?: string) { await this.app.flush(); if (!header?.startsWith('Bearer ')) throw new DomainError('UNAUTHORIZED'); return this.app.auth.verify(header.slice(7)); }
   @Get('rooms/:id/music/:trackId/metadata') async metadata(@Param('id') id:string,@Param('trackId') trackId:string,@Headers('authorization') header?:string) {
     try { const user=await this.user(header);return await this.app.musicImport.metadata(z.string().uuid().parse(id),user.id,z.string().uuid().parse(trackId)); } catch(e){httpError(e);}
+  }
+  @Get('rooms/:id/music/:trackId/comments') @Header('Cache-Control','private, no-store') async comments(@Param('id') id:string,@Param('trackId') trackId:string,@Headers('authorization') header?:string,@Query() query?:unknown) {
+    try {
+      const user=await this.user(header);
+      const {offset}=z.object({offset:z.string().regex(/^\d{1,5}$/).transform(Number).pipe(z.number().max(SONG_COMMENT_MAX_OFFSET)).default('0')}).strict().parse(query??{});
+      const roomId=z.string().uuid().parse(id),songId=z.string().uuid().parse(trackId);
+      this.app.limit(`music-comments:${user.id}`,30,60000);
+      const track=await this.app.musicImport.metadata(roomId,user.id,songId);
+      if(!track.neteaseId || track.qqId)throw new DomainError('COMMENTS_SOURCE_UNSUPPORTED');
+      this.app.limit('music-comments:global',120,60000);
+      const result=await this.app.netease.songComments(track.neteaseId,offset);
+      await this.app.musicImport.metadata(roomId,user.id,songId);
+      return result;
+    }catch(e){httpError(e);}
   }
   @Get('health') async health() { try {await this.app.flush();await this.app.database.getSetting('__health__');}catch(e){httpError(e);} return { ok: true, protocolVersion: 1, chatProtocolVersion: 1, relayUsedBps: this.app.capacity.usedBps, relayBudgetBps: this.app.capacity.budget, turnProvider: this.app.turn.provider, publicRelayUsedBps: this.app.publicCapacity.usedBps, publicRelayBudgetBps: this.app.publicCapacity.budget }; }
   @Post('login') async login(@Body() body: unknown, @Req() req: Request) {

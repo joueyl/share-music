@@ -1,6 +1,6 @@
 # 网易云服务端登录
 
-服务端使用固定版本 `hana-music-api` 6.0.0，通常通过公开 Promise SDK `invokeModule(identifier, query, config)` 编程式调用；固定只读批量请求使用 SDK 的公开 `createRequest`，不部署或连接独立的 hana HTTP 服务。参考 [API 文档](https://hana-music-api.netlify.app/api/)及[编程式调用](https://hana-music-api.netlify.app/guide/programmatic-api)。SDK 要求 **Node.js 24+、ESM**；项目仍使用 NestJS CommonJS，通过原生 Worker 内的动态 `import()` 加载 SDK，避免编译器把导入转换成 require。
+服务端使用固定版本 `hana-music-api` 6.0.0，用于听歌打卡以外的网易云操作，通常通过公开 Promise SDK `invokeModule(identifier, query, config)` 编程式调用；固定只读批量请求使用 SDK 的公开 `createRequest`，不部署或连接独立的 hana HTTP 服务。参考 [API 文档](https://hana-music-api.netlify.app/api/)及[编程式调用](https://hana-music-api.netlify.app/guide/programmatic-api)。SDK 要求 **Node.js 24+、ESM**；项目仍使用 NestJS CommonJS，通过原生 Worker 内的动态 `import()` 加载 SDK，避免编译器把导入转换成 require。
 
 ## 从旧依赖升级
 
@@ -86,6 +86,10 @@ node <项目绝对路径>/scripts/diagnose-netease-source.mjs <歌曲数字ID>
 
 `phase=request` 和 `bodyCode=-460` 只能用于定位 SDK 请求阶段的拒绝，不能仅凭此认定 Cookie 失效、批量接口故障或服务器 IP 已被封。先结合具体操作及固定步骤标签核对；当前不为此错误额外自动重试，不伪造来源 IP、不自动清空登录态。诊断修复本身不代表恢复取链；房间音乐业务现改为统一使用上述固定 batch 路径，播放器子请求及通用代理均改用非 v1 `song_url`；原 `song_url_v1` 代理调用现返回 `NETEASE_METHOD_NOT_ALLOWED`。需要更新、构建并重启后端，由线上实际进程验证；若 batch 同样被拒绝则返回真实失败，不保证解除任何上游限制，无需升级客户端。
 
+## 房间歌曲评论
+
+PC 客户端在房间内为当前网易云曲目读取一次首屏，用于底部按钮的评论总数和评论区，共用精彩评论及最新评论；吸附到评论区后，最新评论在滚动触底时追加下一页。服务端使用固定 `comment_music` 模块，只读分页，不带已保存的网易云账号 Cookie。房间授权、输入范围及返回字段见 [API](API.md#房间歌曲评论)。
+
 ## 服务端每日任务与播放打卡
 
 - 使用数据库 `netease.cookie` 中的 MUSIC_U 登录态，不是项目 Bearer token、TOKEN_SECRET 或 QQ 会话。Asia/Shanghai 每天 **08:00** 并行尝试安卓签到（`daily_signin`，`type=0`）、PC 签到（`daily_signin`，`type=1`）、云贝签到（`yunbei_sign`）；等待三项均结束（包括失败或超时）后，再读取 `vip_tasks` 的 `data.taskList[].taskItems[]`，仅领取 `needReceive === true` 的真实 taskId；同时兼容带 unGetIds 的响应。调用 `vip_growthpoint_get` 时去重并有界校验 ID；无待领取 ID 不伪造奖励，不做任务刷取或付费操作。
@@ -95,7 +99,6 @@ node <项目绝对路径>/scripts/diagnose-netease-source.mjs <歌曲数字ID>
 - 打卡为单并发、最多 100 项等待队列，与每日任务和 HTTP 业务调用无共享串行锁；满队列丢弃并输出不含凭据的提示。沿用独立 Worker 和 18 秒 Worker/20 秒服务调用超时，不让慢打卡占住搜索、导入、取链或播放命令；关闭服务停止调度、丢弃等待项，并等待有界的在途调用结束后关闭数据库。
 - 这些副作用方法只允许服务端内部固定参数调用，`/api/netease/:method` 仍保持只读白名单。每日任务日志仅输出固定任务名和确认状态；听歌打卡拿到返回值后先输出一条 `网易云听歌打卡响应` 单行 JSON 日志，再判断业务 code；成功和业务拒绝均记录，超时/传输错误无返回值时仅保留既有失败提示，不伪造响应。日志对 Cookie、token、Authorization 等敏感字段及含凭据标记的自由文本脱敏，限制深度、节点和文本长度，正文最多 2048 字符，超限标记 `[TRUNCATED]`；不额外打印歌曲 ID、来源 ID 或上报时长，不输出请求凭据或原始异常。SDK 失败诊断仍按前述脱敏规则保留。只有真实账号联调才能验收签到、领取或排行结果，单元测试不代表已获得奖励。
 
-已核对 hana-music-api 6.0.0 的 daily_signin、yunbei_sign、vip_tasks、vip_growthpoint_get、scrobble 实现。听歌打卡恢复通过公开 invokeModule 调用 SDK 原生 scrobble，由 SDK 维护 clientlog/eapi 的 startplay/play 两段事件及默认身份；移除自定义 Windows 系统、机型、UA 和手写事件分支，不再以机型展示替代真实入账验收。保留响应脱敏日志、队列、实测累计时长上报、凭据隔离及零重试。code=200 仅表示接口业务响应，记录、排行、时长或奖励是否入账仍需真实账号核验；不自动补报旧记录，不修改数据库 Cookie。
+仅听歌打卡使用固定版本 `@neteasecloudmusicapienhanced/api` 4.41.1 的 `scrobble_v1` 模块（[Enhanced 听歌打卡 V2 文档](https://neteasecloudmusicapienhanced.js.org/#/?id=听歌打卡-v2-ncbl-加密版)，库的 HTTP 路径为 `/scrobble/v1`）。服务端在现有隔离 Worker 中直接加载模块，不启动独立 HTTP 服务，也不把凭据发给第三方 API 代理。歌曲详情仍用 Hana；上报实测整秒 `time`、详情总整秒 `total`、歌曲 ID 和真实专辑 ID。仅打卡 Worker 在临时 Cookie 中覆盖 `mode` 和 `mobilename` 为 `Windows 10`；SDK 优先读取 `mode`，不代表真实设备，网易云界面是否识别须实测。SDK 负责 NCBL 两段加密上传；只有两段都获确认才记业务响应成功。传输异常不输出 SDK 原始消息，失败不重试、不回退到旧打卡、不补报历史，不修改数据库 Cookie。升级安装锁定依赖并重启服务端即可，客户端协议不变。真实记录、排行和时长仍需用隔离账号核验，不能从日志中的 code=200 推断入账。
 
-
-兼容升级：先部署新版服务端，再刷新网页或重建并更新桌面客户端。旧客户端没有 listenedMs 时仍可同步播放，但不按进度或总时长猜测打卡时长；新版客户端连接旧服务端可能因严格消息校验被拒绝。累计按房间当前领队单份计算，凭据在会话开始时绑定，更换全局登录后旧会话不记入新账号。
+历史客户端兼容：已经支持 `listenedMs` 的客户端无需为本次打卡迁移更新。更早的客户端没有 `listenedMs`，仍可同步播放，但不产生实测打卡；支持该字段的客户端连接不接受该字段的旧服务端时，进度消息可能被严格校验拒绝。累计按房间当前领队单份计算，凭据在会话开始时绑定，更换全局登录后旧会话不记入新账号。

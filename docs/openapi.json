@@ -3,7 +3,7 @@
   "info": {
     "title": "同频 TONE API",
     "version": "0.2.2-mysql",
-    "description": "MySQL-backed server. NetEase uses hana-music-api 6.0.0 programmatically on Node.js 24+; existing HTTP contracts and stored cookies are preserved. Internal-only Netease account jobs run daily at 08:00 Asia/Shanghai: Android (type=0), PC (type=1) and yunbei sign-ins run concurrently; VIP task lookup and reward claiming start only after all three attempts settle; finished playback sessions asynchronously report measured Audio listening seconds (optional WebSocket progress listenedMs), excluding pauses, buffering and seeks; old clients without measurements do not generate scrobbles. Maintenance/scrobble methods are not exposed by the HTTP proxy. See docs/NETEASE.md for bounded queues, credential gating and persisted daily attempts. Registration and login use username and password only. WebSocket protocol is documented separately in docs/API.md and docs/PROTOCOL.md. Music is stored as direct provider URLs and expiry timestamps. Room NetEase links use non-v1 song_url with br=128000 in fixed read-only batches; song_url_v1 is not allowed and is never a fallback. See docs/API.md for bounded refresh, 100 MiB bounded downloads and client-side size checks (no audio digest verification)."
+    "description": "MySQL-backed server. NetEase uses hana-music-api 6.0.0 programmatically on Node.js 24+, except for internal scrobbling via Enhanced 4.41.1 NCBL V2; existing HTTP contracts and stored cookies are preserved. Internal-only Netease account jobs run daily at 08:00 Asia/Shanghai: Android (type=0), PC (type=1) and yunbei sign-ins run concurrently; VIP task lookup and reward claiming start only after all three attempts settle; finished playback sessions asynchronously report measured Audio listening seconds (optional WebSocket progress listenedMs), excluding pauses, buffering and seeks; old clients without measurements do not generate scrobbles. Maintenance/scrobble methods are not exposed by the HTTP proxy. See docs/NETEASE.md for bounded queues, credential gating and persisted daily attempts. Registration and login use username and password only. WebSocket protocol is documented separately in docs/API.md and docs/PROTOCOL.md; close codes distinguish timeout (4010), invalid credentials (4401) and replacement (4009). Music is stored as direct provider URLs and expiry timestamps. Room NetEase links use non-v1 song_url with br=128000 in fixed read-only batches; song_url_v1 is not allowed and is never a fallback. See docs/API.md for bounded refresh, 100 MiB bounded downloads and client-side size checks (no audio digest verification)."
   },
   "servers": [
     {
@@ -1655,6 +1655,98 @@
             "description": "Silently refresh after expired links (including HTTP 403) or download failure; preserve the cache key and retry at most once."
           }
         ]
+      }
+    },
+    "/api/rooms/{id}/music/{trackId}/comments": {
+      "get": {
+        "summary": "读取房间歌曲的网易云精彩评论与最新评论",
+        "operationId": "get_api_rooms_id_music_trackId_comments",
+        "tags": [
+          "歌曲"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "trackId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "minimum": 0,
+              "maximum": 10000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "在线房间成员读取成功，每页最多 20 条",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "hotComments",
+                    "comments",
+                    "total",
+                    "nextOffset"
+                  ],
+                  "properties": {
+                    "hotComments": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "description": "仅 offset=0 有上游精彩评论，缺失时为空",
+                      "items": { "$ref": "#/components/schemas/RoomSongComment" }
+                    },
+                    "comments": {
+                      "type": "array",
+                      "maxItems": 20,
+                      "items": { "$ref": "#/components/schemas/RoomSongComment" }
+                    },
+                    "total": {
+                      "type": "integer",
+                      "nullable": true
+                    },
+                    "nextOffset": {
+                      "type": "integer",
+                      "nullable": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数无效、不是在线成员、曲目不存在、不支持的音源或上游失败"
+          },
+          "401": {
+            "description": "缺少或无效 Bearer 凭据"
+          },
+          "429": {
+            "description": "请求过多"
+          }
+        }
       }
     },
     "/api/rooms/{id}/music/{trackId}/metadata": {
@@ -3977,6 +4069,41 @@
       }
     },
     "schemas": {
+      "RoomSongComment": {
+        "type": "object",
+        "required": [
+          "id",
+          "content",
+          "nickname",
+          "avatarUrl",
+          "time",
+          "likedCount"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "content": {
+            "type": "string"
+          },
+          "nickname": {
+            "type": "string",
+            "nullable": true
+          },
+          "avatarUrl": {
+            "type": "string",
+            "nullable": true
+          },
+          "time": {
+            "type": "integer",
+            "nullable": true
+          },
+          "likedCount": {
+            "type": "integer",
+            "nullable": true
+          }
+        }
+      },
       "MusicReference": {
         "type": "object",
         "additionalProperties": false,

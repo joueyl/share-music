@@ -7,7 +7,7 @@ button,button *,[role=button],[role=button] *,summary,summary *{-webkit-user-sel
 
 .chat-activity{display:flex;align-items:flex-start;gap:7px;margin:14px 0;padding:9px 11px;border-radius:12px;background:#e8eff680;color:#758398;font-size:11px;line-height:1.7}
 .chat-activity>svg{flex-shrink:0;margin-top:3px;color:#7897be}.chat-activity p{margin:0;min-width:0;overflow-wrap:anywhere;flex:1}.chat-activity strong{font-weight:500;color:#526b8c}.chat-activity time{flex-shrink:0;font-size:9px;opacity:.8;margin-top:2px;font-variant-numeric:tabular-nums}
-:root{--accent:#5dbb00;--muted:#798394;--border:#dfe6ee;--surface:#ffffffb3;color:#283448;background:transparent!important}
+:root{--tone-green:#5dbb00;--accent:var(--tone-green);--muted:#798394;--border:#dfe6ee;--surface:#ffffffb3;color:#283448;background:transparent!important}
 html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent!important}
 #app{--window-corner-radius:20px;width:100%;height:100%;overflow:hidden;border-radius:var(--window-corner-radius);background:transparent!important;transition:border-radius .18s ease}
 #app.is-maximized{--window-corner-radius:0px;border-radius:0}

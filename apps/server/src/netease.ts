@@ -3,6 +3,7 @@ import { invokeHana, type MusicInvoker, type MusicResult as Result } from './han
 export type { MusicInvoker } from './hana-music';
 import type { DatabaseStore } from './database';
 import { DomainError } from './engine';
+import { normalizeAlbumCover, SONG_COMMENT_MAX_OFFSET, SONG_COMMENT_PAGE_SIZE, type SongComment, type SongCommentsPage } from '../../../packages/shared/src';
 
 export type PasswordLogin = { type: 'phone'; phone: string; countrycode: string; password: string } | { type: 'email'; email: string; password: string };
 export const musicMethods = new Set(['search', 'search_suggest', 'cloudsearch', 'simi_song', 'song_detail', 'song_url', 'lyric', 'lyric_new', 'playlist_detail', 'playlist_track_all', 'user_playlist', 'user_detail', 'user_account', 'user_cloud', 'login_status', 'album']);
@@ -48,12 +49,47 @@ export class NeteaseService {
       case 'song_detail':
         if(!/^\d{1,20}$/.test(String(params.ids??'')))throw new DomainError('INVALID_REQUEST');
         clean={ids:String(params.ids)};break;
-      case 'scrobble':
-        if(!/^\d{1,20}$/.test(String(params.id??''))||!/^\d{1,20}$/.test(String(params.sourceid??''))||!Number.isInteger(params.time)||Number(params.time)<1||Number(params.time)>86400)throw new DomainError('INVALID_REQUEST');
-        clean={id:String(params.id),sourceid:String(params.sourceid),time:Number(params.time)};break;
+      case 'scrobble_v1':
+        // Enhanced converts the song ID to Number; do not report a rounded ID.
+        if(!/^\d{1,20}$/.test(String(params.id??''))||!Number.isSafeInteger(Number(params.id))||Number(params.id)<1||
+           !/^\d{1,20}$/.test(String(params.sourceid??''))||!Number.isInteger(params.time)||Number(params.time)<1||
+           !Number.isInteger(params.total)||Number(params.total)<Number(params.time)||Number(params.total)>86400)throw new DomainError('INVALID_REQUEST');
+        clean={id:String(params.id),sourceid:String(params.sourceid),time:Number(params.time),total:Number(params.total)};break;
       default:throw new DomainError('NETEASE_METHOD_NOT_ALLOWED');
     }
     return publicBody((await this.request(name,clean,cookie)).body);
+  }
+  async songComments(id: string, offset: number): Promise<SongCommentsPage> {
+    if (!/^\d{1,20}$/.test(id) || !Number.isInteger(offset) || offset < 0 || offset > SONG_COMMENT_MAX_OFFSET) throw new DomainError('INVALID_REQUEST');
+    // Public, read-only comments must not depend on or send the saved account cookie.
+    const { body } = await this.request('comment_music', { id, offset, limit: SONG_COMMENT_PAGE_SIZE }, '');
+    if (body.code !== 200 || !Array.isArray(body.comments) || body.comments.length > SONG_COMMENT_PAGE_SIZE) throw new DomainError('NETEASE_INVALID_RESPONSE');
+    const count = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null;
+    const total = count(body.total);
+    const toComment = (entry: any) => {
+      const id = count(entry?.commentId);
+      if (id === null || typeof entry?.content !== 'string') return null;
+      const time = count(entry.time);
+      return { id: String(id), content: entry.content.slice(0, 4000),
+        nickname: typeof entry.user?.nickname === 'string' ? entry.user.nickname.trim().slice(0, 120) || null : null,
+        avatarUrl: normalizeAlbumCover(entry.user?.avatarUrl), time: time !== null && time <= 8640000000000000 ? time : null,
+        likedCount: count(entry.likedCount) };
+    };
+    const comments = body.comments.map((entry: any) => {
+      const comment=toComment(entry);
+      if(!comment)throw new DomainError('NETEASE_INVALID_RESPONSE');
+      return comment;
+    });
+    const hotById=new Map<string,SongComment>();
+    if(offset===0&&Array.isArray(body.hotComments)) {
+      for(const entry of body.hotComments.slice(0,SONG_COMMENT_PAGE_SIZE)) {
+        const comment=toComment(entry);
+        if(comment&&!hotById.has(comment.id))hotById.set(comment.id,comment);
+      }
+    }
+    const next = offset + SONG_COMMENT_PAGE_SIZE;
+    const more = typeof body.more === 'boolean' ? body.more : total !== null && next < total;
+    return { hotComments:[...hotById.values()], comments, total, nextOffset: more && comments.length > 0 && next <= SONG_COMMENT_MAX_OFFSET ? next : null };
   }
   /** Fixed read-only batch for imports; never expose arbitrary batch routes to browsers. */
   async songBatch(ids:string[]) {

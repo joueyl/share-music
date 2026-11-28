@@ -53,6 +53,38 @@ it('preserves accessible full titles without a shifting status caption in any st
  expect(room).not.toContain('音乐准备中');
  for(const file of ['views/Room.vue','App.vue','components/TrackLyrics.vue'])expect(parse(read(file)).errors).toEqual([]);
 });
+it('hides the original-audio badge on PC while retaining lossless badges and the web presentation',()=>{
+ const room=read('views/Room.vue'),player=read('components/GlobalPlayer.vue');
+ const stageBadge='<span v-if="track && (!bridge.desktop || track.lossless)" class="source-badge">{{ track.lossless ? \'HQ\' : \'原音\' }}</span>';
+ expect(room.split(stageBadge)).toHaveLength(3);
+ expect(player).toContain('<span v-if="!bridge.desktop || track?.lossless" class="source-badge">{{ track?.lossless?\'无损\':\'原音\' }}</span>');
+});
+it('keeps the PC comment snap section after the stage and respects reduced motion',()=>{
+ const room=read('views/Room.vue'),css=styles('views/Room.vue'),comments=read('components/RoomSongComments.vue');
+ expect(room.indexOf('<RoomSongComments v-if="bridge.desktop"')).toBeGreaterThan(room.indexOf('<ResponsiveRoomChat'));
+ expect(room).toContain('@scroll.passive="scheduleRoomSnap"');
+ expect(room).toContain(':docked="commentsDocked"');
+ expect(css).toMatch(/\.desktop-comments-scroll \{[^}]*overflow-y: auto;[^}]*scrollbar-width: none;/s);
+ expect(css).toContain('.desktop-comments-scroll::-webkit-scrollbar { display: none; }');
+ expect(css).toContain('prefers-reduced-motion:reduce');
+ expect(comments).toContain('props.docked&&props.connected');
+ expect(room).toContain('roomComments?.openRoom.value');
+ expect(room).toContain("root.scrollTo({top:commentDock(root,comments),behavior:'instant'})");
+ expect(comments.indexOf("title:'精彩评论'")).toBeLessThan(comments.indexOf("title:'最新评论'"));
+ expect(comments).toContain('歌曲评论<span v-if="total!==null" class="comment-total">（{{ total.toLocaleString(\'zh-CN\') }}）</span>');
+ const commentStyles=styles('components/RoomSongComments.vue');
+ expect(commentStyles).toMatch(/\.comment-title h2\{[^}]*white-space:nowrap/);
+ expect(commentStyles).toMatch(/\.comment-total\{display:inline;/);
+ expect(comments).toContain('<strong class="comment-author">');
+ expect(commentStyles).toMatch(/\.comment-author\{font-size:12px;[^}]*color:var\(--tone-green\)/);
+ expect(commentStyles).toContain('font-family:"Noto Sans SC","Source Han Sans SC"');
+ expect(commentStyles).toMatch(/\.comment-body p\{[^}]*font-size:15px;font-weight:400;line-height:1\.7/);
+ expect(commentStyles).toContain('.comment + .comment{border-top:1px solid var(--border,#e1e7ee)}');
+ expect(commentStyles).not.toMatch(/\.comment\{[^}]*(?:background|border-radius):/);
+ expect(comments).toContain('IntersectionObserver');
+ expect(comments).toContain('ref="loadMoreMarker"');
+ expect(comments).not.toContain('v-html');
+});
 
 it('keeps the room control bar immersive without a separate background or blur layer',()=>{
  const css=styles('App.vue');
@@ -79,7 +111,8 @@ it('rounds the independent player bottom corners and shares the window maximized
  expect(styles('components/GlobalPlayer.vue')).toContain('border-radius:0 0 var(--window-corner-radius,20px) var(--window-corner-radius,20px)');
  expect(styles('components/GlobalPlayer.vue')).not.toMatch(/overflow\s*:\s*hidden|clip-path|scale\(/);
  expect(player).toContain('prefers-reduced-motion:reduce');
- expect(app).toContain('播放器独立于 shell 的 inert 锁');expect(app).toContain(`<GlobalPlayer v-if="app.user" :class="{ 'desktop-room-player': bridge.desktop && inRoom }" />`);
+ expect(app).toContain('播放器独立于 shell 的 inert 锁');expect(app).toContain(`<GlobalPlayer v-if="app.user" :class="{ 'desktop-room-player': bridge.desktop && inRoom }"`);
+ expect(app).toContain(':comment-total="commentTotal" @open-comments="openPlayerComments"');
  expect(styles('components/GlobalPlayer.vue')).toContain('.global-player.desktop-room-player{background-color:rgb(255 255 255 / 42%);border-top:0}');
 });
 
